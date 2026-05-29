@@ -8,72 +8,56 @@
 	},
 	"scripts": {
 		"lint": "tsc --noEmit",
-
 		"test": "vitest run",
 		"test:unit": "vitest run",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
-
 		"dev": "vite dev",
 		"dev:vite": "vite dev",
-
 		"dev:cf": "npm run build && wrangler dev .svelte-kit/cloudflare/_worker.js --port 5173",
 		"dev:cf:local": "npm run build && wrangler dev .svelte-kit/cloudflare/_worker.js --local --port 5173",
-
 		"dev:company": "npm run build && wrangler dev .svelte-kit/cloudflare/_worker.js --env company-dev --port 5173",
-
 		"build": "vite build",
 		"preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
-
 		"prepare": "svelte-kit sync || echo ''",
-
 		"check:modular-boundary": "node scripts/check-modular-boundary.mjs",
 		"check:architecture-report": "node scripts/check-modular-boundary.mjs --report-only",
 		"check": "npm run check:modular-boundary && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-
 		"gen": "wrangler types",
 		"gen:company": "wrangler types --env company-dev",
 		"gen:prod": "wrangler types --env production",
-
 		"db:generate": "drizzle-kit generate",
-
 		"db:migrate:local": "wrangler d1 migrations apply smartfin-db-v4 --local",
 		"db:seed:local": "wrangler d1 execute smartfin-db-v4 --local --file drizzle/seeds/local-customers.sql",
 		"db:seed:mock:local": "wrangler d1 execute smartfin-db-v4 --local --file drizzle/seeds/local-mock-full.sql",
 		"db:test:mock:local": "npm run db:migrate:local && npm run db:seed:mock:local",
-
 		"db:migrate:remote": "wrangler d1 migrations apply smartfin-db-v4 --remote",
 		"db:migrate:personal": "wrangler d1 migrations apply smartfin-db-v4 --remote",
-
 		"db:migrate:company": "wrangler d1 migrations apply smartfin-db-company-dev --env company-dev --remote",
 		"db:migrate:prod": "wrangler d1 migrations apply smartfin-db-prod --env production --remote",
-
 		"deploy": "npm run build && wrangler deploy",
 		"deploy:personal": "npm run build && wrangler deploy",
 		"deploy:company": "npm run build && wrangler deploy --env company-dev",
 		"deploy:prod": "npm run build && wrangler deploy --env production",
-
 		"dev:document-processor": "wrangler dev --config workers/wrangler.document-processor.jsonc",
 		"dev:document-processor:company": "wrangler dev --config workers/wrangler.document-processor.jsonc --env company-dev",
-
 		"deploy:document-processor": "wrangler deploy --config workers/wrangler.document-processor.jsonc",
 		"deploy:document-processor:personal": "wrangler deploy --config workers/wrangler.document-processor.jsonc",
 		"deploy:document-processor:company": "wrangler deploy --config workers/wrangler.document-processor.jsonc --env company-dev",
 		"deploy:document-processor:prod": "wrangler deploy --config workers/wrangler.document-processor.jsonc --env production",
-
 		"deploy:company:all": "npm run deploy:company && npm run deploy:document-processor:company",
 		"deploy:prod:all": "npm run deploy:prod && npm run deploy:document-processor:prod",
-
 		"mobile": "npm --prefix mobile run start",
 		"mobile:typecheck": "npm --prefix mobile run typecheck"
-		},
+	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.71",
 		"@sveltejs/adapter-cloudflare": "^7.2.6",
 		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@types/node": "^25.9.1",
 		"@vitest/coverage-v8": "^3.2.4",
 		"autoprefixer": "^10.4.27",
 		"drizzle-kit": "^0.31.10",

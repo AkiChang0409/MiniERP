@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { createFinanceApi } from '$modules/finance/services/api';
@@ -22,7 +22,7 @@ function nowIso() {
 }
 
 beforeAll(async () => {
-	await applyD1Migrations(env.DB, { migrationsPath: './drizzle/migrations' });
+	await applyD1Migrations(env.DB, inject('d1Migrations'));
 });
 
 // ─── GST quarterly report end-to-end ─────────────────────────────────────────

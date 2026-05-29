@@ -84,10 +84,16 @@
 
 	const hrGroups: SideGroup[] = [
 		{
-			title: 'HR',
+			title: 'Employees',
 			items: [
 				{ href: '/hr/employees', label: 'All Employees', moduleId: 'hr', icon: 'H' },
 				{ href: '/hr/employees/new', label: 'New Employee', moduleId: 'hr', icon: '+' }
+			]
+		},
+		{
+			title: 'Leave',
+			items: [
+				{ href: '/hr/leave', label: 'Leave Management', moduleId: 'hr', icon: 'L' }
 			]
 		}
 	];
@@ -164,8 +170,8 @@
 		if (path.startsWith('/business-partners/suppliers')) return 'business-partner';
 		// Project: list and detail routes
 		if (path === '/projects' || path.startsWith('/projects/')) return 'project';
-		// HR: employee master data (same employee module as in-project Team & Cost)
-		if (path.startsWith('/hr/employees')) return 'hr';
+		// HR: employee master data and leave management
+		if (path.startsWith('/hr/')) return 'hr';
 		// Finance: dashboard, tax, expenses, /finance/* (supplier invoices live under Business Partner)
 		return 'finance';
 	});
@@ -227,6 +233,10 @@
 		}
 		if (itemPath === '/hr/employees') {
 			return path === '/hr/employees';
+		}
+		// HR / Leave
+		if (itemPath === '/hr/leave') {
+			return path.startsWith('/hr/leave');
 		}
 		// Business Partners
 		if (itemPath === '/business-partners/customers') {

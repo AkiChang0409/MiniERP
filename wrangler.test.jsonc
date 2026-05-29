@@ -1,7 +1,7 @@
 // Minimal wrangler config for integration tests (Miniflare / local D1)
 {
 	"name": "smartfin-test",
-	"compatibility_date": "2026-03-30",
+	"compatibility_date": "2025-09-06",
 	"compatibility_flags": ["nodejs_als"],
 	"d1_databases": [
 		{

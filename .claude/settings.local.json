@@ -37,7 +37,12 @@
       "Bash(npx wrangler *)",
       "Bash(kill %1)",
       "Bash(netstat -ano)",
-      "Bash(curl -s http://localhost:5173/api/auth/register)"
+      "Bash(curl -s http://localhost:5173/api/auth/register)",
+      "Bash(Get-ChildItem -Path \"D:\\\\Project\\\\MiniERP\\\\src\\\\modules\" -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(Get-ChildItem *)",
+      "Bash(cd /d \"D:\\\\Project\\\\MiniERP\")",
+      "Bash(dir src *)"
     ]
   }
 }
