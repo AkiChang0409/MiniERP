@@ -379,3 +379,26 @@ VALUES
     ('lar-mock-003', 'lr-mock-006', 'approved',
      'admin', 'admin', 'pending', 'approved', NULL,
      datetime('2026-04-13', '+1 hour'), datetime('2026-04-13', '+1 hour'));
+
+-- -----------------------------------------------------------------------------
+-- 6. Reconcile pending_days
+--    leave_balances.pending_days is an app-managed counter (incremented on
+--    submit, decremented on approve/reject by LeaveService). When the seed adds
+--    new pending requests to an already-existing balance row it bypasses
+--    LeaveService, leaving pending_days stale. This UPDATE recalculates it from
+--    the actual pending requests so the Balances tab always matches the
+--    Requests tab. Safe to re-run: it derives the value, not accumulates it.
+-- -----------------------------------------------------------------------------
+UPDATE leave_balances
+SET
+    pending_days = (
+        SELECT COALESCE(SUM(lr.total_days), 0)
+        FROM leave_requests lr
+        WHERE lr.person_id     = leave_balances.person_id
+          AND lr.leave_type_id = leave_balances.leave_type_id
+          AND lr.status        = 'pending'
+          AND lr.deleted_at    IS NULL
+          AND CAST(strftime('%Y', lr.start_date) AS INTEGER) = leave_balances.year
+    ),
+    updated_at = CURRENT_TIMESTAMP
+WHERE leave_balances.deleted_at IS NULL;
