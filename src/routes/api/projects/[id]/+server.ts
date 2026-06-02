@@ -1,7 +1,11 @@
 import type { RequestHandler } from './$types';
 
 import { createModuleContext } from '$platform/modules';
-import { createProjectApi } from '$modules/project';
+import {
+	createProjectApi,
+	ProjectPermissionError,
+	ProjectValidationError
+} from '$modules/project';
 import { createEmployeeApi } from '$modules/hr';
 import { createFinanceApi } from '$modules/finance';
 import { NotFoundError } from '$platform/modules/errors';
@@ -32,7 +36,11 @@ export const GET: RequestHandler = async (event) => {
 			...p,
 			profit: {
 				revenue: financials.revenue,
-				cost: financials.purchaseCost + financials.staffCost + financials.expenseCogs + financials.expenseOpex,
+				cost:
+					financials.purchaseCost +
+					financials.staffCost +
+					financials.expenseCogs +
+					financials.expenseOpex,
 				net: financials.netProfit
 			}
 		});
@@ -47,28 +55,53 @@ export const PATCH: RequestHandler = async (event) => {
 		const ctx = await createModuleContext(event);
 		const project = createProjectApi(ctx);
 
-		// Verify project exists
-		await project.getById(event.params.id);
-
 		const body = (await event.request.json()) as {
 			name?: string;
 			status?: string;
 			description?: string | null;
+			notes?: string | null;
 			startDate?: string | null;
 			endDate?: string | null;
+			deadline?: string | null;
+			priority?: number | null;
+			attachmentUrl?: string | null;
+			attachmentName?: string | null;
+			recurrenceFrequency?: 'daily' | 'weekly' | 'monthly' | 'custom' | null;
+			recurrenceInterval?: number | null;
+			ownerId?: string | null;
 		};
 
 		const updates: Record<string, unknown> = {};
-		if (body.name !== undefined) updates.name = body.name;
-		if (body.status !== undefined) updates.status = body.status;
-		if (body.description !== undefined) updates.description = body.description;
-		if (body.startDate !== undefined) updates.startDate = body.startDate;
-		if (body.endDate !== undefined) updates.endDate = body.endDate;
+		const allowed = [
+			'name',
+			'status',
+			'description',
+			'notes',
+			'startDate',
+			'endDate',
+			'deadline',
+			'priority',
+			'attachmentUrl',
+			'attachmentName',
+			'recurrenceFrequency',
+			'recurrenceInterval',
+			'ownerId'
+		] as const;
+		for (const key of allowed) {
+			if (Object.prototype.hasOwnProperty.call(body, key)) {
+				updates[key] = (body as Record<string, unknown>)[key];
+			}
+		}
 
 		await project.update(event.params.id, updates);
-
 		return ok({ id: event.params.id, updated: true });
 	} catch (e) {
+		if (e instanceof ProjectValidationError) {
+			return fail(e.message + ': ' + Object.values(e.fields).join('; '), 400);
+		}
+		if (e instanceof ProjectPermissionError) {
+			return fail(e.message, 403);
+		}
 		if (e instanceof NotFoundError) return fail(e.message, 404);
 		return fail((e as Error).message, 500);
 	}
@@ -86,4 +119,3 @@ export const DELETE: RequestHandler = async (event) => {
 		return fail((e as Error).message, 500);
 	}
 };
-

@@ -324,12 +324,65 @@
 							class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
 							value={data.project.status}
 						>
-							<option value="active">active</option>
-							<option value="on_hold">on_hold</option>
-							<option value="completed">completed</option>
+							<option value="unassigned">Unassigned</option>
+							<option value="ongoing">Ongoing</option>
+							<option value="under_review">Under Review</option>
+							<option value="completed">Completed</option>
+							<option value="active">active (legacy)</option>
+							<option value="on_hold">on_hold (legacy)</option>
 							<option value="archived">archived</option>
 						</select>
 					</label>
+
+					<div class="grid grid-cols-2 gap-3">
+						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+							Deadline
+							<input
+								type="date"
+								name="deadline"
+								value={data.project.deadline ?? ''}
+								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+							/>
+						</label>
+						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+							Priority (1–10)
+							<input
+								type="number"
+								name="priority"
+								min="1"
+								max="10"
+								value={data.project.priority ?? 5}
+								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+							/>
+						</label>
+					</div>
+
+					<div class="grid grid-cols-2 gap-3">
+						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+							Recurrence
+							<select
+								name="recurrenceFrequency"
+								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+								value={data.project.recurrenceFrequency ?? ''}
+							>
+								<option value="">No recurrence</option>
+								<option value="daily">Daily</option>
+								<option value="weekly">Weekly</option>
+								<option value="monthly">Monthly</option>
+								<option value="custom">Custom (every N days)</option>
+							</select>
+						</label>
+						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+							Recurrence interval (days)
+							<input
+								type="number"
+								name="recurrenceInterval"
+								min="1"
+								value={data.project.recurrenceInterval ?? ''}
+								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+							/>
+						</label>
+					</div>
 
 					<div class="grid grid-cols-2 gap-3">
 						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
@@ -356,10 +409,39 @@
 						Description
 						<textarea
 							name="description"
-							rows="4"
+							rows="3"
 							class="w-full resize-none rounded-md border border-slate-300 px-2.5 py-2 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
 						>{data.project.description ?? ''}</textarea>
 					</label>
+
+					<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+						Notes
+						<textarea
+							name="notes"
+							rows="3"
+							class="w-full resize-none rounded-md border border-slate-300 px-2.5 py-2 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+						>{data.project.notes ?? ''}</textarea>
+					</label>
+
+					<div class="grid grid-cols-2 gap-3">
+						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+							Attachment URL
+							<input
+								type="url"
+								name="attachmentUrl"
+								value={data.project.attachmentUrl ?? ''}
+								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+							/>
+						</label>
+						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+							Attachment label
+							<input
+								name="attachmentName"
+								value={data.project.attachmentName ?? ''}
+								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+							/>
+						</label>
+					</div>
 
 					<div class="flex gap-2 pt-2">
 						<button

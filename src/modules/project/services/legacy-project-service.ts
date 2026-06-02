@@ -1,6 +1,12 @@
 import { and, desc, eq, gte, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import type { ModuleContext } from '$platform/modules/types';
-import { ProjectRepository, ProjectMemberRepository } from '../repositories/project-repository';
+import {
+	ProjectRepository,
+	ProjectMemberRepository,
+	ProjectCollaboratorRepository,
+	ProjectCommentRepository,
+	ProjectUserDirectory
+} from '../repositories/project-repository';
 import { NotFoundError } from '$platform/modules/errors';
 import { createEvent } from '$platform/modules';
 import { schema } from '$infrastructure/db';
@@ -9,6 +15,82 @@ import {
 	parseAuditMetadata,
 	summarizeAuditForProject
 } from '$modules/project/services/audit-display';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const PROJECT_LIST_PAGE_SIZE = 10;
+
+/**
+ * Statuses introduced by TKMGMT1 (image acceptance criteria) — kept distinct
+ * from the legacy `active / archived / on_hold` set so this module can sit
+ * alongside Wave 2.x data without breaking the existing dashboards.
+ */
+/** Statuses introduced by TKMGMT1 (image acceptance criteria) — kept distinct
+ *  from the legacy `active / archived / on_hold` set so this module can sit
+ *  alongside Wave 2.x data without breaking the existing dashboards.        */
+type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'custom';
+
+// ---------------------------------------------------------------------------
+// Module-level types
+// ---------------------------------------------------------------------------
+
+export interface ProjectCreateInput {
+	businessPartnerId?: string | null;
+	parentProjectId?: string | null;
+	ownerId?: string | null;
+	name: string;
+	description?: string;
+	notes?: string;
+	status?: string;
+	priority?: number;
+	startDate?: string;
+	endDate?: string;
+	deadline?: string;
+	attachmentUrl?: string | null;
+	attachmentName?: string | null;
+	recurrenceFrequency?: RecurrenceFrequency | null;
+	recurrenceInterval?: number | null;
+	collaborators?: Array<{ userId: string; role?: string | null }>;
+}
+
+export interface ProjectUpdateInput {
+	name?: string;
+	status?: string;
+	description?: string | null;
+	notes?: string | null;
+	startDate?: string | null;
+	endDate?: string | null;
+	deadline?: string | null;
+	priority?: number | null;
+	attachmentUrl?: string | null;
+	attachmentName?: string | null;
+	recurrenceFrequency?: RecurrenceFrequency | null;
+	recurrenceInterval?: number | null;
+	ownerId?: string | null;
+	deletedAt?: string | null;
+}
+
+export class ProjectPermissionError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'ProjectPermissionError';
+	}
+}
+
+export class ProjectValidationError extends Error {
+	readonly fields: Record<string, string>;
+	constructor(fields: Record<string, string>) {
+		super(`Validation failed: ${Object.keys(fields).join(', ')}`);
+		this.name = 'ProjectValidationError';
+		this.fields = fields;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function fileLabelFromUrl(fileUrl: string | null, fallbackDate: string | null): string {
 	if (!fileUrl || fileUrl.startsWith('manual://')) {
@@ -22,7 +104,76 @@ function fileLabelFromUrl(fileUrl: string | null, fallbackDate: string | null): 
 	}
 }
 
-const PROJECT_LIST_PAGE_SIZE = 10;
+/** Required fields per TKMGMT1 / TKMGMT2 acceptance criteria. */
+function validateRequired(name: string | undefined, deadline: string | null | undefined) {
+	const fields: Record<string, string> = {};
+	if (name !== undefined && (!name || !name.trim())) {
+		fields.name = 'Project name is required.';
+	}
+	if (deadline !== undefined && (!deadline || !String(deadline).trim())) {
+		fields.deadline = 'Deadline is required.';
+	}
+	if (Object.keys(fields).length > 0) throw new ProjectValidationError(fields);
+}
+
+function isManager(roles: readonly string[] | null | undefined): boolean {
+	if (!roles) return false;
+	return roles.some((r) => r === 'owner' || r === 'admin' || r === 'project_manager');
+}
+
+function parseRoles(raw: string | null | undefined): string[] {
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === 'string');
+		if (typeof parsed === 'string') return [parsed];
+	} catch {
+		if (typeof raw === 'string' && raw.length > 0) return [raw];
+	}
+	return [];
+}
+
+/** Extract @-mention tokens. Tokens may be either a userId or an email-prefix. */
+function extractMentionTokens(body: string): string[] {
+	const matches = body.match(/@[A-Za-z0-9_.+\-]+/g);
+	if (!matches) return [];
+	return Array.from(new Set(matches.map((m) => m.slice(1))));
+}
+
+function addDaysIso(dateIso: string, days: number): string {
+	// Treat the deadline as a date (YYYY-MM-DD). Adding days in UTC keeps the
+	// math timezone-agnostic — we never round-trip to a wall-clock time.
+	const base = new Date(`${dateIso}T00:00:00Z`);
+	if (Number.isNaN(base.getTime())) return dateIso;
+	base.setUTCDate(base.getUTCDate() + days);
+	return base.toISOString().slice(0, 10);
+}
+
+function addMonthsIso(dateIso: string, months: number): string {
+	const base = new Date(`${dateIso}T00:00:00Z`);
+	if (Number.isNaN(base.getTime())) return dateIso;
+	const targetMonth = base.getUTCMonth() + months;
+	base.setUTCMonth(targetMonth);
+	return base.toISOString().slice(0, 10);
+}
+
+/** Compute the *next* deadline in a recurring series. */
+export function computeNextDeadline(
+	currentDeadline: string,
+	frequency: RecurrenceFrequency,
+	intervalDays?: number | null
+): string {
+	switch (frequency) {
+		case 'daily':
+			return addDaysIso(currentDeadline, 1);
+		case 'weekly':
+			return addDaysIso(currentDeadline, 7);
+		case 'monthly':
+			return addMonthsIso(currentDeadline, 1);
+		case 'custom':
+			return addDaysIso(currentDeadline, Math.max(1, intervalDays ?? 1));
+	}
+}
 
 // ---------------------------------------------------------------------------
 // ProjectService
@@ -31,11 +182,21 @@ const PROJECT_LIST_PAGE_SIZE = 10;
 export class ProjectService {
 	private repo: ProjectRepository;
 	private memberRepo: ProjectMemberRepository;
+	private collaboratorRepo: ProjectCollaboratorRepository;
+	private commentRepo: ProjectCommentRepository;
+	private userDirectory: ProjectUserDirectory;
 
 	constructor(private ctx: ModuleContext) {
 		this.repo = new ProjectRepository(ctx.db);
 		this.memberRepo = new ProjectMemberRepository(ctx.db);
+		this.collaboratorRepo = new ProjectCollaboratorRepository(ctx.db);
+		this.commentRepo = new ProjectCommentRepository(ctx.db);
+		this.userDirectory = new ProjectUserDirectory(ctx.db);
 	}
+
+	// -----------------------------------------------------------------------
+	// Reads
+	// -----------------------------------------------------------------------
 
 	async getById(id: string) {
 		const p = await this.repo.findById(id);
@@ -49,7 +210,14 @@ export class ProjectService {
 		return result;
 	}
 
-	async list(opts?: { q?: string; status?: string; page?: number; pageSize?: number }) {
+	async list(opts?: {
+		q?: string;
+		status?: string;
+		page?: number;
+		pageSize?: number;
+		ownerId?: string;
+		participantUserId?: string;
+	}) {
 		return this.repo.list(opts);
 	}
 
@@ -58,13 +226,17 @@ export class ProjectService {
 		status?: string | null;
 		startedAfter?: string | null;
 		page?: number | null;
+		scope?: 'all' | 'mine' | null;
 	}) {
 		const db = this.ctx.db;
 		const q = input.q?.trim() ?? '';
 		const status = input.status?.trim() ?? '';
 		const startedAfter = input.startedAfter?.trim() ?? '';
+		const scope = input.scope ?? 'all';
 		const pageRaw = input.page ?? 1;
 		const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+		const currentUserId = this.ctx.user?.id ?? null;
 
 		const projectConditions: SQL[] = [isNull(schema.projects.deletedAt)];
 		if (q) {
@@ -78,9 +250,29 @@ export class ProjectService {
 		}
 		if (status) projectConditions.push(eq(schema.projects.status, status));
 		if (startedAfter) projectConditions.push(gte(schema.projects.startDate, startedAfter));
+		if (scope === 'mine' && currentUserId) {
+			const collabSubquery = db
+				.select({ id: schema.projectCollaborators.projectId })
+				.from(schema.projectCollaborators)
+				.where(
+					and(
+						eq(schema.projectCollaborators.userId, currentUserId),
+						isNull(schema.projectCollaborators.deletedAt)
+					)
+				);
+			projectConditions.push(
+				or(
+					eq(schema.projects.ownerId, currentUserId),
+					sql`${schema.projects.id} in ${collabSubquery}`
+				)!
+			);
+		}
 
 		const [[allProjectsCountRow], [activeProjectsCountRow], projectCountRows] = await Promise.all([
-			db.select({ n: sql<number>`count(*)` }).from(schema.projects).where(isNull(schema.projects.deletedAt)),
+			db
+				.select({ n: sql<number>`count(*)` })
+				.from(schema.projects)
+				.where(isNull(schema.projects.deletedAt)),
 			db
 				.select({ n: sql<number>`count(*)` })
 				.from(schema.projects)
@@ -88,7 +280,10 @@ export class ProjectService {
 			db
 				.select({ total: sql<number>`count(*)` })
 				.from(schema.projects)
-				.leftJoin(schema.businessPartners, eq(schema.projects.businessPartnerId, schema.businessPartners.id))
+				.leftJoin(
+					schema.businessPartners,
+					eq(schema.projects.businessPartnerId, schema.businessPartners.id)
+				)
 				.where(and(...projectConditions))
 		]);
 
@@ -105,23 +300,33 @@ export class ProjectService {
 				status: schema.projects.status,
 				startDate: schema.projects.startDate,
 				endDate: schema.projects.endDate,
+				deadline: schema.projects.deadline,
+				priority: schema.projects.priority,
+				ownerId: schema.projects.ownerId,
+				ownerEmail: schema.users.email,
+				ownerName: schema.users.name,
 				updatedAt: schema.projects.updatedAt,
 				customerName: schema.businessPartners.name
 			})
 			.from(schema.projects)
-			.leftJoin(schema.businessPartners, eq(schema.projects.businessPartnerId, schema.businessPartners.id))
+			.leftJoin(
+				schema.businessPartners,
+				eq(schema.projects.businessPartnerId, schema.businessPartners.id)
+			)
+			.leftJoin(schema.users, eq(schema.projects.ownerId, schema.users.id))
 			.where(and(...projectConditions))
 			.orderBy(desc(schema.projects.updatedAt))
 			.limit(PROJECT_LIST_PAGE_SIZE)
 			.offset(safeOffset);
 
-		// Wave 2.1d: invoice counts now come from revenue (canonical fact table).
 		const invoiceCountRows = await db
 			.select({ projectId: schema.revenue.projectId, total: sql<number>`count(*)` })
 			.from(schema.revenue)
 			.where(isNull(schema.revenue.deletedAt))
 			.groupBy(schema.revenue.projectId);
-		const invoiceCountMap = new Map(invoiceCountRows.map((row) => [row.projectId, Number(row.total ?? 0)]));
+		const invoiceCountMap = new Map(
+			invoiceCountRows.map((row) => [row.projectId, Number(row.total ?? 0)])
+		);
 
 		const projects = projectRows.map((row) => ({
 			...row,
@@ -139,6 +344,7 @@ export class ProjectService {
 				q,
 				status,
 				startedAfter,
+				scope,
 				page: safePage
 			},
 			pagination: {
@@ -184,7 +390,10 @@ export class ProjectService {
 			[purchaseOrdersCountRow],
 			[expensesCountRow]
 		] = await Promise.all([
-			db.select({ n: sql<number>`count(*)` }).from(schema.projects).where(isNull(schema.projects.deletedAt)),
+			db
+				.select({ n: sql<number>`count(*)` })
+				.from(schema.projects)
+				.where(isNull(schema.projects.deletedAt)),
 			db
 				.select({ n: sql<number>`count(*)` })
 				.from(schema.projects)
@@ -200,7 +409,9 @@ export class ProjectService {
 			db
 				.select({ n: sql<number>`count(*)` })
 				.from(schema.purchaseOrders)
-				.where(and(eq(schema.purchaseOrders.projectId, projectId), isNull(schema.purchaseOrders.deletedAt))),
+				.where(
+					and(eq(schema.purchaseOrders.projectId, projectId), isNull(schema.purchaseOrders.deletedAt))
+				),
 			db
 				.select({ n: sql<number>`count(*)` })
 				.from(schema.expenses)
@@ -241,7 +452,9 @@ export class ProjectService {
 					currency: schema.purchaseOrders.currency
 				})
 				.from(schema.purchaseOrders)
-				.where(and(eq(schema.purchaseOrders.projectId, projectId), isNull(schema.purchaseOrders.deletedAt)))
+				.where(
+					and(eq(schema.purchaseOrders.projectId, projectId), isNull(schema.purchaseOrders.deletedAt))
+				)
 				.orderBy(desc(schema.purchaseOrders.createdAt)),
 			db
 				.select({
@@ -261,22 +474,22 @@ export class ProjectService {
 			contracts: contractsPick.map((row) => ({
 				id: row.id,
 				label: fileLabelFromUrl(row.fileUrl, row.date),
-                subtitle: `${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}`
+				subtitle: `${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}`
 			})),
 			quotations: quotationsPick.map((row) => ({
 				id: row.id,
 				label: fileLabelFromUrl(row.fileUrl ?? '', row.date),
-                subtitle: `${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}${row.quotationNumber ? ` - ${row.quotationNumber}` : ''}`
+				subtitle: `${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}${row.quotationNumber ? ` - ${row.quotationNumber}` : ''}`
 			})),
 			purchaseOrders: purchaseOrdersPick.map((row) => ({
 				id: row.id,
 				label: row.poNumber,
-                subtitle: `${row.supplierName ?? '-'} - ${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}`
+				subtitle: `${row.supplierName ?? '-'} - ${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}`
 			})),
 			expenses: expensesPickRows.map((row) => ({
 				id: row.id,
 				label: `${row.expenseType === 'sales_cost' ? 'SC' : 'OpEx'}: ${row.category}`,
-                subtitle: `${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}`
+				subtitle: `${row.date ?? '-'} - ${row.amount ?? 0} ${row.currency ?? 'SGD'}`
 			}))
 		};
 
@@ -326,19 +539,109 @@ export class ProjectService {
 		};
 	}
 
-	async create(data: {
-		businessPartnerId?: string | null;
-		name: string;
-		status?: string;
-		startDate?: string;
-		endDate?: string;
-		description?: string;
-	}) {
-		return this.repo.create(data);
+	// -----------------------------------------------------------------------
+	// Writes
+	// -----------------------------------------------------------------------
+
+	async create(data: ProjectCreateInput) {
+		validateRequired(data.name, data.deadline);
+
+		const userRoles = this.ctx.user?.roles ?? [];
+		const currentUserId = this.ctx.user?.id ?? null;
+		// TKMGMT4 — only manager/director may explicitly assign ownership at
+		// creation. Non-managers can only own their own projects.
+		let ownerId = data.ownerId ?? null;
+		if (ownerId && ownerId !== currentUserId && !isManager(userRoles)) {
+			throw new ProjectPermissionError('Only managers may assign project ownership to others.');
+		}
+		if (!ownerId) ownerId = currentUserId;
+
+		const now = new Date().toISOString();
+		const projectId = crypto.randomUUID();
+		const status = data.status ?? 'unassigned';
+
+		await this.ctx.db.insert(schema.projects).values({
+			id: projectId,
+			businessPartnerId: data.businessPartnerId ?? null,
+			ownerId,
+			parentProjectId: data.parentProjectId ?? null,
+			name: data.name.trim(),
+			status,
+			startDate: data.startDate ?? null,
+			endDate: data.endDate ?? null,
+			deadline: data.deadline ?? null,
+			description: data.description ?? null,
+			notes: data.notes ?? null,
+			priority: data.priority ?? 5,
+			attachmentUrl: data.attachmentUrl ?? null,
+			attachmentName: data.attachmentName ?? null,
+			recurrenceFrequency: data.recurrenceFrequency ?? null,
+			recurrenceInterval: data.recurrenceInterval ?? null,
+			createdAt: now,
+			updatedAt: now
+		});
+
+		if (data.collaborators && data.collaborators.length > 0) {
+			for (const c of data.collaborators) {
+				await this.addCollaborator({ projectId, userId: c.userId, role: c.role ?? null });
+			}
+		}
+
+		return { id: projectId };
 	}
 
-	async update(id: string, data: Record<string, unknown>) {
-		return this.repo.update(id, data);
+	/**
+	 * Update mutates either crucial fields (name, deadline) or non-crucial
+	 * fields (description, notes, status, attachments). Per TKMGMT2 crucial
+	 * fields are owner-only; non-crucial fields are open to collaborators.
+	 *
+	 * The route layer is expected to gate writes by calling
+	 * `getEditableScope(projectId)` first; this method still re-checks because
+	 * the same write path is used from the API.
+	 */
+	async update(id: string, data: ProjectUpdateInput) {
+		// Validation for required fields only when they're being set blank.
+		validateRequired(
+			Object.prototype.hasOwnProperty.call(data, 'name') ? (data.name ?? '') : undefined,
+			Object.prototype.hasOwnProperty.call(data, 'deadline') ? data.deadline ?? '' : undefined
+		);
+
+		const existing = await this.repo.findById(id);
+		if (!existing) throw new NotFoundError('Project', id);
+
+		const scope = this.getEditableScopeFor(existing.ownerId, existing.id);
+		const touchesCrucial =
+			Object.prototype.hasOwnProperty.call(data, 'name') ||
+			Object.prototype.hasOwnProperty.call(data, 'deadline') ||
+			Object.prototype.hasOwnProperty.call(data, 'ownerId') ||
+			Object.prototype.hasOwnProperty.call(data, 'deletedAt');
+
+		if (touchesCrucial && scope !== 'owner' && scope !== 'manager') {
+			throw new ProjectPermissionError(
+				'Only the project owner or a manager may edit name, deadline, or ownership.'
+			);
+		}
+		if (!touchesCrucial && scope === 'none') {
+			throw new ProjectPermissionError(
+				'Only collaborators of this project may edit project details.'
+			);
+		}
+
+		// TKMGMT4 — re-assignment of ownership.
+		if (
+			Object.prototype.hasOwnProperty.call(data, 'ownerId') &&
+			data.ownerId !== existing.ownerId
+		) {
+			if (!isManager(this.ctx.user?.roles ?? [])) {
+				throw new ProjectPermissionError(
+					'Only managers/directors can transfer project ownership.'
+				);
+			}
+		}
+
+		const patch: Record<string, unknown> = { ...data };
+		if (typeof patch.name === 'string') patch.name = patch.name.trim();
+		await this.repo.update(id, patch);
 	}
 
 	async archive(id: string) {
@@ -354,6 +657,10 @@ export class ProjectService {
 	async softDelete(id: string) {
 		return this.repo.update(id, { status: 'archived', deletedAt: new Date().toISOString() });
 	}
+
+	// -----------------------------------------------------------------------
+	// Members (legacy HR allocation)
+	// -----------------------------------------------------------------------
 
 	async getMembers(projectId: string) {
 		return this.repo.getMembers(projectId);
@@ -375,10 +682,241 @@ export class ProjectService {
 		return this.memberRepo.softDelete(memberId);
 	}
 
+	// -----------------------------------------------------------------------
+	// Collaborators (TKMGMT1 / TKMGMT2 / TKMGMT3 / TKMGMT9)
+	// -----------------------------------------------------------------------
+
+	async listCollaborators(projectId: string) {
+		return this.collaboratorRepo.listForProject(projectId);
+	}
+
+	async addCollaborator(input: { projectId: string; userId: string; role?: string | null }) {
+		const existing = await this.collaboratorRepo.findByProjectAndUser(input.projectId, input.userId);
+		if (existing) {
+			if (input.role !== undefined && input.role !== existing.role) {
+				await this.collaboratorRepo.update(existing.id, { role: input.role ?? null });
+			}
+			return { id: existing.id, alreadyExisted: true };
+		}
+		return this.collaboratorRepo.create({
+			id: crypto.randomUUID(),
+			projectId: input.projectId,
+			userId: input.userId,
+			role: input.role ?? null
+		});
+	}
+
+	async addCollaboratorByEmail(input: { projectId: string; email: string; role?: string | null }) {
+		const user = await this.userDirectory.findByEmail(input.email);
+		if (!user) {
+			throw new ProjectValidationError({
+				email: `No user found with email ${input.email}.`
+			});
+		}
+		return this.addCollaborator({
+			projectId: input.projectId,
+			userId: user.id,
+			role: input.role ?? null
+		});
+	}
+
+	async removeCollaborator(projectId: string, userId: string) {
+		return this.collaboratorRepo.removeByProjectAndUser(projectId, userId);
+	}
+
+	// -----------------------------------------------------------------------
+	// Comments (TKMGMT9)
+	// -----------------------------------------------------------------------
+
+	async listComments(projectId: string) {
+		const rows = await this.commentRepo.listForProject(projectId);
+		return rows.map((c) => ({
+			...c,
+			mentions: c.mentions
+				? (JSON.parse(c.mentions) as Array<{ userId: string; email: string; name: string }>)
+				: []
+		}));
+	}
+
+	async addComment(input: { projectId: string; body: string }) {
+		const body = input.body.trim();
+		if (!body) {
+			throw new ProjectValidationError({ body: 'Comment body cannot be empty.' });
+		}
+
+		const user = this.ctx.user;
+		if (!user) {
+			throw new ProjectPermissionError('Sign in to post a comment.');
+		}
+
+		const tokens = extractMentionTokens(body);
+		const resolvedMentions: Array<{ userId: string; email: string; name: string }> = [];
+		if (tokens.length > 0) {
+			// A token may be an exact userId, an email, or an email-prefix.
+			for (const token of tokens) {
+				const byEmail = await this.userDirectory.findByEmail(token);
+				if (byEmail) {
+					resolvedMentions.push({ userId: byEmail.id, email: byEmail.email, name: byEmail.name });
+					continue;
+				}
+				const candidates = await this.userDirectory.findByEmailPrefix(token, 1);
+				if (candidates.length > 0) {
+					const u = candidates[0];
+					resolvedMentions.push({ userId: u.id, email: u.email, name: u.name });
+				}
+			}
+		}
+
+		const id = crypto.randomUUID();
+		await this.commentRepo.create({
+			id,
+			projectId: input.projectId,
+			authorUserId: user.id,
+			authorEmail: user.email,
+			authorName: user.email.split('@')[0] ?? user.email,
+			body,
+			mentions: resolvedMentions.length > 0 ? JSON.stringify(resolvedMentions) : null
+		});
+
+		return { id, mentions: resolvedMentions };
+	}
+
+	// -----------------------------------------------------------------------
+	// Permissions
+	// -----------------------------------------------------------------------
+
+	private getEditableScopeFor(
+		projectOwnerId: string | null,
+		_projectId: string
+	): 'manager' | 'owner' | 'collaborator' | 'none' {
+		const user = this.ctx.user;
+		if (!user) return 'none';
+		if (isManager(user.roles ?? [])) return 'manager';
+		if (projectOwnerId && projectOwnerId === user.id) return 'owner';
+		return 'collaborator';
+	}
+
+	/** Used by routes / pages to figure out which actions to enable in the UI. */
+	async getEditableScope(projectId: string) {
+		const user = this.ctx.user;
+		const project = await this.repo.findById(projectId);
+		if (!project || !user) return 'none' as const;
+		if (isManager(user.roles ?? [])) return 'manager' as const;
+		if (project.ownerId && project.ownerId === user.id) return 'owner' as const;
+		const collab = await this.collaboratorRepo.findByProjectAndUser(projectId, user.id);
+		if (collab) return 'collaborator' as const;
+		return 'none' as const;
+	}
+
+	// -----------------------------------------------------------------------
+	// Sub-projects (TKMGMT1)
+	// -----------------------------------------------------------------------
+
+	async getSubProjects(parentProjectId: string) {
+		return this.repo.getSubProjects(parentProjectId);
+	}
+
+	// -----------------------------------------------------------------------
+	// Recurrence & completion (TKMGMT6 / TKMGMT7)
+	// -----------------------------------------------------------------------
+
 	/**
-	 * Get full project financials. This method crosses module boundaries
-	 * through the public APIs injected at call time.
+	 * Mark a project as completed. If the project carries a recurrence
+	 * frequency, also create the next occurrence with everything (notes,
+	 * collaborators, attachment) carried over and the deadline shifted.
+	 *
+	 * Returns the freshly-created child project id when one was generated.
 	 */
+	async completeAndMaybeRecur(projectId: string): Promise<{ nextProjectId: string | null }> {
+		const project = await this.getById(projectId);
+		await this.update(projectId, { status: 'completed' });
+
+		if (!project.recurrenceFrequency) return { nextProjectId: null };
+		if (!project.deadline) {
+			// Cannot compute the next deadline without a current one — skip.
+			return { nextProjectId: null };
+		}
+
+		const nextDeadline = computeNextDeadline(
+			project.deadline,
+			project.recurrenceFrequency as RecurrenceFrequency,
+			project.recurrenceInterval ?? null
+		);
+
+		const nextId = crypto.randomUUID();
+		const now = new Date().toISOString();
+		await this.ctx.db.insert(schema.projects).values({
+			id: nextId,
+			businessPartnerId: project.businessPartnerId ?? null,
+			ownerId: project.ownerId ?? null,
+			parentProjectId: project.parentProjectId ?? null,
+			name: project.name,
+			status: 'unassigned',
+			startDate: project.startDate ?? null,
+			endDate: project.endDate ?? null,
+			deadline: nextDeadline,
+			description: project.description ?? null,
+			notes: project.notes ?? null,
+			priority: project.priority ?? 5,
+			attachmentUrl: project.attachmentUrl ?? null,
+			attachmentName: project.attachmentName ?? null,
+			recurrenceFrequency: project.recurrenceFrequency,
+			recurrenceInterval: project.recurrenceInterval ?? null,
+			recurrenceParentId: project.recurrenceParentId ?? project.id,
+			createdAt: now,
+			updatedAt: now
+		});
+
+		// Carry collaborators forward.
+		const collaborators = await this.collaboratorRepo.listForProject(projectId);
+		for (const c of collaborators) {
+			await this.addCollaborator({ projectId: nextId, userId: c.userId, role: c.role ?? null });
+		}
+
+		await this.ctx.eventBus.emit(
+			createEvent('project.recurrence.spawned', 'project', {
+				projectId: nextId,
+				sourceProjectId: projectId
+			})
+		);
+
+		return { nextProjectId: nextId };
+	}
+
+	// -----------------------------------------------------------------------
+	// Dashboard / calendar (TKMGMT8 / TKMGMT10)
+	// -----------------------------------------------------------------------
+
+	async getDashboard() {
+		const now = new Date();
+		const todayIso = now.toISOString().slice(0, 10);
+		const inSevenDays = new Date(now);
+		inSevenDays.setDate(inSevenDays.getDate() + 7);
+		const inSevenIso = inSevenDays.toISOString().slice(0, 10);
+
+		const [statusSummary, upcoming, overdue] = await Promise.all([
+			this.repo.getStatusSummary(),
+			this.repo.getUpcomingDeadlines({ fromIso: todayIso, toIso: inSevenIso, limit: 5 }),
+			this.repo.getOverdue({ nowIso: todayIso })
+		]);
+
+		return {
+			generatedAt: now.toISOString(),
+			statusSummary,
+			upcoming,
+			overdue,
+			lookahead: { from: todayIso, to: inSevenIso }
+		};
+	}
+
+	async getCalendarEntries(opts: { fromIso: string; toIso: string }) {
+		return this.repo.getCalendarEntries(opts);
+	}
+
+	// -----------------------------------------------------------------------
+	// Profit (existing)
+	// -----------------------------------------------------------------------
+
 	async getProjectFinancials(
 		projectId: string,
 		deps: {
@@ -412,4 +950,20 @@ export class ProjectService {
 			margin: Math.round(margin * 100) / 100
 		};
 	}
+
+	// -----------------------------------------------------------------------
+	// User directory passthrough (used by routes to render collaborator picker)
+	// -----------------------------------------------------------------------
+
+	async searchUsers(prefix: string) {
+		if (!prefix || prefix.length < 1) return [];
+		return this.userDirectory.findByEmailPrefix(prefix);
+	}
+
+	async listUsers() {
+		return this.userDirectory.listAll();
+	}
 }
+
+// Re-export the role helper for routes that need to render badges.
+export { parseRoles as parseUserRoles };

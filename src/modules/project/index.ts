@@ -18,6 +18,13 @@ export const projectModule: ModuleDefinition = {
 };
 
 export { createProjectApi, createProjectPublicApi, type ProjectApi } from './services';
+export {
+	ProjectPermissionError,
+	ProjectValidationError,
+	computeNextDeadline,
+	type ProjectCreateInput,
+	type ProjectUpdateInput
+} from './services/legacy-project-service';
 export { projectActions };
 export type { ProjectSource } from './contracts';
 export type { ProjectInboundContract, ProjectPublicGroup } from './contracts/inbound';

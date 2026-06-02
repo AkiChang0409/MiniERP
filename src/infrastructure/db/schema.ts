@@ -35,7 +35,12 @@ export {
 } from '$modules/business-partner/repositories/business-partner.schema';
 
 // Project module
-export { projects, projectEmployees } from '$modules/project/repositories/project.schema';
+export {
+	projects,
+	projectEmployees,
+	projectCollaborators,
+	projectComments
+} from '$modules/project/repositories/project.schema';
 
 // Project archive documents (contracts / quotations / POs)
 export {
