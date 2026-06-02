@@ -85,3 +85,22 @@ export { gstReturns, personIncome, timeLogs } from '$modules/finance/repositorie
 
 // Document Intake module (target-layer artifact storage)
 export { documentArtifacts } from '../../modules/document-intake/repositories/document-artifact.schema';
+
+// Inventory module (item master + attachments + barcodes)
+export {
+	items,
+	inventoryItemAttachments,
+	inventoryItemBarcodes
+} from '$modules/inventory/repositories/item.schema';
+
+// Inventory module — warehouse / bin / stock levels / movements / transfers / cycle counts
+export {
+	warehouses,
+	warehouseBinLocations,
+	inventoryStockLevels,
+	inventoryStockMovements,
+	inventoryStockTransfers,
+	inventoryStockTransferLines,
+	inventoryCycleCounts,
+	inventoryCycleCountLines
+} from '$modules/inventory/repositories/warehouse.schema';
