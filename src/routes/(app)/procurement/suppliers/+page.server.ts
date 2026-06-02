@@ -7,16 +7,27 @@ import { fail } from '@sveltejs/kit';
 export const load: PageServerLoad = async (event) => {
 	const q = (event.url.searchParams.get('q') ?? '').trim().toLowerCase();
 	const project = (event.url.searchParams.get('project') ?? '').trim().toLowerCase();
+	const status = (event.url.searchParams.get('status') ?? '').trim().toLowerCase();
 
 	if (!event.platform) {
 		return {
-			filters: { q, project },
+			filters: { q, project, status },
 			projectOptions: [] as string[],
 			suppliers: [] as {
 				id: string;
 				name: string;
 				contact: string | null;
 				address: string | null;
+				profile: {
+					supplierType: string;
+					supplierStatus: string;
+					acraUen: string | null;
+					businessRegistrationNo: string | null;
+					gstRegistrationStatus: string;
+					taxCode: string | null;
+					paymentTerms: string | null;
+					creditTerms: string | null;
+				} | null;
 				itemDescription: string | null;
 				dateCreate: string | null;
 				projectRelated: string | null;
@@ -49,6 +60,18 @@ export const load: PageServerLoad = async (event) => {
 		name: s.name,
 		contact: s.contact ?? null,
 		address: s.address ?? null,
+		profile: s.profile
+			? {
+					supplierType: s.profile.supplierType,
+					supplierStatus: s.profile.supplierStatus,
+					acraUen: s.profile.acraUen ?? null,
+					businessRegistrationNo: s.profile.businessRegistrationNo ?? null,
+					gstRegistrationStatus: s.profile.gstRegistrationStatus,
+					taxCode: s.profile.taxCode ?? null,
+					paymentTerms: s.profile.paymentTerms ?? null,
+					creditTerms: s.profile.creditTerms ?? null
+				}
+			: null,
 		itemDescription: s.itemDescription ?? null,
 		dateCreate: s.dateCreate ?? null,
 		projectRelated: s.projectRelated ?? null,
@@ -69,10 +92,16 @@ export const load: PageServerLoad = async (event) => {
 	).sort((a, b) => a.localeCompare(b));
 	const filtered = normalized.filter((s) => {
 		if (project && (s.projectRelated ?? '').toLowerCase() !== project) return false;
+		if (status && (s.profile?.supplierStatus ?? '').toLowerCase() !== status) return false;
 		if (!q) return true;
 		const haystack = [
 			s.name,
 			s.contact ?? '',
+			s.profile?.acraUen ?? '',
+			s.profile?.businessRegistrationNo ?? '',
+			s.profile?.taxCode ?? '',
+			s.profile?.paymentTerms ?? '',
+			s.profile?.creditTerms ?? '',
 			s.itemDescription ?? '',
 			s.projectRelated ?? '',
 			s.address ?? '',
@@ -84,7 +113,7 @@ export const load: PageServerLoad = async (event) => {
 	});
 
 	return {
-		filters: { q, project },
+		filters: { q, project, status },
 		projectOptions,
 		suppliers: filtered
 	};

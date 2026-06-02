@@ -2,7 +2,7 @@
 {
 	"name": "smartfin-test",
 	"compatibility_date": "2026-03-30",
-	"compatibility_flags": ["nodejs_als"],
+	"compatibility_flags": ["nodejs_compat"],
 	"d1_databases": [
 		{
 			"binding": "DB",

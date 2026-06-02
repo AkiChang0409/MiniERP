@@ -5,7 +5,14 @@
 	import WorkflowPanel from '$app-layer/ai-panel/components/workflow-panel/WorkflowPanel.svelte';
 	import PanelTrigger from '$app-layer/ai-panel/components/workflow-panel/PanelTrigger.svelte';
 
-	type Primary = 'finance' | 'project' | 'hr' | 'procurement' | 'sales-crm' | 'settings';
+	type Primary =
+		| 'finance'
+		| 'project'
+		| 'hr'
+		| 'procurement'
+		| 'sales-crm'
+		| 'inventory'
+		| 'settings';
 
 	type SideLink = {
 		href: string;
@@ -31,6 +38,7 @@
 		{ id: 'hr', href: '/hr/employees', label: 'HR', moduleId: 'hr' },
 		{ id: 'procurement', href: '/procurement/suppliers', label: 'Procurement', moduleId: 'procurement' },
 		{ id: 'sales-crm', href: '/sales-crm/customers', label: 'Sales CRM', moduleId: 'sales-crm' },
+		{ id: 'inventory', href: '/inventory/items', label: 'Inventory', moduleId: 'inventory' },
 		{ id: 'settings', href: '/settings', label: 'Setting', moduleId: 'core' }
 	];
 
@@ -96,7 +104,10 @@
 	const procurementGroups: SideGroup[] = [
 		{
 			title: 'Suppliers',
-			items: [{ href: '/procurement/suppliers', label: 'Suppliers', moduleId: 'procurement', icon: 'S' }]
+			items: [
+				{ href: '/procurement/suppliers', label: 'Suppliers', moduleId: 'procurement', icon: 'S' },
+				{ href: '/procurement/rfqs', label: 'RFQs', moduleId: 'procurement', icon: 'R' }
+			]
 		}
 	];
 
@@ -104,6 +115,33 @@
 		{
 			title: 'Customers',
 			items: [{ href: '/sales-crm/customers', label: 'Customers', moduleId: 'sales-crm', icon: 'C' }]
+		}
+	];
+
+	const inventoryGroups: SideGroup[] = [
+		{
+			title: 'Master Data',
+			items: [
+				{ href: '/inventory/items', label: 'Items', moduleId: 'inventory', icon: 'I' },
+				{ href: '/inventory/items/new', label: 'New Item', moduleId: 'inventory', icon: '+' },
+				{ href: '/inventory/scan', label: 'Barcode Scan', moduleId: 'inventory', icon: 'B' }
+			]
+		},
+		{
+			title: 'Warehouse',
+			items: [
+				{ href: '/inventory/warehouses', label: 'Warehouses', moduleId: 'inventory', icon: 'W' },
+				{ href: '/inventory/stock', label: 'Stock by Location', moduleId: 'inventory', icon: 'S' },
+				{ href: '/inventory/transfers', label: 'Stock Transfers', moduleId: 'inventory', icon: 'T' }
+			]
+		},
+		{
+			title: 'Movements & Counts',
+			items: [
+				{ href: '/inventory/movements', label: 'Movement Audit', moduleId: 'inventory', icon: 'M' },
+				{ href: '/inventory/cycle-counts', label: 'Cycle Counts', moduleId: 'inventory', icon: 'C' },
+				{ href: '/inventory/aging', label: 'Aging Report', moduleId: 'inventory', icon: 'A' }
+			]
 		}
 	];
 
@@ -167,6 +205,7 @@
 		if (path.startsWith('/settings')) return 'settings';
 		if (path.startsWith('/procurement')) return 'procurement';
 		if (path.startsWith('/sales-crm')) return 'sales-crm';
+		if (path.startsWith('/inventory')) return 'inventory';
 		// Project: list and detail routes
 		if (path === '/projects' || path.startsWith('/projects/')) return 'project';
 		// HR: employee master data (same employee module as in-project Team & Cost)
@@ -181,6 +220,7 @@
 		if (primaryFromPath === 'hr') return hrGroups;
 		if (primaryFromPath === 'procurement') return procurementGroups;
 		if (primaryFromPath === 'sales-crm') return salesCrmGroups;
+		if (primaryFromPath === 'inventory') return inventoryGroups;
 		if (primaryFromPath === 'settings') return settingsGroups;
 		return financeGroups;
 	});
@@ -237,6 +277,9 @@
 		// Procurement / Sales CRM
 		if (itemPath === '/procurement/suppliers') {
 			return path.startsWith('/procurement/suppliers');
+		}
+		if (itemPath === '/procurement/rfqs') {
+			return path.startsWith('/procurement/rfqs');
 		}
 		if (itemPath === '/sales-crm/customers') {
 			return path.startsWith('/sales-crm/customers');

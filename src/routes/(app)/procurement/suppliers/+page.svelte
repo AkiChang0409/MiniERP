@@ -21,20 +21,26 @@
 		</a>
 		<a
 			class="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+			href="/procurement/rfqs"
+		>
+			RFQs & comparison
+		</a>
+		<a
+			class="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
 			href="/finance/expenses"
 		>
 			Supplier invoice expenses
 		</a>
 	</div>
 
-	<form class="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-3" method="GET">
+	<form class="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-4" method="GET">
 		<label class="space-y-1 text-sm md:col-span-2">
 			<span class="text-slate-700">Search</span>
 			<input
 				name="q"
 				value={data.filters.q}
 				class="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-[var(--sf-green)]"
-				placeholder="Name, item description, contact, WeChat..."
+				placeholder="Name, UEN, tax code, payment terms, contact..."
 			/>
 		</label>
 		<label class="space-y-1 text-sm">
@@ -49,7 +55,20 @@
 				{/each}
 			</select>
 		</label>
-		<div class="md:col-span-3 flex gap-2">
+		<label class="space-y-1 text-sm">
+			<span class="text-slate-700">Status</span>
+			<select
+				name="status"
+				class="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-[var(--sf-green)]"
+			>
+				<option value="">All statuses</option>
+				<option value="approved" selected={data.filters.status === 'approved'}>Approved</option>
+				<option value="preferred" selected={data.filters.status === 'preferred'}>Preferred</option>
+				<option value="on_hold" selected={data.filters.status === 'on_hold'}>On Hold</option>
+				<option value="blacklisted" selected={data.filters.status === 'blacklisted'}>Blacklisted</option>
+			</select>
+		</label>
+		<div class="md:col-span-4 flex gap-2">
 			<button class="rounded-md bg-[var(--sf-green)] px-3 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]" type="submit">
 				Apply filters
 			</button>
@@ -64,11 +83,13 @@
 			<thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
 				<tr>
 					<th class="px-4 py-3">Name</th>
+					<th class="px-4 py-3">Status</th>
+					<th class="px-4 py-3">Type</th>
+					<th class="px-4 py-3">UEN / BRN</th>
+					<th class="px-4 py-3">GST / Tax</th>
 					<th class="px-4 py-3">Main Contact</th>
-					<th class="px-4 py-3">Item Description</th>
-					<th class="px-4 py-3">Date Create</th>
+					<th class="px-4 py-3">Terms</th>
 					<th class="px-4 py-3">Project Related</th>
-					<th class="px-4 py-3">Address</th>
 					<th class="px-4 py-3">Contacts</th>
 					<th class="px-4 py-3"></th>
 				</tr>
@@ -76,7 +97,7 @@
 			<tbody class="divide-y divide-slate-100">
 				{#if data.suppliers.length === 0}
 					<tr>
-						<td colspan="8" class="px-4 py-8 text-center text-slate-500">
+						<td colspan="10" class="px-4 py-8 text-center text-slate-500">
 							No suppliers yet.
 							<a class="font-medium text-[var(--sf-green)] hover:underline" href="/procurement/suppliers/new">Add your first supplier</a>
 							or open
@@ -87,7 +108,7 @@
 					{#each data.suppliers as s}
 						{#if pendingDeleteId === s.id}
 							<tr class="bg-red-50">
-								<td colspan="7" class="px-4 py-3 text-sm font-medium text-red-700">
+								<td colspan="9" class="px-4 py-3 text-sm font-medium text-red-700">
 									Delete <span class="font-semibold">{s.name}</span>? This cannot be undone.
 								</td>
 								<td class="px-4 py-3">
@@ -122,11 +143,30 @@
 								<td class="px-4 py-3 font-medium text-slate-900">
 									<a class="hover:text-[var(--sf-green)] hover:underline" href={`/procurement/suppliers/${s.id}`}>{s.name}</a>
 								</td>
+								<td class="px-4 py-3 text-slate-600">
+									<span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium capitalize text-slate-700">
+										{(s.profile?.supplierStatus ?? 'approved').replace('_', ' ')}
+									</span>
+								</td>
+								<td class="px-4 py-3 text-slate-600">{(s.profile?.supplierType ?? '-').replace('_', ' ')}</td>
+								<td class="px-4 py-3 text-slate-600">
+									<div>{s.profile?.acraUen ?? '-'}</div>
+									{#if s.profile?.businessRegistrationNo}
+										<div class="text-xs text-slate-500">{s.profile.businessRegistrationNo}</div>
+									{/if}
+								</td>
+								<td class="px-4 py-3 text-slate-600">
+									<div class="capitalize">{(s.profile?.gstRegistrationStatus ?? 'unknown').replace('_', ' ')}</div>
+									<div class="text-xs text-slate-500">{s.profile?.taxCode ?? '-'}</div>
+								</td>
 								<td class="px-4 py-3 text-slate-600">{s.contact ?? '-'}</td>
-								<td class="px-4 py-3 text-slate-600">{s.itemDescription ?? '-'}</td>
-								<td class="px-4 py-3 text-slate-600">{s.dateCreate ?? '-'}</td>
+								<td class="px-4 py-3 text-slate-600">
+									<div>{s.profile?.paymentTerms ?? '-'}</div>
+									{#if s.profile?.creditTerms}
+										<div class="text-xs text-slate-500">{s.profile.creditTerms}</div>
+									{/if}
+								</td>
 								<td class="px-4 py-3 text-slate-600">{s.projectRelated ?? '-'}</td>
-								<td class="max-w-md truncate px-4 py-3 text-slate-600" title={s.address ?? ''}>{s.address ?? '-'}</td>
 								<td class="px-4 py-3 text-slate-600">
 									{#if s.contacts.length === 0}
 										–

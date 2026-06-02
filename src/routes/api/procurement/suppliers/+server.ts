@@ -35,6 +35,41 @@ export const POST: RequestHandler = async (event) => {
 				position?: string;
 			}>;
 			metadata?: unknown;
+			profile?: {
+				supplierType?: 'individual' | 'corporate_local' | 'corporate_international';
+				supplierStatus?: 'approved' | 'preferred' | 'on_hold' | 'blacklisted';
+				acraUen?: string;
+				businessRegistrationNo?: string;
+				gstRegistrationStatus?: 'registered' | 'not_registered' | 'exempt' | 'unknown';
+				taxCode?: 'SR' | 'ZR' | 'ES' | 'OP';
+				billingAddress?: string;
+				shippingAddress?: string;
+				bankName?: string;
+				bankAccountNo?: string;
+				swiftCode?: string;
+				creditTerms?: string;
+				paymentTerms?: string;
+				preferredCurrency?: string;
+				supplierCategory?: string;
+			};
+			complianceRecords?: Array<{
+				recordType: 'licence' | 'permit' | 'insurance' | 'certificate' | 'other';
+				title?: string;
+				issuer?: string;
+				referenceNo?: string;
+				issueDate?: string;
+				expiryDate?: string;
+				status?: 'valid' | 'expiring' | 'expired' | 'pending_review';
+				notes?: string;
+			}>;
+			attachments?: Array<{
+				attachmentType: 'mou' | 'nda' | 'contract' | 'certificate' | 'licence' | 'permit' | 'insurance' | 'other';
+				title?: string;
+				fileName?: string;
+				fileUrl?: string;
+				expiryDate?: string;
+				notes?: string;
+			}>;
 		};
 
 		if (!body.name) {
@@ -49,6 +84,7 @@ export const POST: RequestHandler = async (event) => {
 			dateCreate: body.dateCreate,
 			projectRelated: body.projectRelated,
 			gstRegNo: body.gstRegNo,
+			profile: body.profile,
 			contacts: (body.contacts ?? [])
 				.map((c) => ({
 					name: String(c.name ?? '').trim(),
@@ -57,6 +93,28 @@ export const POST: RequestHandler = async (event) => {
 					position: String(c.position ?? '').trim() || undefined
 				}))
 				.filter((c) => c.name),
+			complianceRecords: (body.complianceRecords ?? [])
+				.map((record) => ({
+					recordType: record.recordType,
+					title: String(record.title ?? '').trim(),
+					issuer: record.issuer,
+					referenceNo: record.referenceNo,
+					issueDate: record.issueDate,
+					expiryDate: record.expiryDate,
+					status: record.status,
+					notes: record.notes
+				}))
+				.filter((record) => record.title),
+			attachments: (body.attachments ?? [])
+				.map((attachment) => ({
+					attachmentType: attachment.attachmentType,
+					title: String(attachment.title ?? '').trim(),
+					fileName: attachment.fileName,
+					fileUrl: attachment.fileUrl,
+					expiryDate: attachment.expiryDate,
+					notes: attachment.notes
+				}))
+				.filter((attachment) => attachment.title),
 			metadata: body.metadata ? JSON.stringify(body.metadata) : undefined
 		});
 

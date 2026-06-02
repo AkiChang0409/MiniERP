@@ -1,11 +1,12 @@
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Inter �?UI font for panel (main app falls back to system). */
-@import '@fontsource/inter/400.css';
-@import '@fontsource/inter/500.css';
-@import '@fontsource/inter/600.css';
+/* Inter UI font for panel (main app falls back to system). */
 
 :root {
 	color-scheme: light;
@@ -55,37 +56,36 @@ html {
 	}
 }
 
-/* ─────────────────────────────────────────────────────────────────
- * AI Workflow Panel �?scoped "SmartFin at night" token layer.
+/* AI Workflow Panel scoped "SmartFin at night" token layer.
  * Brand green + gold are core, brightened/saturated for dark mode.
  * Gold is treated as a light source (halo, glow), not a flat accent.
  * All panel components must sit under .sf-panel.
- * ───────────────────────────────────────────────────────────────── */
+ */
 .sf-panel {
-	/* Surfaces �?deep forest base */
+	/* Surfaces: deep forest base */
 	--panel-bg: #0d1a0b;
 	--panel-surface: #152a12;
 	--panel-surface-raised: #1c3818;
 	--panel-surface-deep: #0a1408;
 
-	/* Borders & dividers �?warm gold tint, not neutral gray */
+	/* Borders & dividers: warm gold tint, not neutral gray */
 	--panel-border: rgba(234, 188, 60, 0.12);
 	--panel-border-strong: rgba(234, 188, 60, 0.28);
 	--panel-divider: rgba(234, 188, 60, 0.07);
 
-	/* Text �?warm ivory / candlelit paper */
+	/* Text: warm ivory / candlelit paper */
 	--panel-fg: #f4eed8;
 	--panel-fg-muted: #b9b496;
 	--panel-fg-faint: #7c7a63;
 
-	/* Gold �?brand amber as a light source */
+	/* Gold: brand amber as a light source */
 	--panel-gold: #eabc3c;
 	--panel-gold-bright: #f5d674;
 	--panel-gold-deep: #c7991f;
 	--panel-gold-soft: rgba(234, 188, 60, 0.16);
 	--panel-gold-glow: rgba(234, 188, 60, 0.42);
 
-	/* Green �?brand forest, brightened for dark */
+	/* Green: brand forest, brightened for dark */
 	--panel-green: #5fb55e;
 	--panel-green-bright: #7fd47e;
 	--panel-green-deep: var(--sf-green);

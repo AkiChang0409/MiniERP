@@ -18,6 +18,7 @@ DELETE FROM gst_returns;
 DELETE FROM company_settings;
 DELETE FROM expense_categories;
 DELETE FROM projects;
+DELETE FROM partner_supplier_evaluations;
 DELETE FROM employee_profiles;
 DELETE FROM person_roles;
 DELETE FROM persons;
