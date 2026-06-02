@@ -2,6 +2,7 @@
 	import { invalidate } from '$app/navigation';
 	import PageShell from '$app-layer/components/PageShell.svelte';
 	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+	import { preprocessImageForOcr } from '$lib/utils/preprocess-image';
 
 	let { data } = $props();
 
@@ -201,7 +202,7 @@
 		extracted?: Record<string, unknown> | null;
 	};
 
-	// --- Client-side PDF / image extraction (pdfjs-dist + Workers AI vision) ---
+	// --- Client-side PDF / image extraction (pdfjs-dist + server image OCR) ---
 	let _pdfJsCache: (typeof import('pdfjs-dist')) | null = null;
 
 	async function loadPdfJs() {
@@ -249,13 +250,13 @@
 		}
 	}
 
-	async function runWorkersVisionOcr(blob: Blob, fileName: string): Promise<string> {
+	async function runImageOcr(blob: Blob, fileName: string): Promise<string> {
 		const fd = new FormData();
 		fd.append('file', blob, fileName);
-		const res = await fetch('/api/ocr/workers-vision', { method: 'POST', body: fd });
+		const res = await fetch('/api/ocr/image', { method: 'POST', body: fd });
 		const payload = (await res.json()) as { ok?: boolean; data?: { text?: string }; error?: string };
 		if (!res.ok || !payload.ok || typeof payload.data?.text !== 'string') {
-			throw new Error(payload.error ?? `Workers AI vision OCR failed (${res.status})`);
+			throw new Error(payload.error ?? `Image OCR failed (${res.status})`);
 		}
 		return payload.data.text;
 	}
@@ -304,10 +305,11 @@
 			const mime = selectedFile.type.toLowerCase();
 			const fname = selectedFile.name.toLowerCase();
 			const isPdf = mime === 'application/pdf' || fname.endsWith('.pdf');
-			const isImage = mime.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(fname);
+			const isImage = mime.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(fname);
 
 			if (isImage) {
-				const ocrText = await runWorkersVisionOcr(selectedFile, selectedFile.name);
+				const processed = await preprocessImageForOcr(selectedFile);
+				const ocrText = await runImageOcr(processed, processed.name);
 				if (ocrText.trim()) fd.set('rawText', ocrText);
 			} else if (isPdf) {
 				try {
@@ -315,11 +317,12 @@
 					if (text.trim().length >= 48) {
 						fd.set('rawText', text);
 					} else {
-						// Scanned PDF: render first page �?Workers AI vision
+						// Scanned PDF: render first page and run server image OCR
 						const jpeg = await renderPdfFirstPageToJpeg(selectedFile);
 						if (jpeg) {
 							const baseName = fname.replace(/\.pdf$/i, '') || 'document';
-							const ocrText = await runWorkersVisionOcr(jpeg, `${baseName}-p1.jpg`);
+							const processed = await preprocessImageForOcr(jpeg);
+							const ocrText = await runImageOcr(processed, `${baseName}-p1.jpg`);
 							if (ocrText.trim()) fd.set('rawText', ocrText);
 						}
 					}
@@ -450,7 +453,7 @@
 					<label><span class="mb-1 block text-xs font-medium text-slate-700">Document Type</span><select class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={docType} onchange={(e) => onDocTypeChange((e.currentTarget as HTMLSelectElement).value as DocType)}><option value="contract">Contract</option><option value="quotation">Quotation</option><option value="purchase_order">Purchase Order</option></select></label>
 					<label><span class="mb-1 block text-xs font-medium text-slate-700">Status</span><input class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" bind:value={status} /></label>
 				</div>
-				<label class="block"><span class="mb-1 block text-xs font-medium text-slate-700">File</span><input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" onchange={onPickFile} /></label>
+				<label class="block"><span class="mb-1 block text-xs font-medium text-slate-700">File</span><input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.txt,.csv,.doc,.docx,.xls,.xlsx" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" onchange={onPickFile} /></label>
 				<div class="grid gap-3 md:grid-cols-2">
 					<label><span class="mb-1 block text-xs font-medium text-slate-700">Amount</span><input type="number" step="0.01" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" bind:value={amount} /></label>
 					<label><span class="mb-1 block text-xs font-medium text-slate-700">Currency</span><input class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" bind:value={currency} /></label>

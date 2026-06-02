@@ -20,11 +20,11 @@ export const projectOutboundContracts: OutboundContract[] = [
 		failures: ['not_found', 'unavailable', 'timeout', 'invalid_response']
 	},
 	{
-		id: 'project.business_partner',
+		id: 'project.customer_lookup',
 		provider: 'external',
-		providerId: 'business-partner',
+		providerId: 'sales-crm',
 		strength: 'strong',
-		description: 'Project records need customer and business partner references',
+		description: 'Project records need customer references',
 		failurePolicy: 'block',
 		failures: ['not_found', 'unavailable', 'timeout', 'invalid_response']
 	}

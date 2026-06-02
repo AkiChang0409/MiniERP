@@ -42,10 +42,6 @@ export { financeCapabilities, financeCapabilityIds };
 // barrel so cross-module callers don't violate Rule 2 of the boundary linter.
 export { extractDocumentFieldsCapability } from './capabilities/extract-document-fields';
 export {
-	classifyDocumentCategoryCapability,
-	documentTypeForFinanceCategory
-} from './capabilities/classify-document-category';
-export {
 	categoryIdForDocumentType,
 	findCategoryById,
 	FALLBACK_CATEGORY_ID,

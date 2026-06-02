@@ -200,6 +200,12 @@
 		loadError = null;
 		diagnostics = null;
 		diagnosticsError = null;
+		// Reset the inbox sub-flow step so the new artifact starts from
+		// 'category' instead of inheriting the previous artifact's stepIndex
+		// (the InboxConfirmForm $effect would otherwise jump to 'project').
+		if (panel.activeWorkflow?.workflowId === 'finance-inbox') {
+			panel.setStep(0);
+		}
 		try {
 			await loadCategories();
 			selectedArtifact = await getJson<DocumentArtifactView>(`/api/documents/${encodeURIComponent(id)}`);
@@ -230,9 +236,22 @@
 		await openArtifact(selectedArtifact.id);
 	}
 
+	function backToList() {
+		selectedArtifact = null;
+		// Reset sub-flow step so the TaskLine indicator returns to the start.
+		if (panel.activeWorkflow?.workflowId === 'finance-inbox') {
+			panel.setStep(0);
+		}
+	}
+
 	async function handleConfirmed() {
 		selectedArtifact = null;
 		currentTab = 'confirmed';
+		// Reset the inbox sub-flow step so the TaskLine indicator returns
+		// to the start while the user picks the next document.
+		if (panel.activeWorkflow?.workflowId === 'finance-inbox') {
+			panel.setStep(0);
+		}
 		await loadInbox('confirmed');
 	}
 
@@ -302,7 +321,7 @@
 <div class="inbox-layer">
 	{#if selectedArtifact}
 		<div class="detail-header">
-			<button type="button" class="ghost-button" onclick={() => (selectedArtifact = null)}>
+			<button type="button" class="ghost-button" onclick={backToList}>
 				Back
 			</button>
 			<button type="button" class="icon-button" onclick={refreshSelected} disabled={isLoadingDetail} title="Refresh">
@@ -393,7 +412,7 @@
 											{diagnostics.textExtraction.rawText}
 										{/if}
 									{:else}
-										{diagnostics.textExtraction?.provider === 'workers_ai_vision_direct' ? 'Vision direct, no raw OCR text.' : 'No raw text available.'}
+										No raw text available.
 									{/if}
 								</div>
 							{:else}

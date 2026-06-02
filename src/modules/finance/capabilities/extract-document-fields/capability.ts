@@ -13,7 +13,6 @@
  */
 import type { ZodType } from 'zod';
 import { runStructuredOutput } from '../../../../platform/ai/ai-runtime';
-import { runWorkersVisionJson } from '../../../../platform/ai/ocr/workers-vision-ocr';
 import { normalizeDocumentText, smartTruncate } from '../../../../platform/ai/text-preprocessing';
 import {
 	findCategoryById,
@@ -78,8 +77,6 @@ export interface ExtractDocumentFieldsInput {
 	documentId: string;
 	fileName?: string;
 	text?: string;
-	imageBytes?: Uint8Array;
-	mimeType?: string;
 	artifactConfidence?: number;
 	/** Category id from the workflow state, e.g. `expense.sales_cost.invoice`.
 	 *  When absent the capability defaults to invoice extraction (Phase 2 behavior). */
@@ -90,9 +87,19 @@ export interface ExtractDocumentFieldsInput {
 
 export interface ExtractDocumentFieldsOutput {
 	fields: Record<string, unknown>;
+	/** Overall document-level confidence. For LLM-mode this is the mean of per-field confidences
+	 *  (across fields the LLM actually populated), falling back to the LLM's self-reported overall
+	 *  confidence. Kept as a scalar for legacy callers that store one number per artifact. */
 	confidence: number;
-	fieldConfidence?: Record<string, number>;
+	/** Per-field confidence map, keyed by the same shape as `fields` (snake_case category keys for
+	 *  `outputShape: 'category'`, camelCase legacy keys for `outputShape: 'legacy'`). Only includes
+	 *  keys whose value is present and non-null. Worker/API routes write this straight into
+	 *  `SuggestedFieldsResult.confidence` — no fan-out needed. */
+	fieldConfidence: Record<string, number>;
 	evidence: FinanceEvidence[];
+	/** Verbatim text excerpts keyed by the LLM's camelCase field name (e.g. supplierName, totalAmount).
+	 *  Used in the review UI to highlight the source sentence in the raw-text panel when the user
+	 *  focuses a field. Only present when the LLM path was taken; undefined for mock/fixture runs. */
 	sourceQuotes?: Record<string, string>;
 	provider: ExtractionProvider;
 }
@@ -123,29 +130,23 @@ type CommonFields = {
 // LLM dispatch (per categoryDocType)
 // ---------------------------------------------------------------------------
 
-interface MapToFieldsResult {
+/** Per-field confidence keyed in the CommonFields shape — same key set as the projected fields,
+ *  so downstream `projectForCategory` can run the same `categoryValue` reverse-map over both
+ *  data and confidence in lockstep. Missing keys mean "LLM did not report confidence for that
+ *  field" (or the field itself was null) — callers should fall back to the overall confidence. */
+type CommonFieldConfidence = Partial<Record<keyof CommonFields, number>>;
+
+interface MappedExtraction {
 	fields: CommonFields;
-	fieldConfidence: Record<string, number>;
+	fieldConfidence: CommonFieldConfidence;
 }
 
 interface LlmConfig<T> {
 	systemPrompt: string;
 	schema: ZodType<T>;
 	schemaName: string;
-	mapToFields: (value: T, overallConfidence: number) => MapToFieldsResult | null;
+	mapToFields: (value: T) => MappedExtraction | null;
 	confidenceFromValue: (value: T) => number | undefined;
-}
-
-function perFieldConfidence(fields: CommonFields, overall: number): Record<string, number> {
-	const result: Record<string, number> = {};
-	for (const [k, v] of Object.entries(fields)) {
-		if (Array.isArray(v)) {
-			result[k] = v.length > 0 ? overall : 0;
-		} else {
-			result[k] = (v !== null && v !== undefined && v !== '') ? overall : 0;
-		}
-	}
-	return result;
 }
 
 function hasAnyExtractedValue(fields: CommonFields): boolean {
@@ -155,26 +156,68 @@ function hasAnyExtractedValue(fields: CommonFields): boolean {
 	});
 }
 
+/** Read `_confidence` off an LLM raw value with type-safe defensive parsing.
+ *  Returns an empty object when the LLM omitted the field or returned a bad shape;
+ *  per-field consumers then fall back to the overall `confidence`. */
+function readLlmFieldConfidence(raw: unknown): Record<string, number> {
+	const c = (raw as { _confidence?: unknown })._confidence;
+	if (!c || typeof c !== 'object' || Array.isArray(c)) return {};
+	const out: Record<string, number> = {};
+	for (const [k, v] of Object.entries(c as Record<string, unknown>)) {
+		if (typeof v === 'number' && v >= 0 && v <= 1 && Number.isFinite(v)) out[k] = v;
+	}
+	return out;
+}
+
+/** Build the projected per-field confidence map by remapping LLM-camelCase keys to CommonFields-
+ *  camelCase keys via a static mapping table. Keys not present in the LLM map are omitted (not
+ *  defaulted to 0) so the caller can distinguish "LLM didn't report" from "LLM reported 0". */
+function projectFieldConfidence(
+	llmConfidence: Record<string, number>,
+	mapping: Partial<Record<keyof CommonFields, string>>
+): CommonFieldConfidence {
+	const out: CommonFieldConfidence = {};
+	for (const [commonKey, llmKey] of Object.entries(mapping) as Array<
+		[keyof CommonFields, string]
+	>) {
+		const v = llmConfidence[llmKey];
+		if (typeof v === 'number') out[commonKey] = v;
+	}
+	return out;
+}
+
 function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 	if (docType === 'invoice') {
 		return {
 			systemPrompt: INVOICE_SYSTEM_PROMPT,
 			schema: invoiceSchemaV1 as ZodType<unknown>,
 			schemaName: 'finance.invoice-extraction',
-			mapToFields: (raw, overall) => {
+			mapToFields: (raw) => {
 				const v = raw as InvoiceLlmV1;
 				const fields: CommonFields = {
 					documentNumber: v.invoiceNumber ?? null,
 					counterpartyName: v.supplierName ?? null,
-					currency: v.currency?.toUpperCase() ?? null,
-					totalAmount: v.totalAmount ?? null,
-					gstAmount: v.gstAmount ?? 0,
+					currency: v.currency ? v.currency.toUpperCase() : null,
+					totalAmount: v.totalAmount,
+					gstAmount: v.gstAmount,
 					issueDate: v.issueDate ?? null,
-					dueDate: v.dueDate ?? v.issueDate ?? null,
+					dueDate: v.dueDate ?? null,
 					serviceName: v.serviceName ?? null,
 					period: v.period ?? null
 				};
-				return hasAnyExtractedValue(fields) ? { fields, fieldConfidence: perFieldConfidence(fields, overall) } : null;
+				if (!hasAnyExtractedValue(fields)) return null;
+				const fieldConfidence = projectFieldConfidence(readLlmFieldConfidence(raw), {
+					documentNumber: 'invoiceNumber',
+					counterpartyName: 'supplierName',
+					currency: 'currency',
+					totalAmount: 'totalAmount',
+					gstAmount: 'gstAmount',
+					issueDate: 'issueDate',
+					dueDate: 'dueDate',
+					serviceName: 'serviceName',
+					period: 'period'
+				});
+				return { fields, fieldConfidence };
 			},
 			confidenceFromValue: (raw) => (raw as InvoiceLlmV1).confidence
 		};
@@ -184,21 +227,36 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 			systemPrompt: RECEIPT_SYSTEM_PROMPT,
 			schema: receiptSchemaV1 as ZodType<unknown>,
 			schemaName: 'finance.receipt-extraction',
-			mapToFields: (raw, overall) => {
+			mapToFields: (raw) => {
 				const v = raw as ReceiptLlmV1;
 				const fields: CommonFields = {
-					documentNumber: v.receiptNumber ?? (v.date ? `RCT-${v.date}` : null),
+					documentNumber: v.receiptNumber ?? null,
 					counterpartyName: v.vendor ?? null,
-					currency: v.currency?.toUpperCase() ?? null,
-					totalAmount: v.totalAmount ?? null,
-					gstAmount: v.gstAmount ?? 0,
+					currency: v.currency ? v.currency.toUpperCase() : null,
+					totalAmount: v.totalAmount,
+					gstAmount: v.gstAmount,
 					issueDate: v.date ?? null,
 					dueDate: v.date ?? null,
 					recipientName: v.recipientName ?? null,
 					destination: v.destination ?? null,
 					trackingNumber: v.trackingNumber ?? null
 				};
-				return hasAnyExtractedValue(fields) ? { fields, fieldConfidence: perFieldConfidence(fields, overall) } : null;
+				if (!hasAnyExtractedValue(fields)) return null;
+				const llmConf = readLlmFieldConfidence(raw);
+				const fieldConfidence = projectFieldConfidence(llmConf, {
+					documentNumber: 'receiptNumber',
+					counterpartyName: 'vendor',
+					currency: 'currency',
+					totalAmount: 'totalAmount',
+					gstAmount: 'gstAmount',
+					issueDate: 'date',
+					recipientName: 'recipientName',
+					destination: 'destination',
+					trackingNumber: 'trackingNumber'
+				});
+				// dueDate mirrors `date`, so reuse the date confidence when the LLM provided one.
+				if (typeof llmConf.date === 'number') fieldConfidence.dueDate = llmConf.date;
+				return { fields, fieldConfidence };
 			},
 			confidenceFromValue: (raw) => (raw as ReceiptLlmV1).confidence
 		};
@@ -208,7 +266,7 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 			systemPrompt: PO_SYSTEM_PROMPT,
 			schema: poSchemaV1 as ZodType<unknown>,
 			schemaName: 'finance.po-extraction',
-			mapToFields: (raw, overall) => {
+			mapToFields: (raw) => {
 				const v = raw as PoLlmV1;
 				const fields: CommonFields = {
 					documentNumber: v.poNumber ?? null,
@@ -216,13 +274,25 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					clientName: v.clientName ?? null,
 					currency: v.currency?.toUpperCase() ?? null,
 					totalAmount: v.totalAmount ?? null,
-					gstAmount: 0,
 					issueDate: v.date ?? null,
 					dueDate: v.date ?? null,
 					description: v.description ?? null,
 					lineItems: v.lineItems ?? null
 				};
-				return hasAnyExtractedValue(fields) ? { fields, fieldConfidence: perFieldConfidence(fields, overall) } : null;
+				if (!hasAnyExtractedValue(fields)) return null;
+				const llmConf = readLlmFieldConfidence(raw);
+				const fieldConfidence = projectFieldConfidence(llmConf, {
+					documentNumber: 'poNumber',
+					counterpartyName: 'supplierName',
+					clientName: 'clientName',
+					currency: 'currency',
+					totalAmount: 'totalAmount',
+					issueDate: 'date',
+					description: 'description',
+					lineItems: 'lineItems'
+				});
+				if (typeof llmConf.date === 'number') fieldConfidence.dueDate = llmConf.date;
+				return { fields, fieldConfidence };
 			},
 			confidenceFromValue: (raw) => (raw as PoLlmV1).confidence
 		};
@@ -232,20 +302,35 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 			systemPrompt: CUSTOMER_INVOICE_SYSTEM_PROMPT,
 			schema: customerInvoiceSchemaV1 as ZodType<unknown>,
 			schemaName: 'finance.customer-invoice-extraction',
-			mapToFields: (raw, overall) => {
+			mapToFields: (raw) => {
 				const v = raw as CustomerInvoiceLlmV1;
 				const fields: CommonFields = {
 					documentNumber: v.invoiceNumber ?? null,
 					counterpartyName: v.customerName ?? null,
-					currency: v.currency?.toUpperCase() ?? null,
-					totalAmount: v.totalAmount ?? null,
-					gstAmount: v.gstAmount ?? 0,
+					clientName: v.customerName ?? null,
+					currency: v.currency ? v.currency.toUpperCase() : null,
+					totalAmount: v.totalAmount,
+					gstAmount: v.gstAmount,
 					issueDate: v.invoiceDate ?? null,
-					dueDate: v.invoiceDueDate ?? v.invoiceDate ?? null,
+					dueDate: v.invoiceDueDate ?? null,
 					subtotal: v.subtotal ?? null,
 					poNumber: v.poNumber ?? null
 				};
-				return hasAnyExtractedValue(fields) ? { fields, fieldConfidence: perFieldConfidence(fields, overall) } : null;
+				if (!hasAnyExtractedValue(fields)) return null;
+				const llmConf = readLlmFieldConfidence(raw);
+				const fieldConfidence = projectFieldConfidence(llmConf, {
+					documentNumber: 'invoiceNumber',
+					counterpartyName: 'customerName',
+					clientName: 'customerName',
+					currency: 'currency',
+					totalAmount: 'totalAmount',
+					gstAmount: 'gstAmount',
+					issueDate: 'invoiceDate',
+					dueDate: 'invoiceDueDate',
+					subtotal: 'subtotal',
+					poNumber: 'poNumber'
+				});
+				return { fields, fieldConfidence };
 			},
 			confidenceFromValue: (raw) => (raw as CustomerInvoiceLlmV1).confidence
 		};
@@ -255,7 +340,7 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 			systemPrompt: CONTRACT_SYSTEM_PROMPT,
 			schema: contractSchemaV1 as ZodType<unknown>,
 			schemaName: 'finance.contract-extraction',
-			mapToFields: (raw, overall) => {
+			mapToFields: (raw) => {
 				const v = raw as ContractLlmV1;
 				const fields: CommonFields = {
 					documentNumber: v.contractNumber ?? null,
@@ -263,13 +348,24 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					clientName: v.clientName ?? null,
 					currency: v.currency?.toUpperCase() ?? null,
 					totalAmount: v.amount ?? null,
-					gstAmount: 0,
 					issueDate: v.effectiveDate ?? null,
 					dueDate: v.expiryDate ?? null,
 					description: v.scope ?? null,
 					paymentTerms: v.paymentTerms ?? null
 				};
-				return hasAnyExtractedValue(fields) ? { fields, fieldConfidence: perFieldConfidence(fields, overall) } : null;
+				if (!hasAnyExtractedValue(fields)) return null;
+				const fieldConfidence = projectFieldConfidence(readLlmFieldConfidence(raw), {
+					documentNumber: 'contractNumber',
+					counterpartyName: 'clientName',
+					clientName: 'clientName',
+					currency: 'currency',
+					totalAmount: 'amount',
+					issueDate: 'effectiveDate',
+					dueDate: 'expiryDate',
+					description: 'scope',
+					paymentTerms: 'paymentTerms'
+				});
+				return { fields, fieldConfidence };
 			},
 			confidenceFromValue: (raw) => (raw as ContractLlmV1).confidence
 		};
@@ -279,7 +375,7 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 			systemPrompt: QUOTATION_SYSTEM_PROMPT,
 			schema: quotationSchemaV1 as ZodType<unknown>,
 			schemaName: 'finance.quotation-extraction',
-			mapToFields: (raw, overall) => {
+			mapToFields: (raw) => {
 				const v = raw as QuotationLlmV1;
 				const fields: CommonFields = {
 					documentNumber: v.quotationNumber ?? null,
@@ -287,17 +383,55 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					clientName: v.clientName ?? null,
 					currency: v.currency?.toUpperCase() ?? null,
 					totalAmount: v.amount ?? null,
-					gstAmount: 0,
 					issueDate: v.date ?? null,
 					validUntil: v.validUntil ?? null,
 					lineItems: v.lineItems ?? null
 				};
-				return hasAnyExtractedValue(fields) ? { fields, fieldConfidence: perFieldConfidence(fields, overall) } : null;
+				if (!hasAnyExtractedValue(fields)) return null;
+				const fieldConfidence = projectFieldConfidence(readLlmFieldConfidence(raw), {
+					documentNumber: 'quotationNumber',
+					counterpartyName: 'clientName',
+					clientName: 'clientName',
+					currency: 'currency',
+					totalAmount: 'amount',
+					issueDate: 'date',
+					validUntil: 'validUntil',
+					lineItems: 'lineItems'
+				});
+				return { fields, fieldConfidence };
 			},
 			confidenceFromValue: (raw) => (raw as QuotationLlmV1).confidence
 		};
 	}
 	return null;
+}
+
+interface LlmExtractionResult {
+	fields: CommonFields;
+	fieldConfidence: CommonFieldConfidence;
+	/** Overall doc-level confidence — mean of populated per-field confidences, falling back to
+	 *  the LLM's self-reported overall when no per-field signal is available. */
+	confidence: number;
+	provider: ExtractionProvider;
+	quotes: Record<string, string>;
+}
+
+/** Mean of the per-field confidences for keys whose value is actually present (non-null /
+ *  non-empty). Returns null when nothing usable was extracted — caller falls back to the LLM's
+ *  self-reported overall confidence. */
+function aggregateConfidence(
+	fields: CommonFields,
+	fieldConfidence: CommonFieldConfidence
+): number | null {
+	const values: number[] = [];
+	for (const [k, v] of Object.entries(fields) as Array<[keyof CommonFields, unknown]>) {
+		const present = Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined && v !== '';
+		if (!present) continue;
+		const c = fieldConfidence[k];
+		if (typeof c === 'number') values.push(c);
+	}
+	if (values.length === 0) return null;
+	return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
 async function tryLlmExtraction(
@@ -306,7 +440,7 @@ async function tryLlmExtraction(
 	ctx: CapabilityContextWithEnv,
 	categoryId: string,
 	documentId: string
-): Promise<{ fields: CommonFields; confidence: number; fieldConfidence: Record<string, number>; provider: ExtractionProvider; quotes: Record<string, string> } | null> {
+): Promise<LlmExtractionResult | null> {
 	if (!ctx.env) return null;
 	const cfg = configForDocType(docType);
 	if (!cfg) return null;
@@ -340,12 +474,15 @@ async function tryLlmExtraction(
 		return null;
 	}
 	const raw = result.result.value;
-	const confidence = cfg.confidenceFromValue(raw) ?? 0.8;
-	const mapped = cfg.mapToFields(raw, confidence);
+	const mapped = cfg.mapToFields(raw);
 	if (!mapped) return null;
+	const overallFromLlm = cfg.confidenceFromValue(raw);
+	const confidence =
+		aggregateConfidence(mapped.fields, mapped.fieldConfidence) ?? overallFromLlm ?? 0.8;
 	const provider: ExtractionProvider =
 		result.result.meta.providerId === 'workers_ai' ? 'workers_ai' : 'external_api';
 
+	// Extract verbatim source quotes from the optional _quotes key.
 	const rawQuotes = (raw as Record<string, unknown>)._quotes;
 	const quotes: Record<string, string> = {};
 	if (rawQuotes && typeof rawQuotes === 'object' && !Array.isArray(rawQuotes)) {
@@ -354,82 +491,12 @@ async function tryLlmExtraction(
 		}
 	}
 
-	return { fields: mapped.fields, confidence, fieldConfidence: mapped.fieldConfidence, provider, quotes };
-}
-
-async function tryVisionExtraction(
-	imageBytes: Uint8Array,
-	mimeType: string,
-	docType: CategoryDocType,
-	ctx: CapabilityContextWithEnv,
-	categoryId: string,
-	documentId: string,
-	fileName?: string
-): Promise<{
-	fields: CommonFields | null;
-	confidence: number;
-	fieldConfidence: Record<string, number>;
-	provider: ExtractionProvider;
-	quotes: Record<string, string>;
-	rawJson?: unknown;
-	error?: string;
-} | null> {
-	if (!ctx.env) return null;
-	const cfg = configForDocType(docType);
-	if (!cfg) return null;
-
-	const result = await runWorkersVisionJson<unknown>(ctx.env, {
-		imageBytes,
-		mimeType,
-		schema: cfg.schema,
-		maxTokens: 2048,
-		systemPrompt: `${cfg.systemPrompt}
-
-IMAGE MODE:
-- You are looking at the original document image, not an OCR transcription.
-- Read only visible text in the image and extract the requested fields.
-- Do not transcribe the full document.
-- If a field is not visible or is ambiguous, return null.`,
-		userPrompt: `Filename: ${fileName ?? 'unavailable'}
-Document id: ${documentId}
-Category id: ${categoryId}
-
-Extract the category-specific fields directly from this image.`
-	});
-
-	if (!result.ok) {
-		console.warn(
-			`[extract-document-fields] vision JSON call failed for ${docType}/${documentId}: ${result.error}`
-		);
-		return {
-			fields: null,
-			confidence: 0,
-			fieldConfidence: {},
-			provider: 'none',
-			quotes: {},
-			rawJson: result.rawJson,
-			error: result.error
-		};
-	}
-
-	const confidence = cfg.confidenceFromValue(result.value) ?? 0.8;
-	const mapped = cfg.mapToFields(result.value, confidence);
-	const rawQuotes = (result.value as Record<string, unknown>)._quotes;
-	const quotes: Record<string, string> = {};
-	if (rawQuotes && typeof rawQuotes === 'object' && !Array.isArray(rawQuotes)) {
-		for (const [k, v] of Object.entries(rawQuotes as Record<string, unknown>)) {
-			if (typeof v === 'string' && v.trim().length > 0) quotes[k] = v.trim();
-		}
-	}
-
 	return {
-		fields: mapped?.fields ?? null,
+		fields: mapped.fields,
+		fieldConfidence: mapped.fieldConfidence,
 		confidence,
-		fieldConfidence: mapped?.fieldConfidence ?? {},
-		provider: 'workers_ai',
-		quotes,
-		rawJson: result.rawJson,
-		error: mapped ? undefined : 'Vision JSON passed schema, but required business fields were missing for this category.'
+		provider,
+		quotes
 	};
 }
 
@@ -444,44 +511,6 @@ function buildEvidenceForFields(provider: ExtractionProvider, fields: Record<str
 		refId: `${provider}://${field}`,
 		summary: `Extracted ${field} via ${provider}`
 	}));
-}
-
-function safeJsonPreview(value: unknown): string {
-	if (value === undefined) return 'undefined';
-	try {
-		return JSON.stringify(value).slice(0, 2000);
-	} catch {
-		return '[unserializable]';
-	}
-}
-
-function buildVisionDebugEvidence(input: {
-	provider: ExtractionProvider;
-	categoryId: string;
-	docType: CategoryDocType;
-	rawJson?: unknown;
-	error?: string;
-}): FinanceEvidence[] {
-	const evidence: FinanceEvidence[] = [
-		{
-			type: 'ocr_result',
-			refId: `${input.provider}://vision-json/${input.categoryId}`,
-			summary: `Vision field extraction result for ${input.docType ?? 'unknown'} / ${input.categoryId}${input.error ? ` failed: ${input.error}` : ' succeeded'}.`
-		}
-	];
-	if (input.rawJson !== undefined) {
-		evidence.push({
-			type: 'ocr_result',
-			refId: `${input.provider}://vision-json/${input.categoryId}/raw`,
-			summary: `Raw vision JSON: ${safeJsonPreview(input.rawJson)}`
-		});
-	}
-	return evidence;
-}
-
-function setIfValue(output: Record<string, unknown>, key: string, value: unknown) {
-	if (value === null || value === undefined || value === '') return;
-	output[key] = value;
 }
 
 function categoryValue(key: string, fields: CommonFields): unknown {
@@ -543,30 +572,81 @@ function categoryValue(key: string, fields: CommonFields): unknown {
 	}
 }
 
-function projectForCategory(fields: CommonFields, category: CategoryDefinition | null): Record<string, unknown> {
-	if (!category) return { ...fields };
-	const output: Record<string, unknown> = {};
-	for (const key of category.llmFields) setIfValue(output, key, categoryValue(key, fields));
-	return output;
+interface ProjectedExtraction {
+	fields: Record<string, unknown>;
+	fieldConfidence: Record<string, number>;
+}
+
+/** Projects both `fields` and `fieldConfidence` in lockstep using the same `categoryValue`
+ *  reverse-mapping. Confidence is only emitted for keys whose value is actually present —
+ *  so a null/empty field never carries a stale confidence number from the LLM. */
+function projectForCategory(
+	fields: CommonFields,
+	fieldConfidence: CommonFieldConfidence,
+	category: CategoryDefinition | null
+): ProjectedExtraction {
+	const outFields: Record<string, unknown> = {};
+	const outConf: Record<string, number> = {};
+	// CommonFieldConfidence has the same key shape as CommonFields (just number-valued), so the
+	// same `categoryValue` lookup works for both maps when cast.
+	const confAsFields = fieldConfidence as unknown as CommonFields;
+	if (!category) {
+		for (const [k, v] of Object.entries(fields)) {
+			if (v === null || v === undefined || v === '') continue;
+			outFields[k] = v;
+			const c = fieldConfidence[k as keyof CommonFields];
+			if (typeof c === 'number') outConf[k] = c;
+		}
+		return { fields: outFields, fieldConfidence: outConf };
+	}
+	for (const key of category.llmFields) {
+		const v = categoryValue(key, fields);
+		if (v === null || v === undefined || v === '') continue;
+		outFields[key] = v;
+		const c = categoryValue(key, confAsFields);
+		if (typeof c === 'number') outConf[key] = c;
+	}
+	return { fields: outFields, fieldConfidence: outConf };
 }
 
 function outputFor(
 	fields: CommonFields,
+	fieldConfidence: CommonFieldConfidence,
 	category: CategoryDefinition | null,
 	outputShape: ExtractDocumentFieldsInput['outputShape']
-): Record<string, unknown> {
+): ProjectedExtraction {
 	if (outputShape === 'legacy') {
-		return {
-			documentNumber: fields.documentNumber,
-			counterpartyName: fields.counterpartyName,
-			currency: fields.currency,
-			totalAmount: fields.totalAmount,
-			gstAmount: fields.gstAmount,
-			issueDate: fields.issueDate,
-			dueDate: fields.dueDate
-		};
+		const legacyKeys: Array<keyof CommonFields> = [
+			'documentNumber',
+			'counterpartyName',
+			'currency',
+			'totalAmount',
+			'gstAmount',
+			'issueDate',
+			'dueDate'
+		];
+		const outFields: Record<string, unknown> = {};
+		const outConf: Record<string, number> = {};
+		for (const k of legacyKeys) {
+			const v = fields[k] ?? null;
+			outFields[k] = v;
+			const c = fieldConfidence[k];
+			if (typeof c === 'number' && v !== null && v !== undefined && v !== '') outConf[k] = c;
+		}
+		return { fields: outFields, fieldConfidence: outConf };
 	}
-	return projectForCategory(fields, category);
+	return projectForCategory(fields, fieldConfidence, category);
+}
+
+/** Synthesize a per-field confidence map by stamping a single scalar onto every CommonFields key
+ *  that has a present value. Used by the fixture/mock path (no per-field signal available). */
+function fanOutConfidence(fields: CommonFields, confidence: number): CommonFieldConfidence {
+	const out: CommonFieldConfidence = {};
+	for (const [k, v] of Object.entries(fields) as Array<[keyof CommonFields, unknown]>) {
+		const present = Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined && v !== '';
+		if (present) out[k] = confidence;
+	}
+	return out;
 }
 
 function resolveDocType(input: ExtractDocumentFieldsInput): {
@@ -593,69 +673,24 @@ export const extractDocumentFieldsCapability: FinanceCapability<
 		const ctxWithEnv = ctx as CapabilityContextWithEnv;
 		const { docType, category } = resolveDocType(input);
 
-		if (input.imageBytes && input.mimeType && ctxWithEnv.env && !ctxWithEnv.useMock) {
-			const categoryIdRef = category?.id ?? input.categoryId ?? 'unknown';
-			const llm = await tryVisionExtraction(
-				input.imageBytes,
-				input.mimeType,
-				docType,
-				ctxWithEnv,
-				categoryIdRef,
-				input.documentId,
-				input.fileName
-			);
-			if (llm) {
-				const debugEvidence = buildVisionDebugEvidence({
-					provider: llm.provider,
-					categoryId: categoryIdRef,
-					docType,
-					rawJson: llm.rawJson,
-					error: llm.error
-				});
-				if (!llm.fields) {
-					console.warn(
-						`[extract-document-fields] vision extraction returned unusable fields for ${docType}/${input.documentId} (categoryId=${input.categoryId}): ${llm.error}`
-					);
-					return {
-						fields: {},
-						confidence: 0,
-						fieldConfidence: {},
-						evidence: debugEvidence,
-						provider: 'none'
-					};
-				}
-				const fields = outputFor(llm.fields, category, input.outputShape);
-				return {
-					fields,
-					confidence: llm.confidence,
-					fieldConfidence: llm.fieldConfidence,
-					evidence: [...buildEvidenceForFields(llm.provider, fields), ...debugEvidence],
-					sourceQuotes: Object.keys(llm.quotes).length > 0 ? llm.quotes : undefined,
-					provider: llm.provider
-				};
-			}
-			console.warn(
-				`[extract-document-fields] vision extraction produced no usable fields for ${docType}/${input.documentId} (categoryId=${input.categoryId})`
-			);
-			return {
-				fields: {},
-				confidence: 0,
-				evidence: [],
-				provider: 'none'
-			};
-		}
-
 		// 1. No usable text, or a direct unit/demo call without runtime env → fixture mock fallback.
 		if (!input.text || input.text.length < MIN_TEXT_LENGTH_FOR_REAL_EXTRACT || !ctxWithEnv.env) {
 			const fixture = pickFixture({ documentId: input.documentId, fileName: input.fileName });
-			const fields = outputFor(fixture.fields, category, input.outputShape);
+			// Mock has no per-field signal — fan the scalar fixture confidence across every populated key.
+			const projected = outputFor(
+				fixture.fields,
+				fanOutConfidence(fixture.fields, fixture.confidence),
+				category,
+				input.outputShape
+			);
 			return {
-				fields,
+				fields: projected.fields,
 				confidence: fixture.confidence,
+				fieldConfidence: projected.fieldConfidence,
 				evidence:
 					input.outputShape === 'legacy'
 						? buildEvidence(fixture.fields)
-						: buildEvidenceForFields('mock-v1', fields),
+						: buildEvidenceForFields('mock-v1', projected.fields),
 				provider: 'mock-v1'
 			};
 		}
@@ -707,12 +742,12 @@ export const extractDocumentFieldsCapability: FinanceCapability<
 		}
 
 		if (llm) {
-			const fields = outputFor(llm.fields, category, input.outputShape);
+			const projected = outputFor(llm.fields, llm.fieldConfidence, category, input.outputShape);
 			return {
-				fields,
+				fields: projected.fields,
 				confidence: llm.confidence,
-				fieldConfidence: llm.fieldConfidence,
-				evidence: buildEvidenceForFields(llm.provider, fields),
+				fieldConfidence: projected.fieldConfidence,
+				evidence: buildEvidenceForFields(llm.provider, projected.fields),
 				sourceQuotes: Object.keys(llm.quotes).length > 0 ? llm.quotes : undefined,
 				provider: llm.provider
 			};
@@ -723,10 +758,10 @@ export const extractDocumentFieldsCapability: FinanceCapability<
 		console.warn(
 			`[extract-document-fields] extraction produced no usable fields for ${docType}/${input.documentId} (categoryId=${input.categoryId})`
 		);
-		const fields: Record<string, unknown> = {};
 		return {
-			fields,
+			fields: {},
 			confidence: 0,
+			fieldConfidence: {},
 			evidence: [],
 			provider: 'none'
 		};

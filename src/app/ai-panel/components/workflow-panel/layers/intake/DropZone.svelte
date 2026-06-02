@@ -3,6 +3,7 @@
 	import { UploadCloud, FileText, Loader2, AlertTriangle } from 'lucide-svelte';
 	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 	import { panel } from '$app-layer/ai-panel/workflow/panel.svelte';
+	import { preprocessImageForOcr } from '$lib/utils/preprocess-image';
 
 	let fileInput: HTMLInputElement | null = $state(null);
 	let dragOver = $state(false);
@@ -11,7 +12,7 @@
 	let error = $state('');
 
 	// ---------------------------------------------------------------------------
-	// Client-side text extraction ‚Ä?pdfjs for PDF, server-side vision for image.
+	// Client-side text extraction ÔøΩ?pdfjs for PDF, server-side vision for image.
 	// Same pattern as finance/doc-hub/upload/project/+page.svelte; kept inline
 	// because Phase 1B only needs it in this one place (ÂÖàÂÖ∑‰ΩìÂêéÊäΩË±°).
 	// ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@
 		return payload.data.text;
 	}
 
-	async function extractRawText(file: File): Promise<string> {
+	async function extractRawText(file: File): Promise<{ rawText: string; processed?: File }> {
 		const mime = file.type.toLowerCase();
 		const name = file.name.toLowerCase();
 		const isPdf = mime === 'application/pdf' || name.endsWith('.pdf');
@@ -98,25 +99,29 @@
 			mime.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(name);
 
 		if (isImage) {
-			return await runWorkersVision(file, file.name);
+			const processed = await preprocessImageForOcr(file);
+			const rawText = await runWorkersVision(processed, processed.name);
+			return { rawText, processed };
 		}
 		if (isPdf) {
 			const text = await extractPdfText(file);
-			if (text.trim().length >= 48) return text;
+			if (text.trim().length >= 48) return { rawText: text };
 			// Scanned PDF fallback: rasterize first page + vision OCR
 			const jpeg = await renderPdfFirstPageJpeg(file);
 			if (jpeg) {
 				const base = name.replace(/\.pdf$/i, '') || 'document';
-				return await runWorkersVision(jpeg, `${base}-p1.jpg`);
+				const processed = await preprocessImageForOcr(jpeg);
+				const rawText = await runWorkersVision(processed, `${base}-p1.jpg`);
+				return { rawText, processed };
 			}
-			return text;
+			return { rawText: text };
 		}
 		// Fallback: let server try as PDF (best-effort)
-		return '';
+		return { rawText: '' };
 	}
 
 	// ---------------------------------------------------------------------------
-	// Presigned upload ‚Ä?R2 direct PUT. Runs in parallel with text extraction
+	// Presigned upload ÔøΩ?R2 direct PUT. Runs in parallel with text extraction
 	// so the round-trip is bounded by the slower of the two.
 	// ---------------------------------------------------------------------------
 	async function uploadToR2(file: File): Promise<{ key: string }> {
@@ -127,7 +132,7 @@
 			body: JSON.stringify({
 				fileName: file.name,
 				contentType: file.type || 'application/octet-stream',
-				// Panel intake isn't project-scoped at upload time ‚Ä?the user picks
+				// Panel intake isn't project-scoped at upload time ÔøΩ?the user picks
 				// project in step 3. 'intake' bucket keeps R2 keys namespaced.
 				projectId: 'intake',
 				entityType: 'document',
@@ -164,16 +169,24 @@
 
 		try {
 			// Extract text + upload in parallel
-			const [rawText, uploadResult] = await Promise.all([
-				extractRawText(file).catch(() => ''),
+			const [extract, uploadResult] = await Promise.all([
+				extractRawText(file).catch(() => ({ rawText: '' as string, processed: undefined as File | undefined })),
 				uploadToR2(file)
 			]);
+
+			// Expose the preprocessed image via blob URL so the FilePreview can
+			// offer an "Original / Processed" toggle for visual QA. The URL is
+			// retained for the page lifetime (auto-revoked on unload).
+			const processedImageUrl = extract.processed
+				? URL.createObjectURL(extract.processed)
+				: undefined;
 
 			panel.patchState({
 				fileKey: uploadResult.key,
 				fileName: file.name,
 				fileType: file.type || 'application/octet-stream',
-				rawText
+				rawText: extract.rawText,
+				processedImageUrl
 			});
 
 			// Step 2 will kick off the classify call immediately on mount.
@@ -269,7 +282,7 @@
 
 		<span class="drop-heading">
 			{#if stage === 'reading'}
-				Reading {fileName}‚Ä?			{:else if stage === 'error'}
+				Reading {fileName}ÔøΩ?			{:else if stage === 'error'}
 				Couldn't read that file
 			{:else}
 				Drop a file here
@@ -282,13 +295,13 @@
 			{:else if hintLabel}
 				I'm expecting a <b>{hintLabel}</b>. PDF or photo works.
 			{:else}
-				PDF, photo, or screenshot ‚Ä?invoice, receipt, contract, quote.
+				PDF, photo, or screenshot ÔøΩ?invoice, receipt, contract, quote.
 			{/if}
 		</span>
 
 		<span class="drop-footnote">
 			{#if stage === 'idle' && !fileName}
-				Click or drop ‚Ä?I figure out the rest
+				Click or drop ÔøΩ?I figure out the rest
 			{:else if stage === 'reading'}
 				Uploading and extracting text
 			{/if}
@@ -298,7 +311,7 @@
 	<input
 		bind:this={fileInput}
 		type="file"
-		accept="application/pdf,image/png,image/jpeg,image/webp"
+		accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff"
 		onchange={onInputChange}
 		hidden
 	/>

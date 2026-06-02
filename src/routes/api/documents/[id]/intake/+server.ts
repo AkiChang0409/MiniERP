@@ -79,17 +79,6 @@ export const GET: RequestHandler = async (event) => {
 				}
 			: null,
 		classification: artifact.classification ?? null,
-		suggestedCategoryId: artifact.suggestedCategoryId ?? null,
-		suggestedFields: artifact.suggestedFields ?? null,
-		fieldExtraction: artifact.suggestedFields
-			? {
-					categoryId: artifact.suggestedFields.categoryId,
-					fieldCount: Object.keys(artifact.suggestedFields.fields ?? {}).length,
-					hasFields: Object.keys(artifact.suggestedFields.fields ?? {}).length > 0,
-					extractedAt: artifact.suggestedFields.extractedAt,
-					evidence: artifact.suggestedFields.evidence ?? null
-				}
-			: null,
 		securityFlags: artifact.securityFlags ?? [],
 		updatedAt: artifact.updatedAt
 	});

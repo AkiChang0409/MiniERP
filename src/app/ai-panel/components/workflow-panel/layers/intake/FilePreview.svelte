@@ -7,11 +7,18 @@
 		fileKey,
 		fileName,
 		fileType,
+		processedImageUrl = undefined,
 		collapsible = false
 	}: {
 		fileKey: string | undefined;
 		fileName: string | undefined;
 		fileType: string | undefined;
+		/**
+		 * Object URL of the preprocessed image (after EXIF correction,
+		 * resize, perspective warp, sharpening). When provided, the preview
+		 * renders an Original / Processed toggle for visual QA.
+		 */
+		processedImageUrl?: string | undefined;
 		/** When true, renders a collapse toggle (used in half-mode). */
 		collapsible?: boolean;
 	} = $props();
@@ -21,8 +28,12 @@
 	let error = $state('');
 	let collapsed = $state(false);
 	let zoom = $state(1);
+	/** Toggle between the original (R2) and preprocessed (in-memory blob) view. */
+	let view = $state<'original' | 'processed'>('original');
 
 	const fileUrl = $derived(fileKey ? `/api/files?key=${encodeURIComponent(fileKey)}` : null);
+	const hasProcessed = $derived(Boolean(processedImageUrl));
+	const showProcessed = $derived(view === 'processed' && hasProcessed);
 	const isImage = $derived.by(() => {
 		if (!fileType && !fileName) return false;
 		const mime = (fileType ?? '').toLowerCase();
@@ -62,9 +73,14 @@
 	}
 
 	$effect(() => {
-		if (!fileUrl || collapsed) return;
+		if (collapsed) return;
 		loading = true;
 		error = '';
+		if (showProcessed) {
+			// <img onload> for the processed blob URL sets loading = false
+			return;
+		}
+		if (!fileUrl) return;
 		if (isPdf) {
 			// Wait one frame so <canvas> is mounted.
 			requestAnimationFrame(() => {
@@ -111,6 +127,32 @@
 			<span class="preview-name" title={fileName}>{fileName ?? 'Preview'}</span>
 		</div>
 		<div class="preview-ctrls">
+			{#if !collapsed && hasProcessed}
+				<div class="view-toggle" role="tablist" aria-label="Preview source">
+					<button
+						type="button"
+						class="ctrl seg"
+						class:is-active={view === 'original'}
+						onclick={() => (view = 'original')}
+						title="Show original upload"
+						role="tab"
+						aria-selected={view === 'original'}
+					>
+						<span class="z-text">Original</span>
+					</button>
+					<button
+						type="button"
+						class="ctrl seg"
+						class:is-active={view === 'processed'}
+						onclick={() => (view = 'processed')}
+						title="Show preprocessed image sent to OCR"
+						role="tab"
+						aria-selected={view === 'processed'}
+					>
+						<span class="z-text">Processed</span>
+					</button>
+				</div>
+			{/if}
 			{#if !collapsed && fileKey}
 				<button type="button" class="ctrl" onclick={zoomOut} title="Zoom out">
 					<span class="z-text">−</span>
@@ -157,7 +199,15 @@
 				{/if}
 				<div class="preview-scroll">
 					<div class="preview-scale" style={`--zoom: ${zoom};`}>
-						{#if isPdf}
+						{#if showProcessed}
+							<img
+								class="preview-img"
+								src={processedImageUrl}
+								alt={`${fileName ?? 'document'} (preprocessed)`}
+								onload={onImageLoad}
+								onerror={onImageError}
+							/>
+						{:else if isPdf}
 							<canvas bind:this={canvasEl} class="preview-canvas"></canvas>
 						{:else if isImage}
 							<img
@@ -224,7 +274,32 @@
 	}
 	.preview-ctrls {
 		display: inline-flex;
-		gap: 3px;
+		align-items: center;
+		gap: 6px;
+	}
+	.view-toggle {
+		display: inline-flex;
+		gap: 1px;
+		padding: 2px;
+		background: var(--panel-surface-deep);
+		border: 1px solid var(--panel-border);
+		border-radius: 8px;
+	}
+	.ctrl.seg {
+		min-width: 64px;
+		height: 18px;
+		padding: 0 8px;
+		border-radius: 5px;
+		font-size: 10.5px;
+		letter-spacing: 0.04em;
+	}
+	.ctrl.seg.is-active {
+		background: var(--panel-gold-soft);
+		color: var(--panel-gold-bright);
+		border-color: var(--panel-gold);
+	}
+	.ctrl.seg:not(.is-active):hover {
+		background: rgba(234, 188, 60, 0.04);
 	}
 	.ctrl {
 		display: inline-flex;

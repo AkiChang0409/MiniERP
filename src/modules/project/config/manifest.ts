@@ -19,9 +19,9 @@ export const projectManifestV2: ModuleManifestV2 = {
 			failurePolicy: 'block'
 		},
 		{
-			moduleId: 'business-partner',
+			moduleId: 'sales-crm',
 			strength: 'strong',
-			description: 'Project records need customer and partner references',
+			description: 'Project records need customer references',
 			failurePolicy: 'block'
 		}
 	],

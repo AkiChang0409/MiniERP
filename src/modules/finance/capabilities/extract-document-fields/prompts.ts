@@ -8,7 +8,7 @@
  * corresponding schema in `schemas.ts` expects.
  */
 
-export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v4';
+export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v5';
 
 const SECURITY_FOOTER = `
 SECURITY:
@@ -20,6 +20,17 @@ SECURITY:
 const QUOTES_RULE = `
 SOURCE QUOTES:
 - _quotes: for every field above where you found a non-null value, copy the shortest verbatim text snippet (≤ 100 chars) from the document that you read to determine that value. Use the same key as the parent field. Omit keys whose values are null. Do not paraphrase — copy the exact characters as they appear in the OCR text.`;
+
+const CONFIDENCE_RULE = `
+PER-FIELD CONFIDENCE:
+- _confidence: for every field above where you found a non-null value, include a number between 0 and 1 indicating how confident you are in THAT specific value. Use the same key as the parent field. Omit keys whose values are null.
+- Calibration guide:
+  - 0.95–1.00: value is printed verbatim next to an unambiguous label (e.g. "Invoice No: INV-001" → invoiceNumber = 0.99).
+  - 0.80–0.94: value is clearly present but required light interpretation (date reformatting, currency mapping, picking the final total among several).
+  - 0.60–0.79: value is inferred from context (e.g. supplier from letterhead/logo with no explicit "Supplier:" label).
+  - 0.40–0.59: weak / partially obscured / multiple plausible candidates.
+  - Below 0.40: prefer null over guessing.
+- Do NOT report your overall document confidence here — that goes in the top-level confidence field.`;
 
 const EXTRACTION_RULES = `
 EXTRACTION RULES:
@@ -80,11 +91,13 @@ Required keys:
 - period: billing/service period if present, otherwise null.
 - confidence: number between 0 and 1, your overall confidence.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
+- _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
 ${REFERENCE_RULES}
 ${QUOTES_RULE}
+${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const RECEIPT_SYSTEM_PROMPT = `You extract structured fields from a payment receipt OCR transcription.
@@ -103,10 +116,12 @@ Required keys:
 - trackingNumber: logistics tracking / AWB number if present, otherwise null.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
+- _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
 ${QUOTES_RULE}
+${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 const PO_FIELD_HINTS = `
@@ -133,6 +148,7 @@ Required keys:
 - lineItems: array of { description, qty, unitPrice, amount } objects, or null.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
+- _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${PO_FIELD_HINTS}
@@ -140,6 +156,7 @@ ${EXTRACTION_RULES}
 ${REFERENCE_RULES}
 ${ARCHIVE_RULES}
 ${QUOTES_RULE}
+${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const CUSTOMER_INVOICE_SYSTEM_PROMPT = `You extract structured fields from a customer-facing invoice (one we issued to a customer).
@@ -158,11 +175,13 @@ Required keys:
 - poNumber: customer PO referenced on the invoice (string or null).
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
+- _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
 ${REFERENCE_RULES}
 ${QUOTES_RULE}
+${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const CONTRACT_SYSTEM_PROMPT = `You extract structured fields from a business contract OCR transcription.
@@ -180,10 +199,12 @@ Required keys:
 - scope: brief contract scope / subject summary from the document, otherwise null.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
+- _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${ARCHIVE_RULES}
 ${QUOTES_RULE}
+${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const QUOTATION_SYSTEM_PROMPT = `You extract structured fields from a business quotation, quote, or proposal OCR transcription.
@@ -200,10 +221,12 @@ Required keys:
 - lineItems: array of { description, qty, unitPrice, amount } objects, or null.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
+- _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${ARCHIVE_RULES}
 ${QUOTES_RULE}
+${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export function buildDocumentUserPrompt(rawText: string): string {

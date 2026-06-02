@@ -11,8 +11,26 @@ const roleRank: Record<AuthRole, number> = {
 };
 
 const MODULES_BY_ROLE: Record<AuthRole, readonly string[]> = {
-	owner: ['finance', 'document-intake', 'project', 'hr', 'business-partner', 'core'],
-	admin: ['finance', 'document-intake', 'project', 'hr', 'business-partner', 'core'],
+	owner: [
+		'finance',
+		'document-intake',
+		'project',
+		'hr',
+		'procurement',
+		'sales-crm',
+		'inventory',
+		'core'
+	],
+	admin: [
+		'finance',
+		'document-intake',
+		'project',
+		'hr',
+		'procurement',
+		'sales-crm',
+		'inventory',
+		'core'
+	],
 	finance: ['finance', 'document-intake'],
 	project_manager: ['project'],
 	hr: ['hr'],

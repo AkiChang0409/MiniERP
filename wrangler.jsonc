@@ -5,7 +5,7 @@
   "name": "smartfin-v4",
   "account_id": "c09bb2823904032b6ec648b23411f2e0",
   "compatibility_date": "2026-03-30",
-  "compatibility_flags": ["nodejs_als"],
+  "compatibility_flags": ["nodejs_compat"],
   "main": ".svelte-kit/cloudflare/_worker.js",
 
   "d1_databases": [
@@ -53,7 +53,10 @@
     "LLM_PROVIDER": "heuristic",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
-    "OCR_PROMPT_VERSION": "v1"
+    "OCR_IMAGE_PROVIDER": "openai",
+    "OCR_PROMPT_VERSION": "v1",
+    "OPENAI_VISION_MODEL": "gpt-4o-mini"
+    // OPENAI_API_KEY: set via wrangler secret / .dev.vars — do not commit here
   },
 
   "assets": {
@@ -117,7 +120,9 @@
         "LLM_PROVIDER": "heuristic",
         "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
         "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
-        "OCR_PROMPT_VERSION": "v1"
+        "OCR_IMAGE_PROVIDER": "openai",
+        "OCR_PROMPT_VERSION": "v1",
+        "OPENAI_VISION_MODEL": "gpt-4o-mini"
       },
 
       "assets": {
@@ -182,7 +187,9 @@
         "LLM_PROVIDER": "workers-ai",
         "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
         "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
+        "OCR_IMAGE_PROVIDER": "openai",
         "OCR_PROMPT_VERSION": "v1",
+        "OPENAI_VISION_MODEL": "gpt-4o-mini",
 
         // 生产环境建议强制走异步队列
         "DOCUMENT_QUEUE_FORCE_ASYNC": "true"

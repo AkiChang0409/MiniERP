@@ -19,8 +19,14 @@ declare global {
 		 */
 		DOCUMENT_QUEUE?: Queue;
 		AI?: Ai;
-		/** Workers AI vision model for document image OCR / direct image JSON (default @cf/meta/llama-3.2-11b-vision-instruct). */
+		/** Workers AI vision model for document image OCR (default @cf/meta/llama-3.2-11b-vision-instruct). */
 		WORKERS_AI_VISION_MODEL?: string;
+		/** Image OCR provider preference. `openai` disables silent Workers AI fallback for image OCR. */
+		OCR_IMAGE_PROVIDER?: 'auto' | 'openai' | 'workers_ai';
+		/** OpenAI API key for vision OCR (and external LLM extraction). Falls back to LLM_API_KEY. */
+		OPENAI_API_KEY?: string;
+		/** OpenAI vision model for image OCR (default gpt-4o-mini). */
+		OPENAI_VISION_MODEL?: string;
 		/** Local PaddleOCR HTTP service base or full `/ocr` URL (e.g. http://127.0.0.1:8765). When set, tried before Workers AI. */
 		PADDLE_OCR_URL?: string;
 		/** If `true`, only use Paddle (`PADDLE_OCR_URL`); no Workers AI fallback. */
@@ -35,14 +41,6 @@ declare global {
 		LLM_SKIP_WORKERS?: string;
 		LLM_API_URL?: string;
 		LLM_API_KEY?: string;
-		/** External vision API URL for fallback (e.g. https://api.openai.com/v1/chat/completions). */
-		VISION_API_URL?: string;
-		/** External vision API key (falls back to LLM_API_KEY). */
-		VISION_API_KEY?: string;
-		/** External vision model id (default: gpt-4o). */
-		VISION_API_MODEL?: string;
-		/** Set to `true` to skip Workers AI vision and only use external vision API. */
-		VISION_SKIP_WORKERS?: string;
 		OCR_PROMPT_VERSION?: string;
 		BETTER_AUTH_SECRET?: string;
 		BETTER_AUTH_URL?: string;

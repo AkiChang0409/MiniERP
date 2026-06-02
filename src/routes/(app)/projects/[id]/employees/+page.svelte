@@ -103,14 +103,14 @@
 	<!-- Header -->
 	<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 		<div>
-			<h1 class="text-lg font-medium text-slate-900">Team &amp; cost</h1>
-			<p class="mt-0.5 text-sm text-slate-500">
-				{data.project.name} �?staff cost breakdown &amp; settlement
+			<h1 class="text-xl font-semibold text-slate-900">Team &amp; Cost</h1>
+			<p class="mt-1 text-sm text-slate-500">
+				Staff cost breakdown &amp; settlement for {data.project.name}.
 			</p>
 		</div>
 		<button
 			type="button"
-			class="inline-flex shrink-0 items-center justify-center rounded-lg bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]"
+			class="inline-flex shrink-0 items-center justify-center rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]"
 			onclick={scrollToAdd}
 		>
 			+ Add member

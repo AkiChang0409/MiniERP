@@ -9,7 +9,7 @@
  * Output shape is platform-owned and structurally compatible with
  * document-intake artifacts. Callers persist this directly into the artifact.
  */
-import { runWorkersVisionOcr } from './ocr/workers-vision-ocr';
+import { runImageDocumentOcr } from './ocr/image-document-ocr';
 import type { FileServiceContract } from '../files/file.types';
 import { pickMockFixtureText } from './text-extraction-fixtures';
 import {
@@ -52,6 +52,14 @@ export interface ExtractTextInput {
 
 const PDF_BYTE_READ_LIMIT = 50_000;
 const MIN_USEFUL_PDF_TEXT = 48;
+
+function readEnv(platformEnv: Env, key: string): string {
+	const processEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+	const fromPlatform = (platformEnv as unknown as Record<string, unknown>)[key];
+	if (typeof fromPlatform === 'string' && fromPlatform.trim()) return fromPlatform.trim();
+	const fromProcess = processEnv?.[key];
+	return typeof fromProcess === 'string' ? fromProcess.trim() : '';
+}
 
 function decodePdfHeuristicBytes(bytes: Uint8Array): string {
 	const slice = bytes.byteLength > PDF_BYTE_READ_LIMIT ? bytes.slice(0, PDF_BYTE_READ_LIMIT) : bytes;
@@ -175,10 +183,7 @@ export async function extractTextFromBytesRaw(
 	}
 
 	if (isImageMime(mimeType, fileName)) {
-		if (!env.AI) {
-			return buildFailure('no_ai_binding', 'Workers AI binding not available for image extraction.', 'vision_model');
-		}
-		const result = await runWorkersVisionOcr(env, { imageBytes: bytes, mimeType });
+		const result = await runImageDocumentOcr(env, { imageBytes: bytes, mimeType, fileName: fileName ?? '' });
 		if (!result.ok) {
 			return buildFailure('vision_failed', result.error, 'vision_model');
 		}
@@ -186,9 +191,9 @@ export async function extractTextFromBytesRaw(
 			method: 'vision_model',
 			status: 'success',
 			text: result.text,
-			confidence: 0.85,
-			provider: 'workers_ai',
-			providerJobId: result.model
+			confidence: result.provider === 'openai' ? 0.9 : 0.85,
+			provider: result.provider,
+			providerJobId: result.provider === 'openai' ? readEnv(env, 'OPENAI_VISION_MODEL') || 'gpt-4o-mini' : undefined
 		};
 	}
 
@@ -244,7 +249,7 @@ export async function extractTextFromBytesRaw(
  * Run text extraction. Phase 2 supports three paths:
  *  - PDF with a text layer (heuristic byte decode — same approach as the
  *    existing `$platform/ai/ocr/pipeline.ts:extractPdfText`).
- *  - Image (Workers AI vision via `runWorkersVisionOcr`).
+ *  - Image (server image OCR, configured by `OCR_IMAGE_PROVIDER`).
  *  - Mock fixture (filename keyword lookup) when caller opts in or when the
  *    AI binding is missing.
  *

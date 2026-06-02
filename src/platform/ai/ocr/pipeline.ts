@@ -7,7 +7,7 @@ const IMAGE_MIME = /^image\//i;
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
 
 // ---------------------------------------------------------------------------
-// PDF â€?raw byte decode (same approach as SmartFinOnline)
+// PDF ï¿½?raw byte decode (same approach as SmartFinOnline)
 //
 // Key insight: invoice text sits in the uncompressed header/objects at the
 // START of a PDF. FlateDecode binary streams come LATER. Reading the whole
@@ -30,7 +30,7 @@ function extractPdfText(bytes: ArrayBuffer): string {
 }
 
 // ---------------------------------------------------------------------------
-// DOCX â€?unzip + parse <w:t> nodes (same logic as $platform/files/docx/extract-plain-text)
+// DOCX ï¿½?unzip + parse <w:t> nodes (same logic as $platform/files/docx/extract-plain-text)
 // ---------------------------------------------------------------------------
 
 function docxXmlToPlainText(xml: string): string {
@@ -89,9 +89,9 @@ function readEnvString(env: Env, key: string): string {
 /**
  * OCR / text-extraction pipeline.
  *
- * PDF  â†?raw UTF-8 decode (null bytes stripped) â€?same as SmartFinOnline
- * DOCX â†?fflate unzip + <w:t> node extraction
- * Image â†?stub pending image OCR
+ * PDF  ï¿½?raw UTF-8 decode (null bytes stripped) ï¿½?same as SmartFinOnline
+ * DOCX ï¿½?fflate unzip + <w:t> node extraction
+ * Image ï¿½?stub pending image OCR
  */
 export async function runOcrPipeline(
 	fileType: string,
@@ -124,7 +124,7 @@ export async function runOcrPipeline(
 				gstAmount: null, poNumber: null, dueDate: null,
 				confidence: 0, confidenceBand: 'low', needsReview: true,
 				validationWarnings: [`Image OCR failed: ${ocrResult.error}`],
-				sourceSnippets: {}, extractionMethod: 'external_ocr', ocrProvider: 'workers_ai',
+				sourceSnippets: {}, extractionMethod: 'external_ocr', ocrProvider: ocrResult.provider,
 				llmProvider: 'heuristic', promptVersion, rawText: ''
 			};
 		}
@@ -135,7 +135,7 @@ export async function runOcrPipeline(
 				gstAmount: null, poNumber: null, dueDate: null,
 				confidence: 0.1, confidenceBand: 'low', needsReview: true,
 				validationWarnings: ['Image OCR returned very little text.'],
-				sourceSnippets: {}, extractionMethod: 'external_ocr', ocrProvider: 'workers_ai',
+				sourceSnippets: {}, extractionMethod: 'external_ocr', ocrProvider: ocrResult.provider,
 				llmProvider: 'heuristic', promptVersion, rawText: imageText
 			};
 		}
@@ -152,7 +152,7 @@ export async function runOcrPipeline(
 			confidenceBand: imgConfidence >= 0.75 ? 'high' : 'medium',
 			needsReview: imgConfidence < 0.75,
 			validationWarnings: [],
-			sourceSnippets: {}, extractionMethod: 'external_ocr', ocrProvider: 'workers_ai',
+			sourceSnippets: {}, extractionMethod: 'external_ocr', ocrProvider: ocrResult.provider,
 			llmProvider: imageExtracted.llmProvider, promptVersion, rawText: imageText
 		};
 	}

@@ -26,16 +26,38 @@ export {
 	freelancerProfiles
 } from '$modules/hr/repositories/person.schema';
 
-// Business Partner module
+// Sales CRM customer tables and shared customer/supplier base table
 export {
 	businessPartners,
+	partnerCustomerProfiles
+} from '$modules/sales-crm/repositories/customer.schema';
+
+// Procurement supplier tables
+export {
 	partnerSupplierProfiles,
-	partnerCustomerProfiles,
+	partnerSupplierComplianceRecords,
+	partnerSupplierAttachments,
+	partnerSupplierEvaluations,
 	partnerContacts
-} from '$modules/business-partner/repositories/business-partner.schema';
+} from '$modules/procurement/repositories/supplier.schema';
+export {
+	procurementRfqs,
+	procurementRfqItems,
+	procurementRfqSuppliers,
+	procurementSupplierQuotations,
+	procurementSupplierQuotationItems,
+	procurementPurchaseOrders,
+	procurementPurchaseOrderItems,
+	procurementPurchaseOrderReceipts
+} from '$modules/procurement/repositories/rfq.schema';
 
 // Project module
-export { projects, projectEmployees } from '$modules/project/repositories/project.schema';
+export {
+	projects,
+	projectEmployees,
+	projectCollaborators,
+	projectComments
+} from '$modules/project/repositories/project.schema';
 
 // Project archive documents (contracts / quotations / POs)
 export {
@@ -85,3 +107,22 @@ export { gstReturns, personIncome, timeLogs } from '$modules/finance/repositorie
 
 // Document Intake module (target-layer artifact storage)
 export { documentArtifacts } from '../../modules/document-intake/repositories/document-artifact.schema';
+
+// Inventory module (item master + attachments + barcodes)
+export {
+	items,
+	inventoryItemAttachments,
+	inventoryItemBarcodes
+} from '$modules/inventory/repositories/item.schema';
+
+// Inventory module — warehouse / bin / stock levels / movements / transfers / cycle counts
+export {
+	warehouses,
+	warehouseBinLocations,
+	inventoryStockLevels,
+	inventoryStockMovements,
+	inventoryStockTransfers,
+	inventoryStockTransferLines,
+	inventoryCycleCounts,
+	inventoryCycleCountLines
+} from '$modules/inventory/repositories/warehouse.schema';

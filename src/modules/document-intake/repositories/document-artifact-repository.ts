@@ -199,6 +199,30 @@ export class DocumentArtifactRepository {
 			.where(eq(documentArtifacts.id, id));
 	}
 
+	/**
+	 * Set status only if the artifact isn't already `abandoned`. Used by the
+	 * async worker so a user-triggered cancel mid-pipeline can't be silently
+	 * overwritten by the next stage's setStatus call. Returns true when the
+	 * update took effect.
+	 */
+	async setStatusIfActive(id: string, status: DocumentProcessingStatus): Promise<boolean> {
+		await this.db
+			.update(documentArtifacts)
+			.set({ processingStatus: status, updatedAt: nowIso() })
+			.where(
+				and(
+					eq(documentArtifacts.id, id),
+					sql`${documentArtifacts.processingStatus} != 'abandoned'`
+				)
+			);
+		const rows = await this.db
+			.select({ status: documentArtifacts.processingStatus })
+			.from(documentArtifacts)
+			.where(eq(documentArtifacts.id, id))
+			.limit(1);
+		return rows[0]?.status === status;
+	}
+
 	async abandon(
 		id: string,
 		metadata: Record<string, unknown>

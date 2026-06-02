@@ -23,7 +23,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const clientRawText = String(formData.get('rawText') || '');
 
 	// Image files with no client-provided text: return "pending" stub
-	// (client should have already run Workers AI vision and passed rawText)
+	// (client should have already run image OCR and passed rawText)
 	const isImage = /^image\//i.test(fileType) || /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name.toLowerCase());
 	if (isImage && !clientRawText) {
 		return ok({

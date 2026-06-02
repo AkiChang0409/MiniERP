@@ -359,7 +359,7 @@ export function uploadDocument(
 	opts: {
 		uploadedFrom?: 'ai_panel' | 'finance_workspace' | 'task_mode';
 		clientExtractedText?: string;
-		clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'vision_preprocessed' | 'manual';
+		clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
 	} = {}
 ): Promise<DocumentArtifactPostResponse> {
 	const form = new FormData();
@@ -367,9 +367,7 @@ export function uploadDocument(
 	form.append('uploadedFrom', opts.uploadedFrom ?? 'ai_panel');
 	if (opts.clientExtractedText) {
 		form.append('clientExtractedText', opts.clientExtractedText);
-	}
-	if (opts.clientExtractionMethod) {
-		form.append('clientExtractionMethod', opts.clientExtractionMethod);
+		form.append('clientExtractionMethod', opts.clientExtractionMethod ?? 'manual');
 	}
 	return postMultipart<DocumentArtifactPostResponse>('/api/documents', form);
 }

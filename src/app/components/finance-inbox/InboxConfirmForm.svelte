@@ -159,7 +159,19 @@
 				'ready_for_review',
 				'ready_for_workflow',
 				'needs_manual_review',
-				'failed'
+				'failed',
+				// In-flight states — let the user interrupt a stuck pipeline.
+				// Server's setStatusIfActive guards against the worker stomping
+				// the abandoned state on the next stage boundary.
+				'received',
+				'stored',
+				'text_extraction_pending',
+				'text_extracted',
+				'ocr_pending',
+				'ocr_completed',
+				'classification_pending',
+				'classified',
+				'fields_extraction_pending'
 			].includes(artifact.processingStatus)
 	);
 	const categorySuggestions = $derived(categorySuggestionsFor(artifact));

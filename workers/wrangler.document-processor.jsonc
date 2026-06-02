@@ -6,7 +6,7 @@
   "name": "smartfin-document-processor-v4",
   "account_id": "c09bb2823904032b6ec648b23411f2e0",
   "compatibility_date": "2026-03-30",
-  "compatibility_flags": ["nodejs_als"],
+  "compatibility_flags": ["nodejs_compat"],
   "main": "document-processor.ts",
 
   "d1_databases": [
@@ -50,7 +50,9 @@
     "LLM_PROVIDER": "heuristic",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
-    "OCR_PROMPT_VERSION": "v1"
+    "OCR_IMAGE_PROVIDER": "openai",
+    "OCR_PROMPT_VERSION": "v1",
+    "OPENAI_VISION_MODEL": "gpt-4o-mini"
   },
 
   "ai": {

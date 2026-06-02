@@ -31,5 +31,5 @@ export interface DocumentProcessorMessage {
 	 * for the producer-side extraction logic (Ship 1).
 	 */
 	clientExtractedText?: string;
-	clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'vision_preprocessed' | 'manual';
+	clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
 }

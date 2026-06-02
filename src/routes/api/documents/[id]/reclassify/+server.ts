@@ -1,7 +1,6 @@
 import type { RequestHandler } from './$types';
 
 import { fail, ok } from '$platform/http';
-import { createFileService } from '$platform/files/file-service';
 import { getDb } from '../../../../../infrastructure/db';
 import { createDocumentIntakeService } from '$modules/document-intake';
 import {
@@ -26,11 +25,6 @@ import {
  */
 interface ReclassifyBody {
 	categoryId: string;
-}
-
-function isImageArtifact(mimeType: string, fileName?: string): boolean {
-	if (mimeType.toLowerCase().startsWith('image/')) return true;
-	return Boolean(fileName && /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(fileName));
 }
 
 export const POST: RequestHandler = async (event) => {
@@ -64,15 +58,9 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	const text = artifact.textExtraction?.text;
-	const canUseText = Boolean(text && text.length >= 32);
-	const canUseImage = isImageArtifact(artifact.originalFile.mimeType, artifact.originalFile.fileName);
-	let imageBytes: Uint8Array | undefined;
-	if (!canUseText && canUseImage) {
-		imageBytes = await createFileService(env).getBytes(artifact.originalFile.storageRef) ?? undefined;
-	}
-	if (!canUseText && !imageBytes) {
+	if (!text || text.length < 32) {
 		return fail(
-			'Artifact has no usable extracted text or image bytes — cannot re-extract. Re-upload may be required.',
+			'Artifact has no usable extracted text — cannot re-extract. Re-upload may be required.',
 			400
 		);
 	}
@@ -81,9 +69,7 @@ export const POST: RequestHandler = async (event) => {
 		{
 			documentId: artifact.id,
 			fileName: artifact.originalFile.fileName,
-			text: canUseText ? text : undefined,
-			imageBytes,
-			mimeType: imageBytes ? artifact.originalFile.mimeType : undefined,
+			text,
 			categoryId: body.categoryId,
 			artifactConfidence: artifact.classification?.confidence
 		},
@@ -99,9 +85,7 @@ export const POST: RequestHandler = async (event) => {
 		tenantId: 'default',
 		documentId: id,
 		fields: result.fields as unknown as Record<string, unknown>,
-		confidence: result.fieldConfidence ?? Object.fromEntries(
-			Object.keys(result.fields).map(k => [k, result.confidence])
-		),
+		confidence: result.fieldConfidence,
 		evidence: result.evidence,
 		sourceQuotes: result.sourceQuotes,
 		categoryId: body.categoryId

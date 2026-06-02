@@ -70,6 +70,46 @@ describe('invoiceSchemaV1', () => {
 		const { confidence: _, ...withoutConfidence } = validInvoice;
 		expect(invoiceSchemaV1.safeParse(withoutConfidence).success).toBe(true);
 	});
+
+	it('accepts per-field _confidence map', () => {
+		const parsed = invoiceSchemaV1.safeParse({
+			...validInvoice,
+			_confidence: {
+				invoiceNumber: 0.99,
+				supplierName: 0.8,
+				totalAmount: 0.95
+			}
+		});
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data._confidence?.invoiceNumber).toBe(0.99);
+		}
+	});
+
+	it('rejects _confidence values outside [0,1]', () => {
+		expect(
+			invoiceSchemaV1.safeParse({
+				...validInvoice,
+				_confidence: { invoiceNumber: 1.5 }
+			}).success
+		).toBe(false);
+	});
+
+	it('accepts partial invoice with only some fields populated (pro forma case)', () => {
+		// Pro forma invoices often omit the invoice number. The schema must allow it,
+		// and downstream mapToFields must not gate on all-fields-present.
+		expect(
+			invoiceSchemaV1.safeParse({
+				supplierName: 'RNG Wine Ltd',
+				invoiceNumber: null,
+				issueDate: '2026-01-28',
+				dueDate: null,
+				totalAmount: 5210,
+				gstAmount: null,
+				currency: 'HKD'
+			}).success
+		).toBe(true);
+	});
 });
 
 // ─── receiptSchemaV1 ─────────────────────────────────────────────────────────

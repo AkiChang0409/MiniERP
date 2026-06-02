@@ -42,7 +42,10 @@
       "Bash(Select-Object -ExpandProperty Name)",
       "Bash(Get-ChildItem *)",
       "Bash(cd /d \"D:\\\\Project\\\\MiniERP\")",
-      "Bash(dir src *)"
+      "Bash(dir src *)",
+      "Bash(npx vitest *)",
+      "Bash(npm test *)",
+      "Bash(grep -E 'modules|\\\\$modules' C:/Users/akiwc/Documents/Axiom/MiniERP/svelte.config.js C:/Users/akiwc/Documents/Axiom/MiniERP/tsconfig.json)"
     ]
   }
 }

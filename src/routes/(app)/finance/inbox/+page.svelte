@@ -20,6 +20,7 @@
 	let total = $state<number>(data.payload.data?.total ?? 0);
 	let isLoading = $state(false);
 	let loadError = $state<string | null>(null);
+	let cancellingIds = $state<Set<string>>(new Set());
 
 	const formatDateTime = (iso: string) => {
 		try {
@@ -185,6 +186,33 @@
 			void goto(href);
 		}
 	}
+
+	async function cancelItem(item: DocumentArtifactView) {
+		const confirmed = window.confirm(
+			`Cancel processing for "${item.originalFile.fileName}"? The pipeline will stop on the next stage boundary and the item will be moved out of the inbox.`
+		);
+		if (!confirmed) return;
+		cancellingIds = new Set(cancellingIds).add(item.id);
+		try {
+			const res = await fetch(`/api/documents/${item.id}/abandon`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ reason: 'cancelled_from_inbox_processing' })
+			});
+			if (!res.ok) {
+				const json = (await res.json().catch(() => null)) as { error?: string } | null;
+				throw new Error(json?.error ?? `Cancel failed (${res.status})`);
+			}
+			items = items.filter((it) => it.id !== item.id);
+			total = Math.max(0, total - 1);
+		} catch (err) {
+			loadError = err instanceof Error ? err.message : 'Failed to cancel';
+		} finally {
+			const next = new Set(cancellingIds);
+			next.delete(item.id);
+			cancellingIds = next;
+		}
+	}
 </script>
 
 <PageShell
@@ -284,11 +312,12 @@
 				{@const preview = fieldsPreview(item)}
 				{@const lowN = lowConfidenceCount(item)}
 				{@const href = rowHref(item)}
-				<li>
+				{@const isCancelling = cancellingIds.has(item.id)}
+				<li class="flex items-stretch">
 					<a
 						{href}
 						onkeydown={(e) => rowKeyDown(e, href)}
-						class="flex items-center gap-4 px-4 py-3 transition hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-green)] focus-visible:ring-offset-2"
+						class="flex flex-1 items-center gap-4 px-4 py-3 transition hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-green)] focus-visible:ring-offset-2"
 						style="--sf-green: #387234;"
 					>
 						<!-- Icon column -->
@@ -343,6 +372,19 @@
 							<span class="font-mono">{formatBytes(item.originalFile.sizeBytes)}</span>
 						</div>
 					</a>
+					{#if currentTab === 'processing'}
+						<div class="flex items-center pr-3">
+							<button
+								type="button"
+								onclick={() => cancelItem(item)}
+								disabled={isCancelling}
+								title="Stop this processing job and remove it from the inbox"
+								class="inline-flex items-center rounded-md border border-rose-200 bg-white px-2.5 py-1 text-xs font-medium text-rose-700 shadow-sm hover:bg-rose-50 disabled:opacity-50"
+							>
+								{isCancelling ? 'Cancelling…' : 'Cancel'}
+							</button>
+						</div>
+					{/if}
 				</li>
 			{/each}
 		</ul>

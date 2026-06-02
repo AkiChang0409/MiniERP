@@ -66,7 +66,6 @@ export const POST: RequestHandler = async (event) => {
 	const clientExtractionMethod =
 		clientExtractionMethodRaw === 'pdfjs' ||
 		clientExtractionMethodRaw === 'vision_first_page' ||
-		clientExtractionMethodRaw === 'vision_preprocessed' ||
 		clientExtractionMethodRaw === 'manual'
 			? clientExtractionMethodRaw
 			: undefined;
@@ -153,11 +152,8 @@ async function processInlineFallback(
 	// Lazy-load finance bits only on the inline path so the typical
 	// queue-driven prod path doesn't pull them into the HTTP worker bundle.
 	const {
-		classifyDocumentCategoryCapability,
 		extractDocumentFieldsCapability,
-		categoryIdForDocumentType,
-		documentTypeForFinanceCategory,
-		findCategoryById
+		categoryIdForDocumentType
 	} = await import('$modules/finance');
 
 	try {
@@ -166,49 +162,25 @@ async function processInlineFallback(
 			documentId: message.documentId,
 			clientExtractedText: message.clientExtractedText,
 			clientExtractionMethod: message.clientExtractionMethod,
-			categoryClassifier: async ({
-				tenantId,
-				documentId,
-				fileName,
-				mimeType,
-				imageBytes
-			}) => {
-				const result = await classifyDocumentCategoryCapability.execute(
-					{ documentId, fileName, imageBytes, mimeType },
-					{ tenantId, userId: message.userId, env, useMock: !env.AI }
-				);
-				const category = result.categoryId ? findCategoryById(result.categoryId) : undefined;
-				return {
-					categoryId: result.categoryId,
-					documentType: documentTypeForFinanceCategory(category),
-					confidence: result.confidence,
-					reason: result.reason
-				};
-			},
 			fieldExtractor: async ({
 				tenantId,
 				documentId,
 				fileName,
 				text,
-				imageBytes,
-				mimeType,
 				documentType,
-				classificationConfidence,
-				categoryId: classifiedCategoryId
+				classificationConfidence
 			}) => {
-				const categoryId = classifiedCategoryId ?? categoryIdForDocumentType(documentType ?? 'unknown');
+				const categoryId = categoryIdForDocumentType(documentType ?? 'unknown');
 				if (!categoryId) return null;
-				if (classificationConfidence < 0.35) return null;
+				if (classificationConfidence < 0.4) return null;
 
 				const result = await extractDocumentFieldsCapability.execute(
-					{ documentId, fileName, text, imageBytes, mimeType, categoryId, artifactConfidence: classificationConfidence },
+					{ documentId, fileName, text, categoryId, artifactConfidence: classificationConfidence },
 					{ tenantId, userId: message.userId, env, useMock: !env.AI }
 				);
 				return {
 					fields: result.fields as unknown as Record<string, unknown>,
-					confidence: result.fieldConfidence ?? Object.fromEntries(
-						Object.keys(result.fields).map(k => [k, result.confidence])
-					),
+					confidence: result.fieldConfidence,
 					evidence: result.evidence,
 					sourceQuotes: result.sourceQuotes,
 					categoryId

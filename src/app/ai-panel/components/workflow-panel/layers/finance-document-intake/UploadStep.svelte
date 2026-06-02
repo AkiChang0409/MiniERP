@@ -8,6 +8,7 @@
 		type DocumentProcessingStatus
 	} from '$app-layer/ai-panel/workflow/finance-workflow-api';
 	import { extractEmlClientText } from '$app-layer/ai-panel/workflow/extract-eml-client';
+	import { preprocessImageForOcr } from '$lib/utils/preprocess-image';
 
 	type Stage = 'idle' | 'expanding' | 'parsing' | 'storing' | 'queued' | 'error';
 
@@ -22,9 +23,7 @@
 	const TERMINAL_BAD: DocumentProcessingStatus[] = ['needs_manual_review', 'failed'];
 	const MIN_USEFUL_CLIENT_TEXT = 48;
 	const MAX_BATCH_FILES = 25;
-	const VISION_IMAGE_MAX_EDGE = 1800;
-	const VISION_IMAGE_MAX_BYTES = 5_500_000;
-	const SUPPORTED_DOCUMENT_EXT_RE = /\.(pdf|docx|doc|eml|png|jpe?g|webp)$/i;
+	const SUPPORTED_DOCUMENT_EXT_RE = /\.(pdf|docx|doc|eml|png|jpe?g|webp|gif|bmp|tiff?)$/i;
 	const ZIP_EXT_RE = /\.zip$/i;
 
 	// ---------------------------------------------------------------------------
@@ -68,58 +67,6 @@
 		return chunks.join('\n').trim();
 	}
 
-	async function canvasToJpegFile(canvas: HTMLCanvasElement, fileName: string): Promise<File | null> {
-		for (const quality of [0.86, 0.76, 0.66]) {
-			const blob = await new Promise<Blob | null>((resolve) =>
-				canvas.toBlob((b) => resolve(b), 'image/jpeg', quality)
-			);
-			if (!blob) continue;
-			if (blob.size <= VISION_IMAGE_MAX_BYTES || quality === 0.66) {
-				return new File([blob], fileName.replace(/\.[^.]+$/i, '') + '.jpg', { type: 'image/jpeg' });
-			}
-		}
-		return null;
-	}
-
-	function enhanceCanvasForVision(canvas: HTMLCanvasElement) {
-		const ctx = canvas.getContext('2d');
-		if (!ctx) return;
-		const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-		const data = imageData.data;
-		const contrast = 1.12;
-		for (let i = 0; i < data.length; i += 4) {
-			const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-			const adjusted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
-			data[i] = adjusted;
-			data[i + 1] = adjusted;
-			data[i + 2] = adjusted;
-			data[i + 3] = 255;
-		}
-		ctx.putImageData(imageData, 0, 0);
-	}
-
-	async function preprocessImageForVision(file: File): Promise<File | null> {
-		try {
-			const bitmap = await createImageBitmap(file);
-			const scale = Math.min(1, VISION_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height, 1));
-			const width = Math.max(1, Math.round(bitmap.width * scale));
-			const height = Math.max(1, Math.round(bitmap.height * scale));
-			const canvas = document.createElement('canvas');
-			canvas.width = width;
-			canvas.height = height;
-			const ctx = canvas.getContext('2d');
-			if (!ctx) return null;
-			ctx.fillStyle = '#ffffff';
-			ctx.fillRect(0, 0, width, height);
-			ctx.drawImage(bitmap, 0, 0, width, height);
-			bitmap.close?.();
-			enhanceCanvasForVision(canvas);
-			return await canvasToJpegFile(canvas, file.name);
-		} catch {
-			return null;
-		}
-	}
-
 	async function renderPdfFirstPageJpeg(file: File): Promise<File | null> {
 		try {
 			const pdfjs = await loadPdfJs();
@@ -137,9 +84,12 @@
 			const ctx = canvas.getContext('2d');
 			if (!ctx) return null;
 			await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+			const blob = await new Promise<Blob | null>((resolve) =>
+				canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.88)
+			);
+			if (!blob) return null;
 			const baseName = file.name.replace(/\.pdf$/i, '') || 'document';
-			enhanceCanvasForVision(canvas);
-			return await canvasToJpegFile(canvas, `${baseName}-p1.jpg`);
+			return new File([blob], `${baseName}-p1.jpg`, { type: 'image/jpeg' });
 		} catch {
 			return null;
 		}
@@ -147,7 +97,7 @@
 
 	type ClientExtraction = {
 		text: string;
-		method: 'pdfjs' | 'vision_first_page' | 'vision_preprocessed' | 'manual';
+		method: 'pdfjs' | 'vision_first_page' | 'manual';
 		uploadFile: File;
 	};
 
@@ -169,6 +119,9 @@
 		if (/\.png$/i.test(fileName)) return 'image/png';
 		if (/\.jpe?g$/i.test(fileName)) return 'image/jpeg';
 		if (/\.webp$/i.test(fileName)) return 'image/webp';
+		if (/\.gif$/i.test(fileName)) return 'image/gif';
+		if (/\.bmp$/i.test(fileName)) return 'image/bmp';
+		if (/\.tiff?$/i.test(fileName)) return 'image/tiff';
 		return fallback;
 	}
 
@@ -179,9 +132,7 @@
 			mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
 			mime === 'application/msword' ||
 			mime === 'message/rfc822' ||
-			mime === 'image/png' ||
-			mime === 'image/jpeg' ||
-			mime === 'image/webp' ||
+			mime.startsWith('image/') ||
 			SUPPORTED_DOCUMENT_EXT_RE.test(file.name)
 		);
 	}
@@ -274,8 +225,18 @@
 			name.endsWith('.docx');
 
 		if (isImage) {
-			const processed = await preprocessImageForVision(file);
-			return { text: '', method: 'vision_preprocessed', uploadFile: processed ?? file };
+			// OpenAI Vision handles JPEG/PNG/WebP/GIF natively — upload as-is so
+			// we don't pay the OpenCV.js (~10 MB WASM) first-load cost on the
+			// critical path. Only TIFF and BMP need a client-side re-encode to
+			// JPEG (the vision API can't decode them), and we use the lightweight
+			// `'convert'` mode which skips the OpenCV warp + unsharp steps —
+			// pure format conversion only.
+			const needsClientReencode =
+				/\.(tiff?|bmp)$/i.test(name) || /^image\/(tiff?|bmp|x-bmp)$/i.test(mime);
+			const uploadFile = needsClientReencode
+				? await preprocessImageForOcr(file, undefined, { mode: 'convert' }).catch(() => file)
+				: file;
+			return { text: '', method: 'manual', uploadFile };
 		}
 
 		if (isDocx) {
@@ -319,7 +280,7 @@
 			// Server-side vision OCR handles it from there.
 			const jpeg = await renderPdfFirstPageJpeg(file);
 			if (jpeg) {
-				return { text: '', method: 'vision_preprocessed', uploadFile: jpeg };
+				return { text: '', method: 'vision_first_page', uploadFile: jpeg };
 			}
 			// Last-resort: upload the original PDF; server will mark needs_manual_review.
 			return { text: '', method: 'manual', uploadFile: file };
@@ -516,7 +477,7 @@
 	<input
 		bind:this={fileInput}
 		type="file"
-		accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,message/rfc822,image/png,image/jpeg,image/webp,application/zip,.pdf,.docx,.doc,.eml,.zip"
+		accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,message/rfc822,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,application/zip,.pdf,.docx,.doc,.eml,.zip,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff"
 		multiple
 		onchange={onInputChange}
 		hidden

@@ -126,3 +126,32 @@ describe('GST quarterly report end-to-end', () => {
 		expect(box12).toBe(0);
 	});
 });
+
+describe('Finance P&L report', () => {
+	it('includes out-of-scope revenue in P&L revenue totals', async () => {
+		const ctx = makeCtx();
+		const now = nowIso();
+
+		await ctx.db.insert(schema.revenue).values({
+			id: crypto.randomUUID(),
+			amount: 250,
+			gstAmount: 0,
+			date: '2031-01-17',
+			invoiceType: 'out_of_scope',
+			currency: 'SGD',
+			notes: 'Out-of-scope P&L regression fixture',
+			createdAt: now,
+			updatedAt: now
+		});
+
+		const api = createFinanceApi(ctx);
+		const report = await api.insights.getProfitAndLossReport({
+			from: '2031-01-01',
+			to: '2031-01-31'
+		});
+
+		expect(report.revenue.outOfScope).toBe(250);
+		expect(report.revenue.total).toBe(250);
+		expect(report.netProfit).toBe(250);
+	});
+});

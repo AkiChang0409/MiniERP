@@ -46,6 +46,7 @@
 	const fileKey = $derived(wfState.fileKey as string | undefined);
 	const fileName = $derived(wfState.fileName as string | undefined);
 	const fileType = $derived(wfState.fileType as string | undefined);
+	const processedImageUrl = $derived(wfState.processedImageUrl as string | undefined);
 
 	const mode = $derived(panel.mode);
 
@@ -71,7 +72,7 @@
 		})
 	);
 
-	// Form values â€?initialised from classifyResult.fields, then mutated by user.
+	// Form values ï¿½?initialised from classifyResult.fields, then mutated by user.
 	let values = $state<Record<string, string | number | boolean>>({});
 	let initialisedFor = $state<string>('');
 
@@ -124,7 +125,7 @@
 	}
 
 	// -------------------------------------------------------------------
-	// Top pill row â€?"Bucket Â· Kind Â· Project" as editable chips. Tapping
+	// Top pill row ï¿½?"Bucket Â· Kind Â· Project" as editable chips. Tapping
 	// any pill jumps back to the relevant step via panel.setStep.
 	// -------------------------------------------------------------------
 	const bucketLabel = $derived(
@@ -155,7 +156,7 @@
 	}
 
 	// -------------------------------------------------------------------
-	// Re-check â€?forces a re-run of extraction + narration under the
+	// Re-check ï¿½?forces a re-run of extraction + narration under the
 	// user's currently-selected bucket/kind. Useful when the first-pass
 	// classifier picked the wrong kind and the user wants the downstream
 	// data to reflect their override.
@@ -208,7 +209,7 @@
 	}
 
 	// -------------------------------------------------------------------
-	// Save flow â€?inline states on this step.
+	// Save flow ï¿½?inline states on this step.
 	// -------------------------------------------------------------------
 	let saveStage = $state<'idle' | 'saving' | 'done' | 'error'>('idle');
 	let saveError = $state('');
@@ -304,7 +305,7 @@
 				</button>
 			</div>
 
-			<!-- Edit pills â€?tap to jump back to that step -->
+			<!-- Edit pills ï¿½?tap to jump back to that step -->
 			<div class="pill-row">
 				<button type="button" class="pill" onclick={editBucket}>
 					<span class="pill-label">Where</span>
@@ -326,7 +327,7 @@
 			<!-- Half-mode: preview collapses above fields -->
 			{#if mode === 'half'}
 				<div class="preview-half-wrap">
-					<FilePreview {fileKey} {fileName} {fileType} collapsible />
+					<FilePreview {fileKey} {fileName} {fileType} {processedImageUrl} collapsible />
 				</div>
 			{/if}
 
@@ -379,7 +380,7 @@
 								disabled={saveStage !== 'idle' && saveStage !== 'error'}
 							/>
 						{:else if spec.type === 'select'}
-							<!-- Select fields become chip rows â€?vision Â§5.2 everywhere. -->
+							<!-- Select fields become chip rows ï¿½?vision Â§5.2 everywhere. -->
 							<div class="select-chips">
 								{#each spec.options ?? [] as opt (opt)}
 									<button
@@ -459,7 +460,7 @@
 		<!-- ============ RIGHT: preview (full-mode only) ============ -->
 		{#if mode === 'full'}
 			<aside class="review-aside">
-				<FilePreview {fileKey} {fileName} {fileType} />
+				<FilePreview {fileKey} {fileName} {fileType} {processedImageUrl} />
 			</aside>
 		{/if}
 	</div>

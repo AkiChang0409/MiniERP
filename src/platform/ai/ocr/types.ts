@@ -44,7 +44,7 @@ export type OcrPipelineExtract = {
 	validationWarnings: string[];
 	sourceSnippets: SourceSnippetMap;
 	extractionMethod: 'pdf_text' | 'pdf_text_layer' | 'docx_text' | 'external_ocr';
-	ocrProvider: 'builtin_pdf' | 'pdf_native' | 'docx_native' | 'external_api' | 'external_api_mock' | 'workers_ai';
+	ocrProvider: 'builtin_pdf' | 'pdf_native' | 'docx_native' | 'external_api' | 'external_api_mock' | 'workers_ai' | 'openai';
 	llmProvider: 'heuristic' | 'external_api' | 'workers_ai';
 	promptVersion: string;
 	rawText: string;

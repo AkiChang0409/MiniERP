@@ -36,15 +36,13 @@ import {
 	type DocumentProcessorMessage
 } from '../src/modules/document-intake';
 import {
-	classifyDocumentCategoryCapability,
 	extractDocumentFieldsCapability,
-	categoryIdForDocumentType,
-	documentTypeForFinanceCategory,
-	findCategoryById
+	categoryIdForDocumentType
 } from '../src/modules/finance';
 import { getDb } from '../src/infrastructure/db';
 
 export type { DocumentProcessorMessage };
+
 
 export default {
 	async queue(
@@ -108,52 +106,32 @@ async function processOne(
 		documentId: payload.documentId,
 		clientExtractedText: payload.clientExtractedText,
 		clientExtractionMethod: payload.clientExtractionMethod,
-		categoryClassifier: async ({
-			tenantId,
-			documentId,
-			fileName,
-			mimeType,
-			imageBytes
-		}) => {
-			const result = await classifyDocumentCategoryCapability.execute(
-				{ documentId, fileName, imageBytes, mimeType },
-				{ tenantId, userId: payload.userId, env, useMock: !env.AI }
-			);
-			const category = result.categoryId ? findCategoryById(result.categoryId) : undefined;
-			return {
-				categoryId: result.categoryId,
-				documentType: documentTypeForFinanceCategory(category),
-				confidence: result.confidence,
-				reason: result.reason
-			};
-		},
 		fieldExtractor: async ({
 			tenantId,
 			documentId,
 			fileName,
 			text,
-			imageBytes,
-			mimeType,
 			documentType,
-			classificationConfidence,
-			categoryId: classifiedCategoryId
+			classificationConfidence
 		}) => {
 			// Map classifier-emitted documentType to the canonical category id.
 			// null = no auto-extract (bank_statement / tax_document /
 			// logistics_document / unknown). Ready_for_review with no
 			// suggestedFields tells the inbox UI "user picks category".
-			const categoryId = classifiedCategoryId ?? categoryIdForDocumentType(documentType ?? 'unknown');
+			const categoryId = categoryIdForDocumentType(documentType ?? 'unknown');
 			if (!categoryId) return null;
 
-			if (classificationConfidence < 0.35) return null;
+			// Extra guard: skip extraction when classification confidence is
+			// very low — better to let the user pick than to pre-fill from a
+			// wrong category (e.g. classifier guessed `supplier_invoice` for a
+			// receipt).
+			if (classificationConfidence < 0.4) return null;
 
 			const result = await extractDocumentFieldsCapability.execute(
 				{
 					documentId,
 					fileName,
 					text,
-					imageBytes,
-					mimeType,
 					categoryId,
 					artifactConfidence: classificationConfidence
 				},
@@ -162,9 +140,7 @@ async function processOne(
 
 			return {
 				fields: result.fields as unknown as Record<string, unknown>,
-				confidence: result.fieldConfidence ?? Object.fromEntries(
-					Object.keys(result.fields).map(k => [k, result.confidence])
-				),
+				confidence: result.fieldConfidence,
 				evidence: result.evidence,
 				sourceQuotes: result.sourceQuotes,
 				categoryId

@@ -7,6 +7,7 @@
 		uploadDocument,
 		type DocumentProcessingStatus
 	} from '$app-layer/ai-panel/workflow/finance-workflow-api';
+	import { preprocessImageForOcr } from '$lib/utils/preprocess-image';
 
 	type Stage = 'idle' | 'storing' | 'extracting' | 'wiring' | 'error';
 
@@ -25,10 +26,21 @@
 		stage = 'storing';
 
 		try {
-			// 1. Real upload to /api/documents â€?server stores the blob,
+			// 1. Real upload to /api/documents ï¿½?server stores the blob,
 			// extracts text, classifies, and returns the artifact view.
+			// Only TIFF / BMP need a client-side re-encode to JPEG (OpenAI
+			// Vision can't decode them). JPEG/PNG/WebP/GIF and PDFs upload
+			// as-is. For TIFF/BMP we use the lightweight `'convert'` mode â€”
+			// decode â†’ resize â†’ JPEG, no OpenCV warp / unsharp â€” so we never
+			// touch the 10 MB WASM bundle on the upload critical path.
 			stage = 'extracting';
-			const artifact = await uploadDocument(file, { uploadedFrom: 'ai_panel' });
+			const mime = (file.type || '').toLowerCase();
+			const needsClientReencode =
+				/\.(tiff?|bmp)$/i.test(file.name) || /^image\/(tiff?|bmp|x-bmp)$/i.test(mime);
+			const uploadFile = needsClientReencode
+				? await preprocessImageForOcr(file, undefined, { mode: 'convert' }).catch(() => file)
+				: file;
+			const artifact = await uploadDocument(uploadFile, { uploadedFrom: 'ai_panel' });
 
 			if (TERMINAL_BAD.includes(artifact.processingStatus)) {
 				const why =
@@ -140,9 +152,9 @@
 
 		<span class="drop-heading">
 			{#if stage === 'storing'}
-				Storing {fileName}â€?			{:else if stage === 'extracting'}
-				Reading {fileName}â€?			{:else if stage === 'wiring'}
-				Wiring it into the workflowâ€?			{:else if stage === 'error'}
+				Storing {fileName}ï¿½?			{:else if stage === 'extracting'}
+				Reading {fileName}ï¿½?			{:else if stage === 'wiring'}
+				Wiring it into the workflowï¿½?			{:else if stage === 'error'}
 				Couldn't start
 			{:else}
 				Drop the supplier invoice here
@@ -159,7 +171,7 @@
 
 		<span class="drop-footnote">
 			{#if stage === 'idle' && !fileName}
-				Click or drop â€?real OCR + classify, then finance agent
+				Click or drop ï¿½?real OCR + classify, then finance agent
 			{:else if stage === 'storing'}
 				Stashing in object storage
 			{:else if stage === 'extracting'}
@@ -173,7 +185,7 @@
 	<input
 		bind:this={fileInput}
 		type="file"
-		accept="application/pdf,image/png,image/jpeg,image/webp"
+		accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff"
 		onchange={onInputChange}
 		hidden
 	/>

@@ -8,7 +8,6 @@ import { classifyDocumentCapability } from '$modules/document-intake/capabilitie
 import { financeAgentAllowedCapabilities } from '$modules/finance/agent';
 import {
 	detectDuplicateCapability,
-	classifyDocumentCategoryCapability,
 	extractDocumentFieldsCapability,
 	extractInvoiceFieldsCapability,
 	matchPurchaseOrderCapability,
@@ -25,7 +24,6 @@ const FINANCE_AGENT_ID = 'finance-agent';
 
 const financeCapabilities = [
 	extractInvoiceFieldsCapability,
-	classifyDocumentCategoryCapability,
 	extractDocumentFieldsCapability,
 	matchSupplierCapability,
 	matchPurchaseOrderCapability,

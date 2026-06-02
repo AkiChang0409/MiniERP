@@ -170,7 +170,7 @@
 					{diagnostics.textExtraction?.textLength ?? 0} chars
 				</span>
 			</div>
-			<pre class="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100">{diagnostics.textExtraction?.rawText || (diagnostics.textExtraction?.provider === 'workers_ai_vision_direct' ? 'Vision direct, no raw OCR text.' : 'No raw text available.')}</pre>
+			<pre class="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100">{diagnostics.textExtraction?.rawText || 'No raw text available.'}</pre>
 		</div>
 	{/if}
 </section>

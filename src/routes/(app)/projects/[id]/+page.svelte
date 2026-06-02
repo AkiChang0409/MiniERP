@@ -1,7 +1,52 @@
 <script lang="ts">
 	import { setAgentPageContext } from '$app-layer/ai-panel/state/context';
+	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 
 	let { data } = $props();
+
+	// TKMGMT acceptance criteria — derived helpers
+	const todayIso = new Date().toISOString().slice(0, 10);
+	const isOverdue = $derived(
+		!!data.project.deadline && data.project.deadline < todayIso && data.project.status !== 'completed'
+	);
+
+	const statusLabel = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+	const priorityBadge = (p: number) => {
+		if (p >= 8) return 'bg-rose-100 text-rose-700';
+		if (p >= 5) return 'bg-amber-100 text-amber-700';
+		return 'bg-emerald-100 text-emerald-700';
+	};
+
+	let newCommentBody = $state('');
+	let newCollaboratorEmail = $state('');
+	let newCollaboratorRole = $state('');
+	let actionMessage = $state<string | null>(null);
+
+	function fmtTime(iso: string): string {
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return iso;
+		return d.toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' });
+	}
+
+	function escapeHtml(value: string): string {
+		return value
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
+
+	function renderBody(body: string): string {
+		// TKMGMT9 — visually highlight @mentions. Escape first to prevent XSS
+		// since the result is rendered via {@html}.
+		return escapeHtml(body).replace(
+			/@([A-Za-z0-9_.+\-]+)/g,
+			'<span class="rounded bg-emerald-100 px-1 text-emerald-700">@$1</span>'
+		);
+	}
 	$effect(() => {
 		setAgentPageContext({
 			project_id: data.project.id,
@@ -122,6 +167,304 @@
 		<h1 class="text-xl font-semibold text-slate-900">Project Dashboard</h1>
 		<p class="mt-1 text-sm text-slate-500">Financial overview and P&L summary for this project.</p>
 	</div>
+
+	{#if actionMessage}
+		<div class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+			{actionMessage}
+		</div>
+	{/if}
+
+	<!-- TKMGMT1/3/4 — Project overview card -->
+	<section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0 flex-1">
+				<div class="flex flex-wrap items-center gap-2">
+					<span class="rounded-full px-2 py-0.5 text-[11px] font-medium {priorityBadge(data.project.priority ?? 5)}">
+						P{data.project.priority ?? 5}
+					</span>
+					<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+						{statusLabel(data.project.status)}
+					</span>
+					{#if data.project.recurrenceFrequency}
+						<span class="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+							⟳ {data.project.recurrenceFrequency}{data.project.recurrenceFrequency === 'custom'
+								? ` (every ${data.project.recurrenceInterval ?? 1}d)`
+								: ''}
+						</span>
+					{/if}
+					{#if data.project.parentProjectId}
+						<a
+							class="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 hover:underline"
+							href={`/projects/${data.project.parentProjectId}`}
+						>
+							sub-project
+						</a>
+					{/if}
+				</div>
+				<dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+					<div>
+						<dt class="text-[11px] uppercase tracking-wide text-slate-500">Deadline</dt>
+						<dd
+							class={isOverdue
+								? 'mt-0.5 text-base font-medium text-rose-600'
+								: 'mt-0.5 text-base font-medium text-slate-800'}
+						>
+							{data.project.deadline ?? '—'}
+							{#if isOverdue}<span class="ml-1 text-xs">(overdue)</span>{/if}
+						</dd>
+					</div>
+					<div>
+						<dt class="text-[11px] uppercase tracking-wide text-slate-500">Owner</dt>
+						<dd class="mt-0.5 text-base font-medium text-slate-800">
+							{#if data.owner}
+								{data.owner.name || data.owner.email}
+								{#if data.owner.name && data.owner.email}
+									<span class="ml-1 text-xs font-normal text-slate-500">
+										· {data.owner.email}
+									</span>
+								{/if}
+							{:else}
+								<span class="text-slate-400">Unassigned</span>
+							{/if}
+						</dd>
+					</div>
+					<div>
+						<dt class="text-[11px] uppercase tracking-wide text-slate-500">Collaborators</dt>
+						<dd class="mt-0.5 text-base font-medium text-slate-800">
+							{data.collaborators.length}
+						</dd>
+					</div>
+					<div>
+						<dt class="text-[11px] uppercase tracking-wide text-slate-500">Sub-projects</dt>
+						<dd class="mt-0.5 text-base font-medium text-slate-800">
+							{data.subProjects.length}
+						</dd>
+					</div>
+				</dl>
+				{#if data.project.notes}
+					<p class="mt-4 whitespace-pre-line rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">
+						<span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notes:</span>
+						{data.project.notes}
+					</p>
+				{/if}
+				{#if data.project.attachmentUrl}
+					<p class="mt-3 text-sm">
+						📎
+						<a class="text-[var(--sf-green)] underline" href={data.project.attachmentUrl} target="_blank" rel="noreferrer">
+							{data.project.attachmentName ?? 'Attachment'}
+						</a>
+					</p>
+				{/if}
+			</div>
+			<div class="flex flex-col items-end gap-2">
+				<p class="text-[11px] text-slate-400">Edit scope: {data.scope}</p>
+				{#if data.canEditCrucial && data.project.status !== 'completed'}
+					<form
+						method="POST"
+						action="?/complete"
+						use:enhance={() => {
+							return async ({ result }) => {
+								if (result.type === 'success') {
+									await invalidateAll();
+									actionMessage = result.data?.nextProjectId
+										? `Marked completed — next instance #${result.data.nextProjectId} created.`
+										: 'Marked completed.';
+								} else if (result.type === 'failure') {
+									actionMessage = (result.data as { message?: string })?.message ?? 'Failed';
+								}
+							};
+						}}
+					>
+						<button
+							type="submit"
+							class="rounded-md border border-emerald-600 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+						>
+							Mark Completed
+						</button>
+					</form>
+				{/if}
+			</div>
+		</div>
+
+		{#if data.subProjects.length > 0}
+			<div class="mt-5 border-t border-slate-100 pt-4">
+				<h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Sub-projects</h3>
+				<ul class="mt-2 divide-y divide-slate-100">
+					{#each data.subProjects as sp}
+						<li class="flex items-center justify-between py-2 text-sm">
+							<a class="font-medium text-slate-700 hover:text-[var(--sf-green)]" href={`/projects/${sp.id}`}>
+								{sp.name}
+							</a>
+							<span class="text-xs text-slate-500">
+								{sp.deadline ?? '—'} · {statusLabel(sp.status)}
+							</span>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+	</section>
+
+	<!-- TKMGMT1/2/3 — Collaborators -->
+	<section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+		<div class="flex items-baseline justify-between">
+			<h2 class="text-sm font-medium text-slate-800">Collaborators</h2>
+			<p class="text-xs text-slate-500">
+				{data.collaborators.length} {data.collaborators.length === 1 ? 'person' : 'people'}
+			</p>
+		</div>
+		{#if data.collaborators.length === 0}
+			<p class="mt-3 text-sm text-slate-500">No collaborators yet.</p>
+		{:else}
+			<ul class="mt-3 divide-y divide-slate-100">
+				{#each data.collaborators as c}
+					<li class="flex items-center justify-between py-2 text-sm">
+						<div>
+							<p class="font-medium text-slate-800">{c.name}</p>
+							<p class="text-xs text-slate-500">
+								{c.email}{c.role ? ` · ${c.role}` : ''}
+							</p>
+						</div>
+						{#if data.canEditCrucial}
+							<form
+								method="POST"
+								action="?/removeCollaborator"
+								use:enhance={() => {
+									return async ({ result }) => {
+										if (result.type === 'success') await invalidateAll();
+									};
+								}}
+							>
+								<input type="hidden" name="userId" value={c.userId} />
+								<button
+									type="submit"
+									class="rounded border border-rose-200 px-2 py-1 text-[11px] text-rose-700 hover:bg-rose-50"
+								>
+									Remove
+								</button>
+							</form>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		{#if data.canEditCrucial}
+			<form
+				class="mt-4 flex flex-wrap items-end gap-2"
+				method="POST"
+				action="?/addCollaborator"
+				use:enhance={() => {
+					return async ({ result }) => {
+						if (result.type === 'success') {
+							newCollaboratorEmail = '';
+							newCollaboratorRole = '';
+							await invalidateAll();
+						} else if (result.type === 'failure') {
+							actionMessage = (result.data as { message?: string })?.message ?? 'Failed';
+						}
+					};
+				}}
+			>
+				<label class="flex-1 space-y-1 text-xs">
+					<span class="text-slate-600">Collaborator email</span>
+					<input
+						name="email"
+						type="email"
+						required
+						placeholder="someone@example.com"
+						bind:value={newCollaboratorEmail}
+						class="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"
+					/>
+				</label>
+				<label class="w-40 space-y-1 text-xs">
+					<span class="text-slate-600">Role (optional)</span>
+					<input
+						name="role"
+						placeholder="reviewer"
+						bind:value={newCollaboratorRole}
+						class="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"
+					/>
+				</label>
+				<button
+					type="submit"
+					class="rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c]"
+				>
+					Add
+				</button>
+			</form>
+		{/if}
+	</section>
+
+	<!-- TKMGMT9 — Comments -->
+	<section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+		<div class="flex items-baseline justify-between">
+			<h2 class="text-sm font-medium text-slate-800">Discussion</h2>
+			<p class="text-xs text-slate-500">
+				{data.comments.length} comment{data.comments.length === 1 ? '' : 's'}
+			</p>
+		</div>
+		{#if data.canEdit}
+			<form
+				class="mt-3"
+				method="POST"
+				action="?/comment"
+				use:enhance={() => {
+					return async ({ result }) => {
+						if (result.type === 'success') {
+							newCommentBody = '';
+							await invalidateAll();
+						} else if (result.type === 'failure') {
+							actionMessage = (result.data as { message?: string })?.message ?? 'Failed';
+						}
+					};
+				}}
+			>
+				<textarea
+					name="body"
+					rows="3"
+					required
+					placeholder="Use @email to tag a teammate…"
+					bind:value={newCommentBody}
+					class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--sf-green)]"
+				></textarea>
+				<div class="mt-2 flex justify-end">
+					<button
+						type="submit"
+						class="rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c]"
+					>
+						Post comment
+					</button>
+				</div>
+			</form>
+		{:else}
+			<p class="mt-2 text-xs text-slate-500">
+				Only owners and collaborators can post comments.
+			</p>
+		{/if}
+
+		{#if data.comments.length === 0}
+			<p class="mt-4 text-sm text-slate-500">No comments yet.</p>
+		{:else}
+			<ul class="mt-4 space-y-3">
+				{#each data.comments as c}
+					<li class="rounded-md border border-slate-200 bg-slate-50/40 p-3">
+						<div class="flex items-baseline justify-between gap-2">
+							<p class="text-sm font-medium text-slate-800">
+								{c.authorName ?? c.authorEmail ?? 'Anonymous'}
+							</p>
+							<p class="text-[11px] text-slate-500">{fmtTime(c.createdAt)}</p>
+						</div>
+						<p class="mt-1.5 whitespace-pre-line text-sm text-slate-700">{@html renderBody(c.body)}</p>
+						{#if c.mentions.length > 0}
+							<p class="mt-2 text-[11px] text-slate-500">
+								Mentioned: {c.mentions.map((m: { email: string }) => m.email).join(', ')}
+							</p>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
 
 	<!-- Financial overview -->
 	<section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
