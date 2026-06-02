@@ -15,7 +15,21 @@ export function createProjectPublicApi(source: ProjectSource) {
 		getMembers: source.getMembers,
 		addMember: source.addMember,
 		removeMember: source.removeMember,
-		getProjectFinancials: source.getProjectFinancials
+		getProjectFinancials: source.getProjectFinancials,
+		// Wave 4 (TKMGMT) additions:
+		listCollaborators: source.listCollaborators,
+		addCollaborator: source.addCollaborator,
+		addCollaboratorByEmail: source.addCollaboratorByEmail,
+		removeCollaborator: source.removeCollaborator,
+		listComments: source.listComments,
+		addComment: source.addComment,
+		getEditableScope: source.getEditableScope,
+		getSubProjects: source.getSubProjects,
+		completeAndMaybeRecur: source.completeAndMaybeRecur,
+		getDashboard: source.getDashboard,
+		getCalendarEntries: source.getCalendarEntries,
+		searchUsers: source.searchUsers,
+		listUsers: source.listUsers
 	};
 }
 

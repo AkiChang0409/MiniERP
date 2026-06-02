@@ -52,7 +52,12 @@ export {
 } from '$modules/procurement/repositories/rfq.schema';
 
 // Project module
-export { projects, projectEmployees } from '$modules/project/repositories/project.schema';
+export {
+	projects,
+	projectEmployees,
+	projectCollaborators,
+	projectComments
+} from '$modules/project/repositories/project.schema';
 
 // Project archive documents (contracts / quotations / POs)
 export {

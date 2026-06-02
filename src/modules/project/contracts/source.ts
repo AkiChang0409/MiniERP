@@ -17,4 +17,23 @@ export interface ProjectSource {
 	addMember: ProjectServiceMethods['addMember'];
 	removeMember: ProjectServiceMethods['removeMember'];
 	getProjectFinancials: ProjectServiceMethods['getProjectFinancials'];
+	// TKMGMT1 / TKMGMT2 / TKMGMT3 / TKMGMT9 — collaborators + comments
+	listCollaborators: ProjectServiceMethods['listCollaborators'];
+	addCollaborator: ProjectServiceMethods['addCollaborator'];
+	addCollaboratorByEmail: ProjectServiceMethods['addCollaboratorByEmail'];
+	removeCollaborator: ProjectServiceMethods['removeCollaborator'];
+	listComments: ProjectServiceMethods['listComments'];
+	addComment: ProjectServiceMethods['addComment'];
+	// TKMGMT4 + TKMGMT2 gating
+	getEditableScope: ProjectServiceMethods['getEditableScope'];
+	// TKMGMT1 sub-project
+	getSubProjects: ProjectServiceMethods['getSubProjects'];
+	// TKMGMT6 / TKMGMT7
+	completeAndMaybeRecur: ProjectServiceMethods['completeAndMaybeRecur'];
+	// TKMGMT8 / TKMGMT10
+	getDashboard: ProjectServiceMethods['getDashboard'];
+	getCalendarEntries: ProjectServiceMethods['getCalendarEntries'];
+	// Collaborator picker helpers
+	searchUsers: ProjectServiceMethods['searchUsers'];
+	listUsers: ProjectServiceMethods['listUsers'];
 }

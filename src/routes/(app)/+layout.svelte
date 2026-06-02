@@ -197,8 +197,13 @@
 
 	const path = $derived(page.url.pathname);
 
-	// Project detail pages use their own sidebar; shell sidebar is hidden
-	const isProjectDetailPage = $derived(/^\/projects\/(?!new$)[^/]+/.test(path));
+	// Project detail pages use their own sidebar; shell sidebar is hidden.
+	// `/projects/new`, `/projects/dashboard`, `/projects/calendar` are top-level
+	// project pages and should stay inside the default centered max-w-6xl
+	// container along with `/projects` itself.
+	const isProjectDetailPage = $derived(
+		/^\/projects\/(?!new$|dashboard(\/|$)|calendar(\/|$))[^/]+/.test(path)
+	);
 
 	// Determine which primary section the route belongs to
 	const primaryFromPath = $derived.by((): Primary => {

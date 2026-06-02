@@ -14,6 +14,7 @@ export const load: PageServerLoad = async (event) => {
 				q: '',
 				status: '',
 				startedAfter: '',
+				scope: 'all' as 'all' | 'mine',
 				page: 1
 			},
 			pagination: {
@@ -28,13 +29,15 @@ export const load: PageServerLoad = async (event) => {
 	}
 
 	const pageRaw = Number.parseInt(event.url.searchParams.get('page') ?? '1', 10);
+	const scopeParam = event.url.searchParams.get('scope');
+	const scope: 'all' | 'mine' = scopeParam === 'mine' ? 'mine' : 'all';
 	const ctx = await createModuleContext(event);
 	const project = createProjectApi(ctx);
 	return project.getProjectListPage({
 		q: event.url.searchParams.get('q'),
 		status: event.url.searchParams.get('status'),
 		startedAfter: event.url.searchParams.get('startedAfter'),
+		scope,
 		page: Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1
 	});
 };
-

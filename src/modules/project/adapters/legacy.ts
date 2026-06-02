@@ -19,6 +19,19 @@ export function createProjectLegacySource(ctx: ModuleContext): ProjectSource {
 		getMembers: svc.getMembers.bind(svc),
 		addMember: svc.addMember.bind(svc),
 		removeMember: svc.removeMember.bind(svc),
-		getProjectFinancials: svc.getProjectFinancials.bind(svc)
+		getProjectFinancials: svc.getProjectFinancials.bind(svc),
+		listCollaborators: svc.listCollaborators.bind(svc),
+		addCollaborator: svc.addCollaborator.bind(svc),
+		addCollaboratorByEmail: svc.addCollaboratorByEmail.bind(svc),
+		removeCollaborator: svc.removeCollaborator.bind(svc),
+		listComments: svc.listComments.bind(svc),
+		addComment: svc.addComment.bind(svc),
+		getEditableScope: svc.getEditableScope.bind(svc),
+		getSubProjects: svc.getSubProjects.bind(svc),
+		completeAndMaybeRecur: svc.completeAndMaybeRecur.bind(svc),
+		getDashboard: svc.getDashboard.bind(svc),
+		getCalendarEntries: svc.getCalendarEntries.bind(svc),
+		searchUsers: svc.searchUsers.bind(svc),
+		listUsers: svc.listUsers.bind(svc)
 	};
 }
