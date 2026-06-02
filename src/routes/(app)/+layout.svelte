@@ -93,10 +93,28 @@
 
 	const hrGroups: SideGroup[] = [
 		{
-			title: 'HR',
+			title: 'Employees',
 			items: [
 				{ href: '/hr/employees', label: 'All Employees', moduleId: 'hr', icon: 'H' },
 				{ href: '/hr/employees/new', label: 'New Employee', moduleId: 'hr', icon: '+' }
+			]
+		},
+		{
+			title: 'Leave',
+			items: [
+				{ href: '/hr/leave', label: 'Leave Management', moduleId: 'hr', icon: 'L' }
+			]
+		},
+		{
+			title: 'Attendance',
+			items: [
+				{ href: '/hr/attendance', label: 'Attendance Management', moduleId: 'hr', icon: 'A' }
+			]
+		},
+		{
+			title: 'Overtime',
+			items: [
+				{ href: '/hr/overtime', label: 'Overtime Management', moduleId: 'hr', icon: 'O' }
 			]
 		}
 	];
@@ -213,8 +231,8 @@
 		if (path.startsWith('/inventory')) return 'inventory';
 		// Project: list and detail routes
 		if (path === '/projects' || path.startsWith('/projects/')) return 'project';
-		// HR: employee master data (same employee module as in-project Team & Cost)
-		if (path.startsWith('/hr/employees')) return 'hr';
+		// HR: employee master data and leave management
+		if (path.startsWith('/hr/')) return 'hr';
 		// Finance: dashboard, tax, expenses, /finance/* (supplier invoices live under Business Partner)
 		return 'finance';
 	});
@@ -278,6 +296,18 @@
 		}
 		if (itemPath === '/hr/employees') {
 			return path === '/hr/employees';
+		}
+		// HR / Leave
+		if (itemPath === '/hr/leave') {
+			return path.startsWith('/hr/leave');
+		}
+		// HR / Attendance
+		if (itemPath === '/hr/attendance') {
+			return path.startsWith('/hr/attendance');
+		}
+		// HR / Overtime
+		if (itemPath === '/hr/overtime') {
+			return path.startsWith('/hr/overtime');
 		}
 		// Procurement / Sales CRM
 		if (itemPath === '/procurement/suppliers') {

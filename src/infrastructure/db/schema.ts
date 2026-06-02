@@ -76,6 +76,23 @@ export {
 	payoutRecords
 } from '$modules/hr/repositories/employee.schema';
 
+// Leave Management tables (HR module)
+export {
+	leaveTypes,
+	leaveRequests,
+	leaveBalances,
+	leaveApprovalRecords
+} from '$modules/hr/repositories/leave.schema';
+
+// Attendance Management tables (HR module)
+export { attendanceRecords } from '$modules/hr/repositories/attendance.schema';
+
+// Overtime Management tables (HR module)
+export {
+	overtimeRequests,
+	overtimeApprovalRecords
+} from '$modules/hr/repositories/overtime.schema';
+
 // Finance fact tables (canonical expense + revenue per v4 expense-revenue-design)
 export {
 	documents,

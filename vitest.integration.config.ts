@@ -15,10 +15,16 @@ export default defineWorkersConfig({
 	},
 	test: {
 		include: ['src/**/*.integration.test.ts'],
+		globalSetup: ['./src/test/integration/global-setup.ts'],
 		poolOptions: {
 			workers: {
 				singleWorker: true,
-				wranglerConfigPath: './wrangler.test.jsonc'
+				wranglerConfigPath: './wrangler.test.jsonc',
+				miniflare: {
+					compatibilityDate: '2025-09-06',
+					compatibilityFlags: ['nodejs_als'],
+					d1Databases: ['DB']
+				}
 			}
 		}
 	}
