@@ -333,9 +333,7 @@
 							<option value="ongoing">Ongoing</option>
 							<option value="under_review">Under Review</option>
 							<option value="completed">Completed</option>
-							<option value="active">active (legacy)</option>
-							<option value="on_hold">on_hold (legacy)</option>
-							<option value="archived">archived</option>
+							<option value="archived">Archived</option>
 						</select>
 					</label>
 
