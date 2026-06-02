@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { createLeaveApi, LeaveValidationError } from '$modules/hr';
 import { createEventBus } from '$platform/events/index';
 import * as schema from '$infrastructure/db/schema';
@@ -389,5 +389,266 @@ describe('listLeaveBalances — remainingDays', () => {
 		expect(results2025.find((b) => b.id === 'lb-bal-2026')).toBeUndefined();
 		expect(results2026.find((b) => b.id === 'lb-bal-2026')).toBeDefined();
 		expect(results2026.find((b) => b.id === 'lb-bal-2025')).toBeUndefined();
+	});
+});
+
+// ─── Leave → Attendance sync ──────────────────────────────────────────────────
+
+// Helper: query all attendance records for a person within a date range
+async function findAttendance(
+	db: ReturnType<typeof drizzle>,
+	personId: string,
+	dateFrom: string,
+	dateTo: string
+) {
+	return db
+		.select()
+		.from(schema.attendanceRecords)
+		.where(
+			and(
+				isNull(schema.attendanceRecords.deletedAt),
+				eq(schema.attendanceRecords.personId, personId)
+			)
+		)
+		.then((rows) => rows.filter((r) => r.workDate >= dateFrom && r.workDate <= dateTo));
+}
+
+describe('approveLeaveRequest — attendance sync (annual leave)', () => {
+	it('creates on_leave attendance records for each day of the leave', async () => {
+		const ctx = makeCtx();
+		const { db } = ctx;
+		const api = createLeaveApi(ctx);
+
+		await seedPerson(db, 'p-sync-annual', 'Sync Alice');
+		await seedLeaveType(db, 'lt-sync-annual', 'ANNUAL_SYNC', 'Annual Sync', false);
+		await seedLeaveRequest(db, 'lr-sync-annual', 'p-sync-annual', 'lt-sync-annual', {
+			startDate: '2026-07-01',
+			totalDays: 3
+		});
+		// endDate defaults to '2026-06-05' in seedLeaveRequest — override inline
+		await db
+			.update(schema.leaveRequests)
+			.set({ endDate: '2026-07-03' })
+			.where(eq(schema.leaveRequests.id, 'lr-sync-annual'));
+		await seedLeaveBalance(db, 'lb-sync-annual', 'p-sync-annual', 'lt-sync-annual', {
+			entitledDays: 14, pendingDays: 3
+		});
+
+		await api.approveRequest('lr-sync-annual');
+
+		const records = await findAttendance(db, 'p-sync-annual', '2026-07-01', '2026-07-03');
+		expect(records).toHaveLength(3);
+		for (const rec of records) {
+			expect(rec.status).toBe('on_leave');
+			expect(rec.source).toBe('leave_sync');
+			expect(rec.payrollEffect).toBe('not_applicable');
+			expect(rec.checkInTime).toBeNull();
+			expect(rec.checkOutTime).toBeNull();
+			expect(rec.workedMinutes).toBeNull();
+			expect(rec.lateMinutes).toBe(0);
+			expect(rec.notes).toMatch('lr-sync-annual');
+		}
+		// Dates covered exactly 2026-07-01, 2026-07-02, 2026-07-03
+		const dates = records.map((r) => r.workDate).sort();
+		expect(dates).toEqual(['2026-07-01', '2026-07-02', '2026-07-03']);
+	});
+});
+
+describe('approveLeaveRequest — attendance sync (unpaid leave)', () => {
+	it('sets attendance payrollEffect = not_applicable even for unpaid leave', async () => {
+		const ctx = makeCtx();
+		const { db } = ctx;
+		const api = createLeaveApi(ctx);
+
+		await seedPerson(db, 'p-sync-unpaid', 'Sync Bob');
+		await seedLeaveType(db, 'lt-sync-unpaid', 'UNPAID_SYNC', 'Unpaid Sync', true);
+		await seedLeaveRequest(db, 'lr-sync-unpaid', 'p-sync-unpaid', 'lt-sync-unpaid', {
+			startDate: '2026-08-01',
+			totalDays: 1
+		});
+		await db
+			.update(schema.leaveRequests)
+			.set({ endDate: '2026-08-01' })
+			.where(eq(schema.leaveRequests.id, 'lr-sync-unpaid'));
+		await seedLeaveBalance(db, 'lb-sync-unpaid', 'p-sync-unpaid', 'lt-sync-unpaid', {
+			entitledDays: 30, pendingDays: 1
+		});
+
+		await api.approveRequest('lr-sync-unpaid');
+
+		// leave_requests.payrollEffect should be pending_export (unpaid)
+		const [req] = await db
+			.select()
+			.from(schema.leaveRequests)
+			.where(eq(schema.leaveRequests.id, 'lr-sync-unpaid'));
+		expect(req.payrollEffect).toBe('pending_export');
+
+		// attendance_records.payrollEffect must be not_applicable (never pending_export)
+		const records = await findAttendance(db, 'p-sync-unpaid', '2026-08-01', '2026-08-01');
+		expect(records).toHaveLength(1);
+		expect(records[0].status).toBe('on_leave');
+		expect(records[0].payrollEffect).toBe('not_applicable');
+	});
+});
+
+describe('approveLeaveRequest — attendance sync overwrite (mock record)', () => {
+	it('overwrites a pre-existing mock attendance record with on_leave', async () => {
+		const ctx = makeCtx();
+		const { db } = ctx;
+		const api = createLeaveApi(ctx);
+
+		await seedPerson(db, 'p-sync-overwrite', 'Sync Carol');
+		await seedLeaveType(db, 'lt-sync-overwrite', 'ANNUAL_OVW', 'Annual Overwrite', false);
+		await seedLeaveRequest(db, 'lr-sync-overwrite', 'p-sync-overwrite', 'lt-sync-overwrite', {
+			startDate: '2026-09-01',
+			totalDays: 1
+		});
+		await db
+			.update(schema.leaveRequests)
+			.set({ endDate: '2026-09-01' })
+			.where(eq(schema.leaveRequests.id, 'lr-sync-overwrite'));
+		await seedLeaveBalance(db, 'lb-sync-overwrite', 'p-sync-overwrite', 'lt-sync-overwrite', {
+			entitledDays: 14, pendingDays: 1
+		});
+
+		// Pre-existing mock attendance record for the same date
+		await db.insert(schema.attendanceRecords).values({
+			id: 'ar-pre-mock',
+			personId: 'p-sync-overwrite',
+			workDate: '2026-09-01',
+			checkInTime: '09:00',
+			checkOutTime: '18:00',
+			workedMinutes: 540,
+			lateMinutes: 0,
+			earlyLeaveMinutes: 0,
+			overtimeMinutes: 0,
+			status: 'present',
+			source: 'mock',
+			payrollEffect: 'not_applicable',
+			notes: null,
+			createdAt: now,
+			updatedAt: now
+		});
+
+		await api.approveRequest('lr-sync-overwrite');
+
+		const records = await findAttendance(db, 'p-sync-overwrite', '2026-09-01', '2026-09-01');
+		expect(records).toHaveLength(1);
+		expect(records[0].status).toBe('on_leave');
+		expect(records[0].source).toBe('leave_sync');
+		expect(records[0].checkInTime).toBeNull();
+		expect(records[0].workedMinutes).toBeNull();
+	});
+});
+
+describe('syncApprovedLeavesToAttendance — backfill', () => {
+	it('syncs already-approved leave requests to attendance_records', async () => {
+		const ctx = makeCtx();
+		const { db } = ctx;
+		const api = createLeaveApi(ctx);
+
+		await seedPerson(db, 'p-backfill-1', 'Backfill Dave');
+		await seedLeaveType(db, 'lt-backfill-1', 'ANNUAL_BF', 'Annual Backfill', false);
+
+		// Insert already-approved leave request directly (bypassing approveRequest)
+		await db.insert(schema.leaveRequests).values({
+			id: 'lr-backfill-1',
+			personId: 'p-backfill-1',
+			leaveTypeId: 'lt-backfill-1',
+			startDate: '2026-10-01',
+			endDate: '2026-10-02',
+			totalDays: 2,
+			status: 'approved',
+			source: 'mock',
+			payrollEffect: 'not_applicable',
+			submittedAt: now,
+			createdAt: now,
+			updatedAt: now
+		});
+
+		const synced = await api.syncBackfill('2026-10-01', '2026-10-31');
+		expect(synced).toBeGreaterThanOrEqual(1);
+
+		const records = await findAttendance(db, 'p-backfill-1', '2026-10-01', '2026-10-02');
+		expect(records).toHaveLength(2);
+		for (const rec of records) {
+			expect(rec.status).toBe('on_leave');
+			expect(rec.source).toBe('leave_sync');
+		}
+	});
+
+	it('is idempotent — re-running backfill does not duplicate records', async () => {
+		const ctx = makeCtx();
+		const { db } = ctx;
+		const api = createLeaveApi(ctx);
+
+		await seedPerson(db, 'p-backfill-2', 'Backfill Eve');
+		await seedLeaveType(db, 'lt-backfill-2', 'ANNUAL_BF2', 'Annual Backfill 2', false);
+		await db.insert(schema.leaveRequests).values({
+			id: 'lr-backfill-2',
+			personId: 'p-backfill-2',
+			leaveTypeId: 'lt-backfill-2',
+			startDate: '2026-11-01',
+			endDate: '2026-11-01',
+			totalDays: 1,
+			status: 'approved',
+			source: 'mock',
+			payrollEffect: 'not_applicable',
+			submittedAt: now,
+			createdAt: now,
+			updatedAt: now
+		});
+
+		await api.syncBackfill('2026-11-01', '2026-11-30');
+		await api.syncBackfill('2026-11-01', '2026-11-30'); // second run
+
+		const records = await findAttendance(db, 'p-backfill-2', '2026-11-01', '2026-11-01');
+		expect(records).toHaveLength(1); // exactly one, not two
+		expect(records[0].status).toBe('on_leave');
+	});
+
+	it('does not sync rejected or pending leave requests', async () => {
+		const ctx = makeCtx();
+		const { db } = ctx;
+		const api = createLeaveApi(ctx);
+
+		await seedPerson(db, 'p-backfill-3', 'Backfill Frank');
+		await seedLeaveType(db, 'lt-backfill-3', 'ANNUAL_BF3', 'Annual Backfill 3', false);
+
+		await db.insert(schema.leaveRequests).values([
+			{
+				id: 'lr-bf-pending',
+				personId: 'p-backfill-3',
+				leaveTypeId: 'lt-backfill-3',
+				startDate: '2026-12-01',
+				endDate: '2026-12-01',
+				totalDays: 1,
+				status: 'pending',
+				source: 'mock',
+				payrollEffect: 'not_applicable',
+				submittedAt: now,
+				createdAt: now,
+				updatedAt: now
+			},
+			{
+				id: 'lr-bf-rejected',
+				personId: 'p-backfill-3',
+				leaveTypeId: 'lt-backfill-3',
+				startDate: '2026-12-02',
+				endDate: '2026-12-02',
+				totalDays: 1,
+				status: 'rejected',
+				source: 'mock',
+				payrollEffect: 'not_applicable',
+				submittedAt: now,
+				createdAt: now,
+				updatedAt: now
+			}
+		]);
+
+		await api.syncBackfill('2026-12-01', '2026-12-31');
+
+		const records = await findAttendance(db, 'p-backfill-3', '2026-12-01', '2026-12-31');
+		expect(records).toHaveLength(0); // neither pending nor rejected should generate attendance
 	});
 });

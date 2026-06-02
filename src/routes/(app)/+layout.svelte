@@ -95,6 +95,12 @@
 			items: [
 				{ href: '/hr/leave', label: 'Leave Management', moduleId: 'hr', icon: 'L' }
 			]
+		},
+		{
+			title: 'Attendance',
+			items: [
+				{ href: '/hr/attendance', label: 'Attendance Management', moduleId: 'hr', icon: 'A' }
+			]
 		}
 	];
 

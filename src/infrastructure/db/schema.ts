@@ -62,6 +62,9 @@ export {
 	leaveApprovalRecords
 } from '$modules/hr/repositories/leave.schema';
 
+// Attendance Management tables (HR module)
+export { attendanceRecords } from '$modules/hr/repositories/attendance.schema';
+
 // Finance fact tables (canonical expense + revenue per v4 expense-revenue-design)
 export {
 	documents,

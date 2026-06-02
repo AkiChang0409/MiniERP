@@ -208,6 +208,44 @@ is managed exclusively by `LeaveService` through the approve/reject batch.
 
 ---
 
+## Attendance Sync
+
+When `approveLeaveRequest` commits successfully, `LeaveService` immediately calls
+`syncLeaveToAttendance(personId, startDate, endDate, leaveRequestId)`.
+
+This writes one `attendance_records` row per calendar date in the leave range:
+
+| Field | Value |
+|-------|-------|
+| `status` | `on_leave` |
+| `source` | `leave_sync` |
+| `payroll_effect` | `not_applicable` (always — see note below) |
+| `check_in/out_time` | `null` |
+| `worked_minutes` | `null` |
+| `notes` | `leave_sync:<leaveRequestId>` |
+
+**Overwrite policy:**
+- No existing record → INSERT
+- Existing with `source ∈ {mock, manual, leave_sync}` → UPDATE to `on_leave`
+- Existing with `source ∈ {mobile, terminal, employee_portal}` → skip (TODO: conflict flag)
+
+**Payroll note:** Even for Unpaid Leave (`affectsPayroll = true`), the attendance
+record's `payroll_effect` is always `not_applicable`. Payroll processes Unpaid Leave
+via `leave_requests.payroll_effect = pending_export` — not via `attendance_records`.
+This prevents double-counting.
+
+### Backfill
+
+```typescript
+await leave.syncBackfill(dateFrom, dateTo);
+// Returns the count of approved leave requests processed.
+// Safe to re-run — idempotent per (personId, workDate).
+```
+
+Use this after importing historical leave data or after retroactively approving requests.
+
+---
+
 ## Extension Points
 
 | When | What to add |

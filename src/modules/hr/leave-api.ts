@@ -11,6 +11,7 @@ export function createLeaveApi(ctx: ModuleContext) {
 		listLeaveRequests: svc.listLeaveRequests.bind(svc),
 		approveRequest: svc.approveLeaveRequest.bind(svc),
 		rejectRequest: svc.rejectLeaveRequest.bind(svc),
-		listLeaveBalances: svc.listLeaveBalances.bind(svc)
+		listLeaveBalances: svc.listLeaveBalances.bind(svc),
+		syncBackfill: svc.syncApprovedLeavesToAttendance.bind(svc)
 	};
 }

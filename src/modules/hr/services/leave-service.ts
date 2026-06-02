@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import type { ModuleContext } from '$platform/modules/types';
 import {
 	leaveApprovalRecords,
@@ -13,6 +13,34 @@ import {
 	LeaveRequestRepository,
 	LeaveTypeRepository
 } from '../repositories/leave-repository';
+import { attendanceRecords } from '../repositories/attendance.schema';
+import { AttendanceRepository } from '../repositories/attendance-repository';
+
+// ---------------------------------------------------------------------------
+// Leave → Attendance sync helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns every calendar date (YYYY-MM-DD) in [startDate, endDate] inclusive.
+ * Uses UTC to avoid DST shifts.
+ */
+function expandDateRange(startDate: string, endDate: string): string[] {
+	const dates: string[] = [];
+	const d = new Date(startDate + 'T00:00:00Z');
+	const end = new Date(endDate + 'T00:00:00Z');
+	while (d <= end) {
+		dates.push(d.toISOString().slice(0, 10));
+		d.setUTCDate(d.getUTCDate() + 1);
+	}
+	return dates;
+}
+
+/**
+ * Sources whose attendance records may be overwritten by a leave sync.
+ * Real punch-in sources (mobile / terminal / employee_portal) are intentionally
+ * excluded — overwriting verified punch data would be misleading.
+ */
+const OVERRIDABLE_SOURCES = new Set(['mock', 'manual', 'leave_sync']);
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -148,6 +176,96 @@ export class LeaveService {
 				updatedAt: now
 			})
 		]);
+
+		// Sync attendance records for every date in the leave range.
+		// This is best-effort derived data; the leave approval above already committed.
+		await this.syncLeaveToAttendance(request.personId, request.startDate, request.endDate, id);
+	}
+
+	/**
+	 * Writes (insert or update) one attendance_record per calendar date in the
+	 * leave range, setting status = 'on_leave', source = 'leave_sync'.
+	 *
+	 * Overwrite policy:
+	 *   - No existing record → INSERT
+	 *   - Existing record with source in OVERRIDABLE_SOURCES → UPDATE
+	 *   - Existing record with source in (mobile / terminal / employee_portal) → skip
+	 *     (TODO: flag conflict for HR review in a future iteration)
+	 *
+	 * payroll_effect is always 'not_applicable' regardless of leave type — Unpaid
+	 * Leave's payroll impact is handled exclusively by leave_requests.payroll_effect.
+	 */
+	private async syncLeaveToAttendance(
+		personId: string,
+		startDate: string,
+		endDate: string,
+		leaveRequestId: string
+	): Promise<void> {
+		const attendanceRepo = new AttendanceRepository(this.db);
+		const dates = expandDateRange(startDate, endDate);
+		const now = new Date().toISOString();
+		const notes = `leave_sync:${leaveRequestId}`;
+
+		const onLeaveFields = {
+			status: 'on_leave' as const,
+			source: 'leave_sync' as const,
+			payrollEffect: 'not_applicable' as const,
+			checkInTime: null,
+			checkOutTime: null,
+			workedMinutes: null,
+			lateMinutes: 0,
+			earlyLeaveMinutes: 0,
+			overtimeMinutes: 0,
+			notes,
+			updatedAt: now
+		};
+
+		for (const workDate of dates) {
+			const existing = await attendanceRepo.findByPersonDate(personId, workDate);
+
+			if (!existing) {
+				await this.db.insert(attendanceRecords).values({
+					id: crypto.randomUUID(),
+					personId,
+					workDate,
+					...onLeaveFields,
+					createdAt: now
+				});
+			} else if (OVERRIDABLE_SOURCES.has(existing.source)) {
+				await this.db
+					.update(attendanceRecords)
+					.set(onLeaveFields)
+					.where(eq(attendanceRecords.id, existing.id));
+			}
+			// source not in OVERRIDABLE_SOURCES (mobile / terminal / employee_portal):
+			// TODO: surface as a conflict flag for HR review in a future iteration
+		}
+	}
+
+	/**
+	 * Backfill: sync all approved leave requests that overlap [dateFrom, dateTo]
+	 * into attendance_records.  Safe to re-run — idempotent per (personId, workDate).
+	 *
+	 * Returns the count of leave requests processed.
+	 */
+	async syncApprovedLeavesToAttendance(dateFrom: string, dateTo: string): Promise<number> {
+		// Overlap condition: req.startDate <= dateTo AND req.endDate >= dateFrom
+		const approved = await this.db
+			.select()
+			.from(leaveRequests)
+			.where(
+				and(
+					isNull(leaveRequests.deletedAt),
+					eq(leaveRequests.status, 'approved'),
+					lte(leaveRequests.startDate, dateTo),
+					gte(leaveRequests.endDate, dateFrom)
+				)
+			);
+
+		for (const req of approved) {
+			await this.syncLeaveToAttendance(req.personId, req.startDate, req.endDate, req.id);
+		}
+		return approved.length;
 	}
 
 	async rejectLeaveRequest(id: string, reason: string) {

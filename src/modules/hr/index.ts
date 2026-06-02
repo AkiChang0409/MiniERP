@@ -26,6 +26,8 @@ export { createHrApi, type HrApi } from './api';
 export { createEmployeeApi, type EmployeeApi } from './employee-api';
 export { createLeaveApi, type LeaveApi } from './leave-api';
 export { LeaveValidationError } from './services/leave-service';
+export { createAttendanceApi, type AttendanceApi } from './attendance-api';
+export { AttendanceValidationError } from './services/attendance-service';
 export { createPersonApi, type PersonApi } from './person-api';
 export {
 	staffCostPayoutStatuses,
