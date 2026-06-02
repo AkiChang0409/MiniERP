@@ -17,9 +17,9 @@ import { salesCrmModule } from '$modules/sales-crm';
 // Procurement and Sales CRM expose supplier/customer workspaces as separate modules.
 registerModules([
 	coreModule,
-	procurementModule,
 	salesCrmModule,
 	inventoryModule,
+	procurementModule,
 	projectModule,
 	hrModule,
 	financeModule,

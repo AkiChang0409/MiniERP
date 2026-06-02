@@ -2,6 +2,8 @@ import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core
 import { timeFields } from '$platform/modules/schema-helpers';
 import { businessPartners } from '$modules/sales-crm/repositories/customer.schema';
 import { projects } from '$modules/project/repositories/project.schema';
+import { items } from '$modules/inventory/repositories/item.schema';
+import { warehouses, warehouseBinLocations } from '$modules/inventory/repositories/warehouse.schema';
 
 export const procurementRfqs = sqliteTable(
 	'procurement_rfqs',
@@ -240,6 +242,14 @@ export const procurementPurchaseOrderItems = sqliteTable(
 		lineSubtotal: real('line_subtotal').notNull().default(0),
 		taxCode: text('tax_code', { enum: ['SR', 'ZR', 'ES', 'OP'] }),
 		deliveryDate: text('delivery_date'),
+		// PUR005 — optional inventory linkage so GRN can adjust stock
+		itemId: text('item_id').references(() => items.id),
+		warehouseId: text('warehouse_id').references(() => warehouses.id),
+		binLocationId: text('bin_location_id').references(() => warehouseBinLocations.id),
+		quarantineBinId: text('quarantine_bin_id').references(() => warehouseBinLocations.id),
+		inspectionRequired: integer('inspection_required', { mode: 'boolean' })
+			.notNull()
+			.default(false),
 		notes: text('notes'),
 		...timeFields
 	},
@@ -262,11 +272,51 @@ export const procurementPurchaseOrderReceipts = sqliteTable(
 		acceptedQuantity: real('accepted_quantity').notNull().default(0),
 		rejectedQuantity: real('rejected_quantity').notNull().default(0),
 		backOrderQuantity: real('back_order_quantity').notNull().default(0),
+		// PUR005 — GRN status machine: receipts default to `accepted` (no QC required);
+		// QC-routed receipts start as `pending_inspection` and transition via
+		// recordReceiptInspection.
+		status: text('status', {
+			enum: ['pending_inspection', 'accepted', 'rejected', 'quarantined']
+		})
+			.notNull()
+			.default('accepted'),
+		inspectionRequired: integer('inspection_required', { mode: 'boolean' })
+			.notNull()
+			.default(false),
+		inspectionStatus: text('inspection_status', {
+			enum: ['not_required', 'pending', 'accepted', 'rejected', 'quarantined']
+		})
+			.notNull()
+			.default('not_required'),
+		inspectionDecisionAt: text('inspection_decision_at'),
+		inspectionDecisionByUserId: text('inspection_decision_by_user_id'),
+		inspectionDecisionByEmail: text('inspection_decision_by_email'),
+		inspectionNotes: text('inspection_notes'),
+		rejectionReason: text('rejection_reason'),
+		returnRequired: integer('return_required', { mode: 'boolean' }).notNull().default(false),
+		overReceiptFlag: integer('over_receipt_flag', { mode: 'boolean' }).notNull().default(false),
+		// Inventory linkage — copied from PO item at receipt time so later edits don't drift.
+		itemId: text('item_id').references(() => items.id),
+		warehouseId: text('warehouse_id').references(() => warehouses.id),
+		binLocationId: text('bin_location_id').references(() => warehouseBinLocations.id),
+		quarantineBinId: text('quarantine_bin_id').references(() => warehouseBinLocations.id),
+		unitCost: real('unit_cost'),
+		// Stock movement IDs — written when the receipt touches inventory so we can
+		// trace GRN → ledger without grepping reference_id.
+		quarantineMovementId: text('quarantine_movement_id'),
+		acceptanceMovementId: text('acceptance_movement_id'),
+		returnMovementId: text('return_movement_id'),
+		paymentTriggeredAt: text('payment_triggered_at'),
+		paymentReference: text('payment_reference'),
+		receivedByUserId: text('received_by_user_id'),
+		receivedByEmail: text('received_by_email'),
 		notes: text('notes'),
 		...timeFields
 	},
 	(table) => [
 		index('idx_procurement_po_receipts_po').on(table.poId),
-		index('idx_procurement_po_receipts_item').on(table.poItemId)
+		index('idx_procurement_po_receipts_item').on(table.poItemId),
+		index('idx_procurement_po_receipts_status').on(table.status),
+		index('idx_procurement_po_receipts_inspection').on(table.inspectionStatus)
 	]
 );

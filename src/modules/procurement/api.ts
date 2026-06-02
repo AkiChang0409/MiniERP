@@ -25,6 +25,7 @@ export function createProcurementApi(ctx: ModuleContext) {
 		updatePurchaseOrderApproval: svc.updatePurchaseOrderApproval.bind(svc),
 		recordPurchaseOrderAcknowledgment: svc.recordPurchaseOrderAcknowledgment.bind(svc),
 		recordPurchaseOrderReceipt: svc.recordPurchaseOrderReceipt.bind(svc),
+		recordReceiptInspection: svc.recordReceiptInspection.bind(svc),
 		listPurchaseOrders: svc.listPurchaseOrders.bind(svc)
 	};
 }

@@ -2,6 +2,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 import { fail } from '@sveltejs/kit';
 import { createProcurementApi } from '$modules/procurement';
+import { createInventoryApi } from '$modules/inventory';
 import { createModuleContext } from '$platform/modules';
 
 function text(form: FormData, key: string) {
@@ -46,6 +47,11 @@ function parsePoItemRows(form: FormData) {
 	const uoms = form.getAll('poItemUom').map(String);
 	const unitPrices = form.getAll('poItemUnitPrice').map(String);
 	const taxCodes = form.getAll('poItemTaxCode').map(String);
+	const itemIds = form.getAll('poItemInventoryId').map(String);
+	const warehouseIds = form.getAll('poItemWarehouseId').map(String);
+	const binIds = form.getAll('poItemBinId').map(String);
+	const quarantineBinIds = form.getAll('poItemQuarantineBinId').map(String);
+	const inspectionFlags = form.getAll('poItemInspectionRequired').map(String);
 	const max = Math.max(
 		codes.length,
 		descriptions.length,
@@ -67,7 +73,12 @@ function parsePoItemRows(form: FormData) {
 			quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
 			uom: (uoms[i] ?? '').trim() || 'unit',
 			unitPrice: Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0,
-			taxCode: (taxCodes[i] || undefined) as 'SR' | 'ZR' | 'ES' | 'OP' | undefined
+			taxCode: (taxCodes[i] || undefined) as 'SR' | 'ZR' | 'ES' | 'OP' | undefined,
+			itemId: (itemIds[i] ?? '').trim() || undefined,
+			warehouseId: (warehouseIds[i] ?? '').trim() || undefined,
+			binLocationId: (binIds[i] ?? '').trim() || undefined,
+			quarantineBinId: (quarantineBinIds[i] ?? '').trim() || undefined,
+			inspectionRequired: (inspectionFlags[i] ?? '') === 'on' ? true : undefined
 		});
 	}
 	return items;
@@ -80,6 +91,9 @@ export const load: PageServerLoad = async (event) => {
 			rfqs: [],
 			suppliers: [],
 			purchaseOrders: [],
+			inventoryItems: [],
+			warehouses: [],
+			bins: [],
 			selectedRfqId,
 			comparison: null
 		};
@@ -87,13 +101,29 @@ export const load: PageServerLoad = async (event) => {
 
 	const ctx = await createModuleContext(event);
 	const procurement = createProcurementApi(ctx);
-	const [rfqs, suppliers, purchaseOrders] = await Promise.all([
+	const inventory = createInventoryApi(ctx);
+	const [rfqs, suppliers, purchaseOrders, inventoryItems, warehouses] = await Promise.all([
 		procurement.listRfqs(),
 		procurement.listSuppliers(),
-		procurement.listPurchaseOrders()
+		procurement.listPurchaseOrders(),
+		inventory.listItems(),
+		inventory.listWarehouses()
 	]);
+	const binLists = await Promise.all(
+		warehouses.map((wh) => inventory.listBinsForWarehouse(wh.id))
+	);
+	const bins = binLists.flat();
 	const comparison = selectedRfqId ? await procurement.getRfqComparison(selectedRfqId) : null;
-	return { rfqs, suppliers, purchaseOrders, selectedRfqId, comparison };
+	return {
+		rfqs,
+		suppliers,
+		purchaseOrders,
+		inventoryItems,
+		warehouses,
+		bins,
+		selectedRfqId,
+		comparison
+	};
 };
 
 export const actions: Actions = {
@@ -261,15 +291,48 @@ export const actions: Actions = {
 		if (!poId || !poItemId) return fail(400, { error: 'Missing PO item' });
 		const ctx = await createModuleContext(event);
 		const procurement = createProcurementApi(ctx);
-		await procurement.recordPurchaseOrderReceipt(poId, {
-			poItemId,
-			receiptNumber: text(form, 'receiptNumber'),
-			receiptDate: text(form, 'receiptDate'),
-			quantityReceived: num(form, 'quantityReceived') ?? 0,
-			acceptedQuantity: num(form, 'acceptedQuantity'),
-			rejectedQuantity: num(form, 'rejectedQuantity'),
-			notes: text(form, 'notes')
-		});
+		try {
+			await procurement.recordPurchaseOrderReceipt(poId, {
+				poItemId,
+				receiptNumber: text(form, 'receiptNumber'),
+				receiptDate: text(form, 'receiptDate'),
+				quantityReceived: num(form, 'quantityReceived') ?? 0,
+				acceptedQuantity: num(form, 'acceptedQuantity'),
+				rejectedQuantity: num(form, 'rejectedQuantity'),
+				itemId: text(form, 'itemId'),
+				warehouseId: text(form, 'warehouseId'),
+				binLocationId: text(form, 'binLocationId'),
+				quarantineBinId: text(form, 'quarantineBinId'),
+				unitCost: num(form, 'unitCost'),
+				inspectionRequired: form.get('inspectionRequired') === 'on' ? true : undefined,
+				notes: text(form, 'notes')
+			});
+		} catch (err) {
+			return fail(400, { error: (err as Error).message });
+		}
+		return { success: true };
+	},
+
+	inspectReceipt: async (event) => {
+		if (!event.platform) return fail(503, { error: 'Platform unavailable' });
+		const form = await event.request.formData();
+		const receiptId = text(form, 'receiptId');
+		const decision = text(form, 'decision') as 'accept' | 'reject' | 'quarantine' | undefined;
+		if (!receiptId || !decision) return fail(400, { error: 'Missing receipt or decision' });
+		const ctx = await createModuleContext(event);
+		const procurement = createProcurementApi(ctx);
+		try {
+			await procurement.recordReceiptInspection(receiptId, {
+				decision,
+				acceptedQuantity: num(form, 'acceptedQuantity'),
+				rejectedQuantity: num(form, 'rejectedQuantity'),
+				reason: text(form, 'reason'),
+				notes: text(form, 'notes'),
+				returnRequired: form.get('returnRequired') === 'on'
+			});
+		} catch (err) {
+			return fail(400, { error: (err as Error).message });
+		}
 		return { success: true };
 	}
 };

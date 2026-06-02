@@ -1,7 +1,9 @@
 import type { ModuleContext } from '$platform/modules/types';
-import { NotFoundError } from '$platform/modules/errors';
+import { NotFoundError, ValidationError } from '$platform/modules/errors';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { AuditService } from '$platform/audit/audit-service';
+import { createEvent } from '$platform/modules';
+import { createInventoryApi, type InventoryApi } from '$modules/inventory';
 import { SupplierRepository } from './repository';
 import {
 	partnerContacts,
@@ -188,6 +190,12 @@ type PurchaseOrderItemInput = {
 	taxCode?: TaxCode;
 	deliveryDate?: string;
 	notes?: string;
+	// PUR005 — inventory linkage used by the GRN flow.
+	itemId?: string;
+	warehouseId?: string;
+	binLocationId?: string;
+	quarantineBinId?: string;
+	inspectionRequired?: boolean;
 };
 
 export type CreatePurchaseOrderInput = {
@@ -233,6 +241,22 @@ export type PurchaseOrderReceiptInput = {
 	acceptedQuantity?: number;
 	rejectedQuantity?: number;
 	notes?: string;
+	// PUR005 — optional GRN inputs (override PO-line defaults when present)
+	itemId?: string;
+	warehouseId?: string;
+	binLocationId?: string;
+	quarantineBinId?: string;
+	unitCost?: number;
+	inspectionRequired?: boolean;
+};
+
+export type ReceiptInspectionInput = {
+	decision: 'accept' | 'reject' | 'quarantine';
+	acceptedQuantity?: number;
+	rejectedQuantity?: number;
+	reason?: string;
+	notes?: string;
+	returnRequired?: boolean;
 };
 
 function nullable(value?: string) {
@@ -331,12 +355,20 @@ export class ProcurementService {
 	private db: ModuleContext['db'];
 	private audit: AuditService;
 	private user: ModuleContext['user'];
+	private ctx: ModuleContext;
+	private inventoryApi: InventoryApi | null = null;
 
 	constructor(ctx: ModuleContext) {
+		this.ctx = ctx;
 		this.db = ctx.db;
 		this.suppliers = new SupplierRepository(ctx.db);
 		this.audit = new AuditService(ctx);
 		this.user = ctx.user;
+	}
+
+	private inventory(): InventoryApi {
+		if (!this.inventoryApi) this.inventoryApi = createInventoryApi(this.ctx);
+		return this.inventoryApi;
 	}
 
 	async listSuppliers() {
@@ -1017,6 +1049,11 @@ export class ProcurementService {
 				lineSubtotal,
 				taxCode: item.taxCode ?? input.taxCode ?? null,
 				deliveryDate: nullable(item.deliveryDate) ?? nullable(input.deliveryDate),
+				itemId: nullable(item.itemId),
+				warehouseId: nullable(item.warehouseId),
+				binLocationId: nullable(item.binLocationId),
+				quarantineBinId: nullable(item.quarantineBinId),
+				inspectionRequired: item.inspectionRequired ?? false,
 				notes: nullable(item.notes),
 				createdAt: now,
 				updatedAt: now
@@ -1168,58 +1205,465 @@ export class ProcurementService {
 
 		const now = new Date().toISOString();
 		const quantityReceived = Math.max(0, finiteNumber(input.quantityReceived));
-		if (quantityReceived <= 0) throw new Error('Receipt quantity must be greater than zero');
-		const acceptedQuantity = Math.max(0, finiteNumber(input.acceptedQuantity, quantityReceived));
-		const rejectedQuantity = Math.max(0, finiteNumber(input.rejectedQuantity));
-		const nextReceived = Math.min(finiteNumber(item.quantity), finiteNumber(item.receivedQuantity) + acceptedQuantity);
-		const backOrderQuantity = Math.max(0, finiteNumber(item.quantity) - nextReceived);
+		if (quantityReceived <= 0) throw new ValidationError('Receipt quantity must be greater than zero');
+
+		// Resolve inventory linkage — receipt input overrides PO-line defaults.
+		const itemId = nullable(input.itemId) ?? (item.itemId as string | null);
+		const warehouseId = nullable(input.warehouseId) ?? (item.warehouseId as string | null);
+		const binLocationId = nullable(input.binLocationId) ?? (item.binLocationId as string | null);
+		const quarantineBinId = nullable(input.quarantineBinId) ?? (item.quarantineBinId as string | null);
+
+		// Resolve inspection requirement: item input > PO-line flag > item master flag > supplier profile flag.
+		const itemMaster = itemId ? await this.findInventoryItem(itemId) : null;
+		const supplierProfile = po.supplierId ? await this.getProfileByPartnerId(po.supplierId) : null;
+		const inspectionRequired =
+			input.inspectionRequired ??
+			((item as any).inspectionRequired as boolean | undefined) ??
+			Boolean(itemMaster?.inspectionRequired) ??
+			Boolean(supplierProfile?.inspectionRequired) ??
+			false;
+
+		// Over-receipt tolerance: receipts may exceed the open balance up to
+		// `(quantity * (1 + tolerance/100))`. Beyond that we reject the GRN.
+		const tolerancePct = Math.max(
+			0,
+			finiteNumber(itemMaster?.overReceiptTolerancePct, 0)
+		);
+		const ordered = finiteNumber(item.quantity);
+		const alreadyReceived = finiteNumber(item.receivedQuantity);
+		const maxReceivable = ordered * (1 + tolerancePct / 100);
+		const projectedReceived = alreadyReceived + quantityReceived;
+		if (projectedReceived - maxReceivable > 1e-6) {
+			throw new ValidationError(
+				`Receipt exceeds over-receipt tolerance: ordered ${ordered}, already received ${alreadyReceived}, this receipt ${quantityReceived}, tolerance ${tolerancePct}% (max ${maxReceivable})`
+			);
+		}
+		const overReceiptFlag = projectedReceived - ordered > 1e-6;
+
+		// Accepted / rejected default — when no QC required, the warehouse user
+		// can split the receipt up front. When QC is required we ignore the
+		// up-front split because the inspector makes that call later.
+		const acceptedQuantityInput = Math.max(
+			0,
+			Math.min(quantityReceived, finiteNumber(input.acceptedQuantity, quantityReceived))
+		);
+		const rejectedQuantityInput = Math.max(
+			0,
+			Math.min(quantityReceived - acceptedQuantityInput, finiteNumber(input.rejectedQuantity))
+		);
+
+		// Short receipt — back-order balance after THIS receipt assuming the
+		// accepted portion lands. Inspection-routed receipts treat the whole
+		// receipt as in-flight (back order unchanged) until the inspector accepts.
+		const provisionalReceived = inspectionRequired
+			? alreadyReceived
+			: Math.min(ordered, alreadyReceived + acceptedQuantityInput);
+		const backOrderQuantity = Math.max(0, ordered - provisionalReceived);
+
+		const unitCost =
+			input.unitCost !== undefined
+				? Math.max(0, finiteNumber(input.unitCost))
+				: finiteNumber(item.unitPrice, 0);
+
+		const receiptId = crypto.randomUUID();
+		const receiptDate = nullable(input.receiptDate) ?? now.slice(0, 10);
+		const receiptNumber = nullable(input.receiptNumber) ?? generatedNumber('GRN');
+
+		// If we have a full inventory triple and inspection is NOT required,
+		// stock lands directly in the receiving bin and we trigger payment.
+		// If inspection IS required and a quarantine bin is provided, stock is
+		// routed to that bin and waits for the inspector.
+		let quarantineMovementId: string | null = null;
+		let acceptanceMovementId: string | null = null;
+		const canTouchInventory = Boolean(itemId && warehouseId);
+
+		if (inspectionRequired && canTouchInventory && quarantineBinId && quantityReceived > 0) {
+			const movement = await this.inventory().adjustStock({
+				itemId: itemId!,
+				warehouseId: warehouseId!,
+				binLocationId: quarantineBinId,
+				quantityDelta: quantityReceived,
+				movementType: 'receipt',
+				unitCost,
+				referenceType: 'po_receipt_quarantine',
+				referenceId: receiptId,
+				notes: `GRN ${receiptNumber} pending inspection`
+			});
+			quarantineMovementId = movement.movementId;
+		} else if (
+			!inspectionRequired &&
+			canTouchInventory &&
+			binLocationId &&
+			acceptedQuantityInput > 0
+		) {
+			const movement = await this.inventory().adjustStock({
+				itemId: itemId!,
+				warehouseId: warehouseId!,
+				binLocationId,
+				quantityDelta: acceptedQuantityInput,
+				movementType: 'receipt',
+				unitCost,
+				referenceType: 'po_receipt',
+				referenceId: receiptId,
+				notes: `GRN ${receiptNumber} accepted on receipt`
+			});
+			acceptanceMovementId = movement.movementId;
+		}
+
+		const initialStatus: 'pending_inspection' | 'accepted' = inspectionRequired
+			? 'pending_inspection'
+			: 'accepted';
+		const initialInspectionStatus: 'not_required' | 'pending' = inspectionRequired
+			? 'pending'
+			: 'not_required';
+
 		const receipt = {
-			id: crypto.randomUUID(),
+			id: receiptId,
 			poId,
 			poItemId: input.poItemId,
-			receiptNumber: nullable(input.receiptNumber) ?? generatedNumber('GRN'),
-			receiptDate: nullable(input.receiptDate) ?? now.slice(0, 10),
+			receiptNumber,
+			receiptDate,
 			quantityReceived,
-			acceptedQuantity,
-			rejectedQuantity,
+			acceptedQuantity: inspectionRequired ? 0 : acceptedQuantityInput,
+			rejectedQuantity: inspectionRequired ? 0 : rejectedQuantityInput,
 			backOrderQuantity,
+			status: initialStatus,
+			inspectionRequired,
+			inspectionStatus: initialInspectionStatus,
+			inspectionDecisionAt: null,
+			inspectionDecisionByUserId: null,
+			inspectionDecisionByEmail: null,
+			inspectionNotes: null,
+			rejectionReason: null,
+			returnRequired: false,
+			overReceiptFlag,
+			itemId,
+			warehouseId,
+			binLocationId,
+			quarantineBinId,
+			unitCost,
+			quarantineMovementId,
+			acceptanceMovementId,
+			returnMovementId: null,
+			paymentTriggeredAt: null,
+			paymentReference: null,
+			receivedByUserId: this.user?.id ?? null,
+			receivedByEmail: this.user?.email ?? null,
 			notes: nullable(input.notes),
 			createdAt: now,
 			updatedAt: now
 		};
 		await this.db.insert(procurementPurchaseOrderReceipts).values(receipt as any);
+
+		// Only "accepted" portion updates the PO line received_qty. Inspection-
+		// routed receipts don't bump received_qty until the inspector accepts.
 		await this.db
 			.update(procurementPurchaseOrderItems)
-			.set({ receivedQuantity: nextReceived, backOrderedQuantity: backOrderQuantity, updatedAt: now } as any)
-			.where(eq(procurementPurchaseOrderItems.id, input.poItemId));
-
-		const refreshedItems = items.map((row) =>
-			row.id === input.poItemId
-				? { ...row, receivedQuantity: nextReceived, backOrderedQuantity: backOrderQuantity }
-				: row
-		);
-		const orderedTotal = refreshedItems.reduce((sum, row) => sum + finiteNumber(row.quantity), 0);
-		const receivedTotal = refreshedItems.reduce((sum, row) => sum + finiteNumber(row.receivedQuantity), 0);
-		const nextStatus = receivedTotal >= orderedTotal ? 'received' : receivedTotal > 0 ? 'back_ordered' : po.status;
-		await this.db
-			.update(procurementPurchaseOrders)
 			.set({
-				status: nextStatus,
-				goodsReceiptDate: receipt.receiptDate,
+				receivedQuantity: provisionalReceived,
+				backOrderedQuantity: backOrderQuantity,
 				updatedAt: now
 			} as any)
-			.where(eq(procurementPurchaseOrders.id, poId));
+			.where(eq(procurementPurchaseOrderItems.id, input.poItemId));
+
+		await this.recomputePoStatus(poId, receiptDate, now);
+
 		await this.audit.writeLog({
 			module: 'procurement',
 			actionType: 'update',
-			action: 'purchase_order.receipt.recorded',
+			action: inspectionRequired
+				? 'purchase_order.receipt.pending_inspection'
+				: 'purchase_order.receipt.recorded',
 			entityType: 'purchase_order',
 			entityId: poId,
 			oldValue: po,
-			newValue: { receipt, status: nextStatus },
-			metadata: { poItemId: input.poItemId, quantityReceived, acceptedQuantity, backOrderQuantity }
+			newValue: { receipt },
+			metadata: {
+				poItemId: input.poItemId,
+				receiptId,
+				quantityReceived,
+				acceptedQuantity: receipt.acceptedQuantity,
+				rejectedQuantity: receipt.rejectedQuantity,
+				backOrderQuantity,
+				inspectionRequired,
+				overReceiptFlag,
+				itemId,
+				warehouseId,
+				quarantineBinId
+			}
 		});
+
+		// Receipts that auto-accept (no QC) trigger payment immediately.
+		if (!inspectionRequired && acceptedQuantityInput > 0) {
+			await this.triggerPurchaseOrderPayment(poId, receiptId, {
+				acceptedQuantity: acceptedQuantityInput,
+				unitCost
+			});
+		}
+
 		return receipt;
+	}
+
+	async recordReceiptInspection(receiptId: string, input: ReceiptInspectionInput) {
+		const receipt = await this.getReceipt(receiptId);
+		if (receipt.inspectionStatus !== 'pending' && receipt.inspectionStatus !== 'quarantined') {
+			throw new ValidationError(
+				`Receipt ${receipt.receiptNumber ?? receiptId} is not awaiting inspection (status ${receipt.inspectionStatus})`
+			);
+		}
+		const po = await this.getPurchaseOrder(receipt.poId);
+		const items = await this.getPurchaseOrderItems(receipt.poId);
+		const poItem = items.find((row) => row.id === receipt.poItemId);
+		if (!poItem) throw new NotFoundError('Purchase order item', receipt.poItemId);
+
+		const now = new Date().toISOString();
+		const quantityReceived = finiteNumber(receipt.quantityReceived);
+		const acceptedQuantity = Math.max(
+			0,
+			Math.min(quantityReceived, finiteNumber(input.acceptedQuantity, quantityReceived))
+		);
+		const rejectedQuantity = Math.max(
+			0,
+			Math.min(quantityReceived - acceptedQuantity, finiteNumber(input.rejectedQuantity))
+		);
+
+		let acceptanceMovementId = receipt.acceptanceMovementId as string | null;
+		let returnMovementId = receipt.returnMovementId as string | null;
+		let nextStatus: 'accepted' | 'rejected' | 'quarantined' = 'accepted';
+		let nextInspectionStatus: 'accepted' | 'rejected' | 'quarantined' = 'accepted';
+		let returnRequired = Boolean(input.returnRequired);
+
+		const canTouchInventory = Boolean(receipt.itemId && receipt.warehouseId);
+
+		if (input.decision === 'accept') {
+			nextStatus = 'accepted';
+			nextInspectionStatus = 'accepted';
+			if (canTouchInventory && acceptedQuantity > 0) {
+				// If stock was previously parked in quarantine, drain it first
+				// (negative quarantine movement) before crediting the receiving bin.
+				if (receipt.quarantineBinId && receipt.quarantineMovementId) {
+					await this.inventory().adjustStock({
+						itemId: receipt.itemId!,
+						warehouseId: receipt.warehouseId!,
+						binLocationId: receipt.quarantineBinId,
+						quantityDelta: -acceptedQuantity,
+						movementType: 'transfer_out',
+						unitCost: receipt.unitCost ?? undefined,
+						referenceType: 'po_receipt_release',
+						referenceId: receipt.id,
+						notes: `GRN ${receipt.receiptNumber ?? receipt.id} accepted`
+					});
+				}
+				if (receipt.binLocationId) {
+					const movement = await this.inventory().adjustStock({
+						itemId: receipt.itemId!,
+						warehouseId: receipt.warehouseId!,
+						binLocationId: receipt.binLocationId,
+						quantityDelta: acceptedQuantity,
+						movementType: receipt.quarantineMovementId ? 'transfer_in' : 'receipt',
+						unitCost: receipt.unitCost ?? undefined,
+						referenceType: 'po_receipt',
+						referenceId: receipt.id,
+						notes: `GRN ${receipt.receiptNumber ?? receipt.id} accepted into stock`
+					});
+					acceptanceMovementId = movement.movementId;
+				}
+			}
+		} else if (input.decision === 'reject') {
+			nextStatus = 'rejected';
+			nextInspectionStatus = 'rejected';
+			returnRequired = input.returnRequired ?? true;
+			// Stock previously parked in quarantine must come back out (return / scrap).
+			if (canTouchInventory && receipt.quarantineBinId && receipt.quarantineMovementId) {
+				const movement = await this.inventory().adjustStock({
+					itemId: receipt.itemId!,
+					warehouseId: receipt.warehouseId!,
+					binLocationId: receipt.quarantineBinId,
+					quantityDelta: -quantityReceived,
+					movementType: 'scrap',
+					unitCost: receipt.unitCost ?? undefined,
+					referenceType: 'po_receipt_return',
+					referenceId: receipt.id,
+					notes: `GRN ${receipt.receiptNumber ?? receipt.id} rejected${
+						input.reason ? `: ${input.reason}` : ''
+					}`
+				});
+				returnMovementId = movement.movementId;
+			}
+		} else {
+			// quarantine — keep in quarantine bin, mark decision so it doesn't
+			// block the receipt list but flag for follow-up review.
+			nextStatus = 'quarantined';
+			nextInspectionStatus = 'quarantined';
+		}
+
+		await this.db
+			.update(procurementPurchaseOrderReceipts)
+			.set({
+				status: nextStatus,
+				inspectionStatus: nextInspectionStatus,
+				acceptedQuantity,
+				rejectedQuantity,
+				inspectionDecisionAt: now,
+				inspectionDecisionByUserId: this.user?.id ?? null,
+				inspectionDecisionByEmail: this.user?.email ?? null,
+				inspectionNotes: nullable(input.notes),
+				rejectionReason: nullable(input.reason),
+				returnRequired,
+				acceptanceMovementId,
+				returnMovementId,
+				updatedAt: now
+			} as any)
+			.where(eq(procurementPurchaseOrderReceipts.id, receiptId));
+
+		// Bump PO line received quantity only if we just accepted stock.
+		if (input.decision === 'accept' && acceptedQuantity > 0) {
+			const nextReceived = Math.min(
+				finiteNumber(poItem.quantity) *
+					(1 + finiteNumber((await this.findInventoryItem(receipt.itemId as string | null))?.overReceiptTolerancePct, 0) / 100),
+				finiteNumber(poItem.receivedQuantity) + acceptedQuantity
+			);
+			const nextBackOrder = Math.max(0, finiteNumber(poItem.quantity) - nextReceived);
+			await this.db
+				.update(procurementPurchaseOrderItems)
+				.set({
+					receivedQuantity: nextReceived,
+					backOrderedQuantity: nextBackOrder,
+					updatedAt: now
+				} as any)
+				.where(eq(procurementPurchaseOrderItems.id, receipt.poItemId));
+		}
+
+		await this.recomputePoStatus(receipt.poId, receipt.receiptDate as string, now);
+
+		await this.audit.writeLog({
+			module: 'procurement',
+			actionType: 'update',
+			action: `purchase_order.receipt.inspection.${input.decision}`,
+			entityType: 'purchase_order',
+			entityId: receipt.poId,
+			oldValue: receipt,
+			newValue: {
+				status: nextStatus,
+				inspectionStatus: nextInspectionStatus,
+				acceptedQuantity,
+				rejectedQuantity,
+				reason: input.reason ?? null
+			},
+			metadata: {
+				receiptId,
+				decision: input.decision,
+				acceptedQuantity,
+				rejectedQuantity,
+				returnRequired
+			}
+		});
+
+		if (input.decision === 'accept' && acceptedQuantity > 0) {
+			await this.triggerPurchaseOrderPayment(receipt.poId, receiptId, {
+				acceptedQuantity,
+				unitCost: receipt.unitCost ?? undefined
+			});
+		}
+
+		return this.getReceipt(receiptId);
+	}
+
+	/** Payment trigger — writes audit + event so finance/AP picks it up.
+	 * In MVP there is no AP invoice module yet, so this records the trigger on
+	 * the GRN and emits `purchase_order.payment.due`. */
+	private async triggerPurchaseOrderPayment(
+		poId: string,
+		receiptId: string,
+		ctx: { acceptedQuantity: number; unitCost?: number | null }
+	) {
+		const now = new Date().toISOString();
+		const paymentReference = generatedNumber('AP');
+		await this.db
+			.update(procurementPurchaseOrderReceipts)
+			.set({
+				paymentTriggeredAt: now,
+				paymentReference,
+				updatedAt: now
+			} as any)
+			.where(eq(procurementPurchaseOrderReceipts.id, receiptId));
+
+		const amount =
+			ctx.acceptedQuantity > 0 && ctx.unitCost
+				? roundMoney(ctx.acceptedQuantity * Number(ctx.unitCost))
+				: null;
+		await this.audit.writeLog({
+			module: 'procurement',
+			actionType: 'create',
+			action: 'purchase_order.payment.triggered',
+			entityType: 'purchase_order',
+			entityId: poId,
+			metadata: {
+				receiptId,
+				paymentReference,
+				acceptedQuantity: ctx.acceptedQuantity,
+				unitCost: ctx.unitCost ?? null,
+				amount
+			}
+		});
+		this.ctx.eventBus?.emit(
+			createEvent('purchase_order.payment.due', 'procurement', {
+				poId,
+				receiptId,
+				paymentReference,
+				acceptedQuantity: ctx.acceptedQuantity,
+				unitCost: ctx.unitCost ?? null,
+				amount
+			})
+		);
+	}
+
+	private async recomputePoStatus(poId: string, lastReceiptDate: string, now: string) {
+		const refreshed = await this.getPurchaseOrderItems(poId);
+		const orderedTotal = refreshed.reduce((sum, row) => sum + finiteNumber(row.quantity), 0);
+		const receivedTotal = refreshed.reduce((sum, row) => sum + finiteNumber(row.receivedQuantity), 0);
+		const nextStatus =
+			receivedTotal >= orderedTotal && orderedTotal > 0
+				? 'received'
+				: receivedTotal > 0
+					? 'partially_received'
+					: null;
+		const updates: Record<string, unknown> = {
+			goodsReceiptDate: lastReceiptDate,
+			updatedAt: now
+		};
+		if (nextStatus) updates.status = nextStatus;
+		await this.db
+			.update(procurementPurchaseOrders)
+			.set(updates as any)
+			.where(eq(procurementPurchaseOrders.id, poId));
+	}
+
+	private async getReceipt(receiptId: string) {
+		const rows = await this.db
+			.select()
+			.from(procurementPurchaseOrderReceipts)
+			.where(
+				and(
+					eq(procurementPurchaseOrderReceipts.id, receiptId),
+					isNull(procurementPurchaseOrderReceipts.deletedAt)
+				)
+			)
+			.limit(1);
+		const receipt = rows[0];
+		if (!receipt) throw new NotFoundError('PO receipt', receiptId);
+		return receipt;
+	}
+
+	private async findInventoryItem(itemId: string | null) {
+		if (!itemId) return null;
+		try {
+			const detail = await this.inventory().getItemDetail(itemId);
+			return detail.item as any;
+		} catch (err) {
+			if (err instanceof NotFoundError) return null;
+			throw err;
+		}
 	}
 
 	async listPurchaseOrders() {

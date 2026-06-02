@@ -40,7 +40,8 @@
       "Bash(curl -s http://localhost:5173/api/auth/register)",
       "Bash(npx vitest *)",
       "Bash(npm test *)",
-      "Bash(grep -E 'modules|\\\\$modules' C:/Users/akiwc/Documents/Axiom/MiniERP/svelte.config.js C:/Users/akiwc/Documents/Axiom/MiniERP/tsconfig.json)"
+      "Bash(grep -E 'modules|\\\\$modules' C:/Users/akiwc/Documents/Axiom/MiniERP/svelte.config.js C:/Users/akiwc/Documents/Axiom/MiniERP/tsconfig.json)",
+      "Bash(awk '/Record receipt/,/<\\\\/form>/' \"C:/Users/akiwc/Documents/Axiom/MiniERP/src/routes/\\(app\\)/procurement/rfqs/+page.svelte\")"
     ]
   }
 }

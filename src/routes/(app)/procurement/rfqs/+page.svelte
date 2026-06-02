@@ -30,15 +30,50 @@
 
 	let nextPoItemRowId = 2;
 	let poItemRows = $state([
-		{ id: 1, code: 'MAT-200', description: 'Purchased component', quantity: 10, uom: 'pcs', unitPrice: 25, taxCode: 'SR' }
+		{
+			id: 1,
+			code: 'MAT-200',
+			description: 'Purchased component',
+			quantity: 10,
+			uom: 'pcs',
+			unitPrice: 25,
+			taxCode: 'SR',
+			itemId: '',
+			warehouseId: '',
+			binLocationId: '',
+			quarantineBinId: '',
+			inspectionRequired: false
+		}
 	]);
 
 	function addPoItemRow() {
 		nextPoItemRowId += 1;
 		poItemRows = [
 			...poItemRows,
-			{ id: nextPoItemRowId, code: '', description: '', quantity: 1, uom: 'unit', unitPrice: 0, taxCode: 'SR' }
+			{
+				id: nextPoItemRowId,
+				code: '',
+				description: '',
+				quantity: 1,
+				uom: 'unit',
+				unitPrice: 0,
+				taxCode: 'SR',
+				itemId: '',
+				warehouseId: '',
+				binLocationId: '',
+				quarantineBinId: '',
+				inspectionRequired: false
+			}
 		];
+	}
+
+	function binsForWarehouse(warehouseId: string) {
+		return data.bins.filter((bin) => bin.warehouseId === warehouseId);
+	}
+	function quarantineBinsForWarehouse(warehouseId: string) {
+		return data.bins.filter(
+			(bin) => bin.warehouseId === warehouseId && bin.locationType === 'quarantine'
+		);
 	}
 
 	function removePoItemRow(id: number) {
@@ -279,11 +314,16 @@
 						<thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
 							<tr>
 								<th class="px-3 py-2">Code</th>
-								<th class="min-w-64 px-3 py-2">Description</th>
-								<th class="w-28 px-3 py-2">Qty</th>
-								<th class="w-28 px-3 py-2">UOM</th>
-								<th class="w-36 px-3 py-2">Unit price</th>
-								<th class="w-28 px-3 py-2">Tax</th>
+								<th class="min-w-48 px-3 py-2">Description</th>
+								<th class="w-24 px-3 py-2">Qty</th>
+								<th class="w-20 px-3 py-2">UOM</th>
+								<th class="w-28 px-3 py-2">Unit price</th>
+								<th class="w-20 px-3 py-2">Tax</th>
+								<th class="w-44 px-3 py-2">Inventory item</th>
+								<th class="w-36 px-3 py-2">Warehouse</th>
+								<th class="w-36 px-3 py-2">Receiving bin</th>
+								<th class="w-36 px-3 py-2">Quarantine bin</th>
+								<th class="w-20 px-3 py-2">QC?</th>
 								<th class="w-16 px-3 py-2"></th>
 							</tr>
 						</thead>
@@ -312,6 +352,41 @@
 											<option value="ES">ES</option>
 											<option value="OP">OP</option>
 										</select>
+									</td>
+									<td class="px-3 py-2">
+										<select name="poItemInventoryId" bind:value={row.itemId} class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+											<option value="">—</option>
+											{#each data.inventoryItems as item}
+												<option value={item.id}>{item.code} · {item.name}</option>
+											{/each}
+										</select>
+									</td>
+									<td class="px-3 py-2">
+										<select name="poItemWarehouseId" bind:value={row.warehouseId} class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+											<option value="">—</option>
+											{#each data.warehouses as wh}
+												<option value={wh.id}>{wh.code}</option>
+											{/each}
+										</select>
+									</td>
+									<td class="px-3 py-2">
+										<select name="poItemBinId" bind:value={row.binLocationId} class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+											<option value="">—</option>
+											{#each binsForWarehouse(row.warehouseId) as bin}
+												<option value={bin.id}>{bin.code}</option>
+											{/each}
+										</select>
+									</td>
+									<td class="px-3 py-2">
+										<select name="poItemQuarantineBinId" bind:value={row.quarantineBinId} class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+											<option value="">—</option>
+											{#each quarantineBinsForWarehouse(row.warehouseId) as bin}
+												<option value={bin.id}>{bin.code}</option>
+											{/each}
+										</select>
+									</td>
+									<td class="px-3 py-2 text-center">
+										<input type="checkbox" name="poItemInspectionRequired" bind:checked={row.inspectionRequired} />
 									</td>
 									<td class="px-3 py-2 text-right">
 										<button
@@ -465,20 +540,103 @@
 									<button class="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700" type="submit">Update ACK</button>
 								</form>
 								{#if po.items.length > 0}
-									<form class="grid gap-2 sm:grid-cols-2" method="POST" action="?/receivePurchaseOrder" use:enhance>
+									{@const defaultLine = po.items[0]}
+									<form class="grid gap-2 sm:grid-cols-3 rounded-md border border-dashed border-slate-300 bg-slate-50 p-2" method="POST" action="?/receivePurchaseOrder" use:enhance>
 										<input type="hidden" name="poId" value={po.id} />
-										<select name="poItemId" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs">
-											{#each po.items as item}
-												<option value={item.id}>{item.description}</option>
-											{/each}
-										</select>
+										<label class="space-y-1 sm:col-span-3">
+											<span class="text-[10px] uppercase tracking-wide text-slate-500">PO line</span>
+											<select
+												name="poItemId"
+												class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-xs"
+												onchange={(e) => {
+													const lineId = (e.currentTarget as HTMLSelectElement).value;
+													const line = po.items.find((l: any) => l.id === lineId);
+													if (!line) return;
+													const form = (e.currentTarget as HTMLSelectElement).form!;
+													(form.elements.namedItem('itemId') as HTMLInputElement).value = line.itemId ?? '';
+													(form.elements.namedItem('warehouseId') as HTMLInputElement).value = line.warehouseId ?? '';
+													(form.elements.namedItem('binLocationId') as HTMLInputElement).value = line.binLocationId ?? '';
+													(form.elements.namedItem('quarantineBinId') as HTMLInputElement).value = line.quarantineBinId ?? '';
+													(form.elements.namedItem('inspectionRequired') as HTMLInputElement).checked = Boolean(line.inspectionRequired);
+													(form.elements.namedItem('unitCost') as HTMLInputElement).value = String(line.unitPrice ?? 0);
+												}}
+											>
+												{#each po.items as item}
+													<option value={item.id}>{item.description} (ordered {item.quantity}, received {item.receivedQuantity})</option>
+												{/each}
+											</select>
+										</label>
 										<input type="date" name="receiptDate" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" />
 										<input name="receiptNumber" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" placeholder="GRN no. auto" />
+										<input type="number" step="0.01" min="0" name="unitCost" value={defaultLine?.unitPrice ?? 0} class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" placeholder="Unit cost" />
 										<input type="number" step="0.01" min="0" name="quantityReceived" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" placeholder="Received qty" />
-										<input type="number" step="0.01" min="0" name="acceptedQuantity" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" placeholder="Accepted qty" />
-										<input type="number" step="0.01" min="0" name="rejectedQuantity" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" placeholder="Rejected qty" />
-										<button class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white sm:col-span-2" type="submit">Record receipt</button>
+										<input type="number" step="0.01" min="0" name="acceptedQuantity" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" placeholder="Accept qty (no-QC)" />
+										<input type="number" step="0.01" min="0" name="rejectedQuantity" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs" placeholder="Reject qty (no-QC)" />
+										<input type="hidden" name="itemId" value={defaultLine?.itemId ?? ''} />
+										<input type="hidden" name="warehouseId" value={defaultLine?.warehouseId ?? ''} />
+										<input type="hidden" name="binLocationId" value={defaultLine?.binLocationId ?? ''} />
+										<input type="hidden" name="quarantineBinId" value={defaultLine?.quarantineBinId ?? ''} />
+										<label class="flex items-center gap-2 text-[11px] text-slate-600 sm:col-span-2">
+											<input type="checkbox" name="inspectionRequired" checked={Boolean(defaultLine?.inspectionRequired)} />
+											<span>Route to quality inspection</span>
+										</label>
+										<input name="notes" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs sm:col-span-3" placeholder="GRN notes" />
+										<button class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white sm:col-span-3" type="submit">Record goods receipt</button>
 									</form>
+									{#if po.receipts && po.receipts.length > 0}
+										<div class="mt-2 space-y-2">
+											{#each po.receipts as receipt}
+												<div class="rounded-md border border-slate-200 bg-white p-2 text-xs">
+													<div class="flex items-start justify-between gap-2">
+														<div>
+															<p class="font-semibold text-slate-800">{receipt.receiptNumber} · {receipt.receiptDate}</p>
+															<p class="text-[11px] text-slate-500">
+																qty {receipt.quantityReceived} · acc {receipt.acceptedQuantity} · rej {receipt.rejectedQuantity} · back-order {receipt.backOrderQuantity}
+																{#if receipt.overReceiptFlag} · <span class="text-amber-700 font-medium">over-receipt</span>{/if}
+															</p>
+														</div>
+														<div class="flex flex-wrap justify-end gap-1">
+															<span class="rounded-full bg-slate-100 px-2 py-0.5 font-medium capitalize text-slate-700">{(receipt.status ?? 'accepted').replace('_', ' ')}</span>
+															{#if receipt.inspectionStatus && receipt.inspectionStatus !== 'not_required'}
+																<span class={
+																	receipt.inspectionStatus === 'pending'
+																		? 'rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800'
+																		: receipt.inspectionStatus === 'accepted'
+																			? 'rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800'
+																			: receipt.inspectionStatus === 'rejected'
+																				? 'rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700'
+																				: 'rounded-full bg-purple-100 px-2 py-0.5 font-medium text-purple-700'
+																}>QC: {receipt.inspectionStatus}</span>
+															{/if}
+															{#if receipt.paymentTriggeredAt}
+																<span class="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">Pay {receipt.paymentReference ?? ''}</span>
+															{/if}
+															{#if receipt.returnRequired}
+																<span class="rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-700">return</span>
+															{/if}
+														</div>
+													</div>
+													{#if receipt.rejectionReason}
+														<p class="mt-1 text-[11px] text-red-700">Reject reason: {receipt.rejectionReason}</p>
+													{/if}
+													{#if receipt.inspectionStatus === 'pending' || receipt.inspectionStatus === 'quarantined'}
+														<form class="mt-2 grid gap-1 sm:grid-cols-[1fr_1fr_2fr_auto_auto_auto]" method="POST" action="?/inspectReceipt" use:enhance>
+															<input type="hidden" name="receiptId" value={receipt.id} />
+															<input type="number" step="0.01" min="0" name="acceptedQuantity" value={receipt.quantityReceived} class="rounded-md border border-slate-300 px-2 py-1 text-[11px]" placeholder="Accept qty" />
+															<input type="number" step="0.01" min="0" name="rejectedQuantity" class="rounded-md border border-slate-300 px-2 py-1 text-[11px]" placeholder="Reject qty" />
+															<input name="reason" class="rounded-md border border-slate-300 px-2 py-1 text-[11px]" placeholder="Reason / return note" />
+															<button name="decision" value="accept" class="rounded-md bg-green-700 px-2 py-1 text-[11px] font-medium text-white" type="submit">Accept</button>
+															<button name="decision" value="quarantine" class="rounded-md bg-purple-700 px-2 py-1 text-[11px] font-medium text-white" type="submit">Quarantine</button>
+															<button name="decision" value="reject" class="rounded-md bg-red-700 px-2 py-1 text-[11px] font-medium text-white" type="submit">Reject</button>
+															<label class="flex items-center gap-1 text-[10px] text-slate-600 sm:col-span-6">
+																<input type="checkbox" name="returnRequired" /> mark for return-to-supplier
+															</label>
+														</form>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									{/if}
 								{/if}
 							</div>
 						</div>

@@ -1,4 +1,4 @@
-import { index, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { timeFields } from '$platform/modules/schema-helpers';
 import { businessPartners } from '$modules/sales-crm/repositories/customer.schema';
 
@@ -46,6 +46,10 @@ export const partnerSupplierProfiles = sqliteTable('partner_supplier_profiles', 
 	paymentTerms: text('payment_terms'),
 	preferredCurrency: text('preferred_currency').default('SGD'),
 	supplierCategory: text('supplier_category'),
+	// PUR005 — route every receipt from this supplier through QC regardless of item config.
+	inspectionRequired: integer('inspection_required', { mode: 'boolean' })
+		.notNull()
+		.default(false),
 	...timeFields
 });
 

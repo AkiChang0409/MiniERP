@@ -32,6 +32,12 @@ export const items = sqliteTable(
 		serialControl: integer('serial_control', { mode: 'boolean' }).notNull().default(false),
 		shelfLifeDays: integer('shelf_life_days'),
 
+		// PUR005 — incoming inspection / over-receipt policy
+		inspectionRequired: integer('inspection_required', { mode: 'boolean' })
+			.notNull()
+			.default(false),
+		overReceiptTolerancePct: real('over_receipt_tolerance_pct').notNull().default(0),
+
 		// Valuation
 		valuationMethod: text('valuation_method', {
 			enum: ['fifo', 'weighted_average', 'standard_cost']
