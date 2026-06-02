@@ -6,7 +6,7 @@ import {
 	projectCollaborators,
 	projectComments
 } from './project.schema';
-import { businessPartners } from '$modules/business-partner/repositories/business-partner.schema';
+import { businessPartners } from '$modules/sales-crm/repositories/customer.schema';
 import { users } from '$platform/auth/users.schema';
 import { BaseRepository } from '$platform/modules/base-repository';
 

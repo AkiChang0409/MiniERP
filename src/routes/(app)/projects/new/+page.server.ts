@@ -2,7 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 import { createModuleContext } from '$platform/modules';
-import { createBusinessPartnerApi } from '$modules/business-partner';
+import { createSalesCrmApi } from '$modules/sales-crm';
 import {
 	createProjectApi,
 	ProjectPermissionError,
@@ -15,7 +15,7 @@ export const load: PageServerLoad = async (event) => {
 	}
 
 	const ctx = await createModuleContext(event);
-	const businessPartner = createBusinessPartnerApi(ctx);
+	const salesCrm = createSalesCrmApi(ctx);
 	const project = createProjectApi(ctx);
 	const roles = ctx.user?.roles ?? [];
 	const canAssignOwner = roles.some(
@@ -23,7 +23,7 @@ export const load: PageServerLoad = async (event) => {
 	);
 
 	const [customers, users, parentProjectsRaw] = await Promise.all([
-		businessPartner.listCustomerOptions(),
+		salesCrm.listCustomerOptions(),
 		project.listUsers(),
 		project.list({ pageSize: 50 })
 	]);
