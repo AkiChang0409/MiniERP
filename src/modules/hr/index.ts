@@ -28,6 +28,8 @@ export { createLeaveApi, type LeaveApi } from './leave-api';
 export { LeaveValidationError } from './services/leave-service';
 export { createAttendanceApi, type AttendanceApi } from './attendance-api';
 export { AttendanceValidationError } from './services/attendance-service';
+export { createOvertimeApi, type OvertimeApi } from './overtime-api';
+export { OvertimeValidationError } from './services/overtime-service';
 export { createPersonApi, type PersonApi } from './person-api';
 export {
 	staffCostPayoutStatuses,

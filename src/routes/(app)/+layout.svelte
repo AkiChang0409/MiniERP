@@ -101,6 +101,12 @@
 			items: [
 				{ href: '/hr/attendance', label: 'Attendance Management', moduleId: 'hr', icon: 'A' }
 			]
+		},
+		{
+			title: 'Overtime',
+			items: [
+				{ href: '/hr/overtime', label: 'Overtime Management', moduleId: 'hr', icon: 'O' }
+			]
 		}
 	];
 
@@ -243,6 +249,14 @@
 		// HR / Leave
 		if (itemPath === '/hr/leave') {
 			return path.startsWith('/hr/leave');
+		}
+		// HR / Attendance
+		if (itemPath === '/hr/attendance') {
+			return path.startsWith('/hr/attendance');
+		}
+		// HR / Overtime
+		if (itemPath === '/hr/overtime') {
+			return path.startsWith('/hr/overtime');
 		}
 		// Business Partners
 		if (itemPath === '/business-partners/customers') {
