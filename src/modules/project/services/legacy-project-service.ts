@@ -382,6 +382,22 @@ export class ProjectService {
 					.limit(1)
 			: [];
 
+		// Resolve owner via platform/auth users table (allowed: module → platform).
+		// Surfaced as `owner` at the top of the shell payload, parallel to
+		// `customerName`, so the page can render a human-readable label without
+		// having to ask the user directory again.
+		const [owner] = project.ownerId
+			? await db
+					.select({
+						id: schema.users.id,
+						email: schema.users.email,
+						name: schema.users.name
+					})
+					.from(schema.users)
+					.where(eq(schema.users.id, project.ownerId))
+					.limit(1)
+			: [];
+
 		const [
 			[allProjectsCountRow],
 			[activeProjectsCountRow],
@@ -524,6 +540,10 @@ export class ProjectService {
 		return {
 			project,
 			customerName: customer?.name ?? project.businessPartnerId ?? '',
+			owner: owner
+				? { id: owner.id, email: owner.email, name: owner.name }
+				: null,
+			ownerLabel: owner?.name ?? owner?.email ?? null,
 			projectListCounts: {
 				all: Number(allProjectsCountRow?.n ?? 0),
 				active: Number(activeProjectsCountRow?.n ?? 0)

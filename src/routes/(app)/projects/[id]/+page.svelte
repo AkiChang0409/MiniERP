@@ -216,7 +216,16 @@
 					<div>
 						<dt class="text-[11px] uppercase tracking-wide text-slate-500">Owner</dt>
 						<dd class="mt-0.5 text-base font-medium text-slate-800">
-							{data.project.ownerId ?? 'Unassigned'}
+							{#if data.owner}
+								{data.owner.name || data.owner.email}
+								{#if data.owner.name && data.owner.email}
+									<span class="ml-1 text-xs font-normal text-slate-500">
+										· {data.owner.email}
+									</span>
+								{/if}
+							{:else}
+								<span class="text-slate-400">Unassigned</span>
+							{/if}
 						</dd>
 					</div>
 					<div>

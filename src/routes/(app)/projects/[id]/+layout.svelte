@@ -110,6 +110,11 @@
 				{#if dateRangeLabel}
 					<p class="mt-2 text-[11px] text-slate-400">{dateRangeLabel}</p>
 				{/if}
+				{#if data.ownerLabel}
+					<p class="mt-1 truncate text-[11px] text-slate-500">
+						Owner · {data.ownerLabel}
+					</p>
+				{/if}
 			</div>
 
 			<!-- Project section links -->

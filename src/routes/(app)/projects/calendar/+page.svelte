@@ -1,6 +1,4 @@
 <script lang="ts">
-	import PageShell from '$app-layer/components/PageShell.svelte';
-
 	let { data } = $props();
 
 	type CalEntry = {
@@ -113,39 +111,41 @@
 	};
 </script>
 
-<PageShell
-	eyebrow="Project Management"
-	title="Project Calendar"
-	description="Recurring projects appear on every occurrence's deadline. Subscribe via ICS to mirror this view in Google Calendar or Outlook."
->
-	{#snippet actions()}
-		<div class="flex flex-wrap items-center gap-2">
+<div class="space-y-5">
+	<header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+		<div class="min-w-0">
+			<nav class="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+				<a class="hover:text-[var(--sf-green)] hover:underline" href="/projects">Projects</a>
+				<span class="text-slate-300">/</span>
+				<span class="text-slate-600">Calendar</span>
+			</nav>
+			<h1 class="text-xl font-medium text-slate-900">Project Calendar</h1>
+			<p class="mt-1 text-[13px] text-slate-600">
+				Recurring projects appear on every occurrence's deadline. Subscribe via ICS to mirror this
+				view in Google Calendar or Outlook.
+			</p>
+		</div>
+		<div class="flex shrink-0 items-center gap-2">
 			<a
-				class="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-				href="/projects"
-			>
-				All projects
-			</a>
-			<a
-				class="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
 				href="/projects/dashboard"
+				class="inline-flex items-center justify-center rounded-md border border-slate-300 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
 			>
 				Dashboard
 			</a>
 			<a
-				class="inline-flex items-center justify-center rounded-md border border-[var(--sf-gold)] bg-[var(--sf-gold-soft)] px-3 py-1.5 text-sm font-medium text-[#7a5a07] hover:bg-[#f6e8b8]"
 				href={icsHref}
+				class="inline-flex items-center justify-center rounded-md border border-[var(--sf-gold)] bg-[var(--sf-gold-soft)] px-3.5 py-2 text-[13px] font-medium text-[#7a5a07] hover:bg-[#f6e8b8]"
 			>
 				Download .ics
 			</a>
 			<a
-				class="inline-flex items-center justify-center rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c]"
 				href="/projects/new"
+				class="inline-flex items-center justify-center rounded-md bg-[var(--sf-green)] px-3.5 py-2 text-[13px] font-medium text-white hover:bg-[#2f5e2c]"
 			>
 				Create project
 			</a>
 		</div>
-	{/snippet}
+	</header>
 
 	<!-- KPI strip -->
 	<section class="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -305,4 +305,4 @@
 			platform-side OAuth integration ships.
 		</p>
 	</section>
-</PageShell>
+</div>

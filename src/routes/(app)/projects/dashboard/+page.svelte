@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
-	import PageShell from '$app-layer/components/PageShell.svelte';
 
 	let { data } = $props();
 
@@ -115,40 +114,41 @@
 	}
 </script>
 
-<PageShell
-	eyebrow="Project Management"
-	title="Project Dashboard"
-	description="Status mix, the next 5 deadlines and anything past its due date — refreshed every minute."
->
-	{#snippet actions()}
-		<div class="flex flex-wrap items-center gap-2">
+<div class="space-y-5">
+	<header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+		<div class="min-w-0">
+			<nav class="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+				<a class="hover:text-[var(--sf-green)] hover:underline" href="/projects">Projects</a>
+				<span class="text-slate-300">/</span>
+				<span class="text-slate-600">Dashboard</span>
+			</nav>
+			<h1 class="text-xl font-medium text-slate-900">Project Dashboard</h1>
+			<p class="mt-1 text-[13px] text-slate-600">
+				Status mix, the next 5 deadlines and anything past its due date — refreshed every minute.
+			</p>
+		</div>
+		<div class="flex shrink-0 items-center gap-2">
 			<a
-				class="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-				href="/projects"
-			>
-				All projects
-			</a>
-			<a
-				class="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
 				href="/projects/calendar"
+				class="inline-flex items-center justify-center rounded-md border border-slate-300 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
 			>
 				Calendar
 			</a>
 			<button
 				type="button"
 				onclick={manualRefresh}
-				class="inline-flex items-center justify-center rounded-md border border-[var(--sf-green)] bg-[var(--sf-green-soft)] px-3 py-1.5 text-sm font-medium text-[var(--sf-green)] hover:bg-emerald-100"
+				class="inline-flex items-center justify-center rounded-md border border-[var(--sf-green)] bg-[var(--sf-green-soft)] px-3.5 py-2 text-[13px] font-medium text-[var(--sf-green)] hover:bg-emerald-100"
 			>
 				Refresh now
 			</button>
 			<a
-				class="inline-flex items-center justify-center rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c]"
 				href="/projects/new"
+				class="inline-flex items-center justify-center rounded-md bg-[var(--sf-green)] px-3.5 py-2 text-[13px] font-medium text-white hover:bg-[#2f5e2c]"
 			>
 				Create project
 			</a>
 		</div>
-	{/snippet}
+	</header>
 
 	<!-- KPI strip -->
 	<section class="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -373,4 +373,4 @@
 	<p class="text-right text-[11px] text-slate-400">
 		Last refreshed {lastRefreshedAt.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
 	</p>
-</PageShell>
+</div>
