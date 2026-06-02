@@ -53,7 +53,13 @@
 	};
 	type PnlData = {
 		range: { start: string; end: string };
-		revenue: { standardRated: number; zeroRated: number; exempt: number; total: number };
+		revenue: {
+			standardRated: number;
+			zeroRated: number;
+			exempt: number;
+			outOfScope: number;
+			total: number;
+		};
 		costOfSales: {
 			byCategory: Array<{ category: string; total: number }>;
 			staffCost: number;
@@ -101,7 +107,7 @@
 	};
 	const emptyPnl: PnlData = {
 		range: { start: '', end: '' },
-		revenue: { standardRated: 0, zeroRated: 0, exempt: 0, total: 0 },
+		revenue: { standardRated: 0, zeroRated: 0, exempt: 0, outOfScope: 0, total: 0 },
 		costOfSales: { byCategory: [], staffCost: 0, total: 0 },
 		grossProfit: 0,
 		grossMargin: 0,
@@ -865,6 +871,13 @@
 									<td class="w-6"></td>
 									<td class="px-4 py-2">Exempt</td>
 									<td class="px-4 py-2 text-right tabular-nums">{money(pnl.revenue.exempt)}</td>
+								</tr>
+							{/if}
+							{#if pnl.revenue.outOfScope > 0}
+								<tr class="text-slate-700">
+									<td class="w-6"></td>
+									<td class="px-4 py-2">Out-of-Scope</td>
+									<td class="px-4 py-2 text-right tabular-nums">{money(pnl.revenue.outOfScope)}</td>
 								</tr>
 							{/if}
 
