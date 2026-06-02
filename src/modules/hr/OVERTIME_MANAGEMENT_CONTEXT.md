@@ -60,7 +60,7 @@ non-duplication discipline Leave uses (`leave_requests.payroll_effect`).
 | Public API factory | `src/modules/hr/overtime-api.ts` |
 | Route (load + actions) | `src/routes/(app)/hr/overtime/+page.server.ts` |
 | UI | `src/routes/(app)/hr/overtime/+page.svelte` |
-| Migration | `drizzle/migrations/0010_hr_overtime_management.sql` |
+| Migration | `drizzle/migrations/0017_hr_overtime_management.sql` |
 | Unit tests | `src/test/unit/overtime-service.test.ts` |
 | Integration tests | `src/test/integration/overtime-service.integration.test.ts` |
 

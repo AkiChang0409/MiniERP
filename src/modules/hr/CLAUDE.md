@@ -41,7 +41,7 @@ SvelteKit route (+page.server.ts)
 ## Schema changes
 
 - `drizzle-kit generate` requires a TTY. Write migrations manually if running in
-  a non-interactive shell (see `drizzle/migrations/0008_hr_leave_management.sql`
+  a non-interactive shell (see `drizzle/migrations/0015_hr_leave_management.sql`
   as the template).
 - Export new tables from `src/infrastructure/db/schema.ts`.
 

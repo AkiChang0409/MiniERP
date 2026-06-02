@@ -33,7 +33,7 @@
 | Public API factory | `src/modules/hr/leave-api.ts` |
 | Route (load + actions) | `src/routes/(app)/hr/leave/+page.server.ts` |
 | UI | `src/routes/(app)/hr/leave/+page.svelte` |
-| Migration | `drizzle/migrations/0008_hr_leave_management.sql` |
+| Migration | `drizzle/migrations/0015_hr_leave_management.sql` |
 | Seed | `drizzle/seeds/leave-seed.sql` |
 | Unit tests | `src/test/unit/leave-service.test.ts` |
 | Integration tests | `src/test/integration/leave-service.integration.test.ts` |
@@ -162,7 +162,7 @@ npx wrangler d1 execute smartfin-db-v4 --local --file drizzle/seeds/leave-seed.s
 **Re-run migration if schema was reset:**
 
 ```bash
-npx wrangler d1 execute smartfin-db-v4 --local --file drizzle/migrations/0008_hr_leave_management.sql
+npx wrangler d1 execute smartfin-db-v4 --local --file drizzle/migrations/0015_hr_leave_management.sql
 ```
 
 > `db:generate` requires a TTY terminal. Migration `0008` was written manually.
