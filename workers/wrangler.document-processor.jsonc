@@ -6,7 +6,7 @@
   "name": "smartfin-document-processor-v4",
   "account_id": "c09bb2823904032b6ec648b23411f2e0",
   "compatibility_date": "2026-03-30",
-  "compatibility_flags": ["nodejs_als"],
+  "compatibility_flags": ["nodejs_compat"],
   "main": "document-processor.ts",
 
   "d1_databases": [

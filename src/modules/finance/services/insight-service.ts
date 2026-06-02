@@ -1114,6 +1114,16 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 					eq(revenue.invoiceType, 'exempt')
 				)
 			);
+		const [revenueOutOfScope] = await ctx.db
+			.select({ total: sql<number>`coalesce(sum(${revenueSgdAmountExpr()}), 0)` })
+			.from(revenue)
+			.where(
+				and(
+					between(revenue.date, current.start, current.end),
+					isNull(revenue.deletedAt),
+					eq(revenue.invoiceType, 'out_of_scope')
+				)
+			);
 
 		const salesCostByCategory = await ctx.db
 			.select({
@@ -1156,7 +1166,8 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 		const stdRevenue = (revenueStandard?.total ?? 0) + (revenueTaxInvoice?.total ?? 0);
 		const zrRevenue = revenueZeroRate?.total ?? 0;
 		const exRevenue = revenueExempt?.total ?? 0;
-		const totalRevenue = stdRevenue + zrRevenue + exRevenue;
+		const opRevenue = revenueOutOfScope?.total ?? 0;
+		const totalRevenue = stdRevenue + zrRevenue + exRevenue + opRevenue;
 
 		const totalSalesCost = salesCostByCategory.reduce((s, r) => s + Number(r.total ?? 0), 0);
 		const totalStaffCost = Number(staffCost?.total ?? 0);
@@ -1171,6 +1182,7 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 				standardRated: stdRevenue,
 				zeroRated: zrRevenue,
 				exempt: exRevenue,
+				outOfScope: opRevenue,
 				total: totalRevenue
 			},
 			costOfSales: {

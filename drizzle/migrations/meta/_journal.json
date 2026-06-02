@@ -57,6 +57,13 @@
       "when": 1780012800000,
       "tag": "0007_audit_trail_enhancement",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1780016400000,
+      "tag": "0008_supplier_prequalification",
+      "breakpoints": true
     }
   ]
 }

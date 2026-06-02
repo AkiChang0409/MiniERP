@@ -21,7 +21,15 @@
 	} | null>(null);
 	let integrityLoading = $state(false);
 
-	const modules = ['core', 'finance', 'document-intake', 'project', 'hr', 'business-partner'];
+	const modules = [
+		'core',
+		'finance',
+		'document-intake',
+		'project',
+		'hr',
+		'procurement',
+		'sales-crm'
+	];
 	const actionTypes = ['view', 'create', 'update', 'delete', 'export', 'login', 'permission_change', 'system'];
 
 	function applyFilters() {
