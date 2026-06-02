@@ -1,22 +1,7 @@
 <script lang="ts">
+	import PageShell from '$app-layer/components/PageShell.svelte';
+
 	let { data } = $props();
-
-	const monthName = $derived.by(() => {
-		const d = new Date(Date.UTC(data.month.year, data.month.month, 1));
-		return d.toLocaleString('en-SG', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-	});
-
-	const prevMonthHref = $derived.by(() => {
-		const d = new Date(Date.UTC(data.month.year, data.month.month - 1, 1));
-		return `/projects/calendar?month=${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-	});
-
-	const nextMonthHref = $derived.by(() => {
-		const d = new Date(Date.UTC(data.month.year, data.month.month + 1, 1));
-		return `/projects/calendar?month=${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-	});
-
-	const icsHref = $derived(`/api/projects/calendar?format=ics&from=${data.range.from}&to=${data.range.to}`);
 
 	type CalEntry = {
 		id: string;
@@ -28,6 +13,39 @@
 		recurrenceInterval: number | null;
 		recurrenceParentId: string | null;
 	};
+
+	const STATUS_PALETTE: Record<string, { fill: string; soft: string; text: string; label: string }> = {
+		unassigned: { fill: '#94a3b8', soft: '#f1f5f9', text: '#475569', label: 'Unassigned' },
+		ongoing: { fill: '#1e88e5', soft: '#e0f2fe', text: '#0c4a6e', label: 'Ongoing' },
+		under_review: { fill: '#f59e0b', soft: '#fef3c7', text: '#92400e', label: 'Under Review' },
+		completed: { fill: '#16a34a', soft: '#dcfce7', text: '#166534', label: 'Completed' },
+		active: { fill: '#0f9d58', soft: '#dcfce7', text: '#166534', label: 'Active' },
+		on_hold: { fill: '#fb923c', soft: '#ffedd5', text: '#9a3412', label: 'On Hold' },
+		archived: { fill: '#64748b', soft: '#e2e8f0', text: '#334155', label: 'Archived' }
+	};
+	const statusMeta = (status: string) =>
+		STATUS_PALETTE[status] ?? { fill: '#cbd5e1', soft: '#f1f5f9', text: '#475569', label: status };
+
+	const monthLabel = $derived.by(() => {
+		const d = new Date(Date.UTC(data.month.year, data.month.month, 1));
+		return d.toLocaleString('en-SG', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+	});
+
+	const monthHref = (year: number, month: number) =>
+		`/projects/calendar?month=${year}-${String(month + 1).padStart(2, '0')}`;
+
+	const prevMonthHref = $derived.by(() => {
+		const d = new Date(Date.UTC(data.month.year, data.month.month - 1, 1));
+		return monthHref(d.getUTCFullYear(), d.getUTCMonth());
+	});
+	const nextMonthHref = $derived.by(() => {
+		const d = new Date(Date.UTC(data.month.year, data.month.month + 1, 1));
+		return monthHref(d.getUTCFullYear(), d.getUTCMonth());
+	});
+
+	const icsHref = $derived(
+		`/api/projects/calendar?format=ics&from=${data.range.from}&to=${data.range.to}`
+	);
 
 	const dayMap = $derived.by(() => {
 		const map = new Map<string, CalEntry[]>();
@@ -42,8 +60,22 @@
 
 	const todayIso = new Date().toISOString().slice(0, 10);
 
-	// Build the month grid: 6 weeks × 7 cells, with leading/trailing blanks for
-	// days outside the current month so the grid always renders cleanly.
+	// Stats for the eyebrow strip.
+	const totalThisMonth = $derived((data.entries ?? []).length);
+	const completedThisMonth = $derived(
+		((data.entries ?? []) as CalEntry[]).filter((e) => e.status === 'completed').length
+	);
+	const recurringThisMonth = $derived(
+		((data.entries ?? []) as CalEntry[]).filter((e) => e.recurrenceFrequency).length
+	);
+	const overdueThisMonth = $derived(
+		((data.entries ?? []) as CalEntry[]).filter(
+			(e) => e.deadline && e.deadline < todayIso && e.status !== 'completed'
+		).length
+	);
+
+	// Build the month grid: 6 weeks × 7 cells, with leading/trailing blanks
+	// padded so the visual grid is always consistent.
 	const cells = $derived.by(() => {
 		const first = new Date(Date.UTC(data.month.year, data.month.month, 1));
 		const firstWeekday = first.getUTCDay(); // 0=Sun
@@ -55,116 +87,204 @@
 			iso: string | null;
 			day: number | null;
 			inMonth: boolean;
+			isWeekend: boolean;
 		}> = [];
 		for (let i = 0; i < firstWeekday; i++) {
-			out.push({ iso: null, day: null, inMonth: false });
+			out.push({ iso: null, day: null, inMonth: false, isWeekend: i === 0 || i === 6 });
 		}
 		for (let d = 1; d <= daysInMonth; d++) {
 			const iso = `${data.month.year}-${String(data.month.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-			out.push({ iso, day: d, inMonth: true });
+			const weekday = new Date(`${iso}T00:00:00Z`).getUTCDay();
+			out.push({ iso, day: d, inMonth: true, isWeekend: weekday === 0 || weekday === 6 });
 		}
-		while (out.length % 7 !== 0) {
-			out.push({ iso: null, day: null, inMonth: false });
-		}
-		// Pad to 6 rows for visual consistency.
 		while (out.length < 42) {
-			out.push({ iso: null, day: null, inMonth: false });
+			const weekday = out.length % 7;
+			out.push({ iso: null, day: null, inMonth: false, isWeekend: weekday === 0 || weekday === 6 });
 		}
 		return out;
 	});
 
-	const priorityColor = (priority: number) => {
-		if (priority >= 8) return 'bg-rose-100 text-rose-700 border-rose-200';
-		if (priority >= 5) return 'bg-amber-100 text-amber-700 border-amber-200';
-		return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+	const priorityMeta = (priority: number) => {
+		if (priority >= 8)
+			return { soft: '#fee2e2', text: '#b91c1c', border: '#fecaca' };
+		if (priority >= 5)
+			return { soft: '#fef3c7', text: '#92400e', border: '#fde68a' };
+		return { soft: '#dcfce7', text: '#166534', border: '#bbf7d0' };
 	};
 </script>
 
-<div class="space-y-5">
-	<header class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-		<div>
-			<nav class="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-				<a class="hover:text-[var(--sf-green)] hover:underline" href="/projects">Projects</a>
-				<span class="text-slate-300">/</span>
-				<span class="text-slate-600">Calendar</span>
-			</nav>
-			<h1 class="text-xl font-medium text-slate-900">{monthName}</h1>
-			<p class="mt-1 text-[13px] text-slate-600">
-				Recurring projects appear on every occurrence's deadline. Subscribe via ICS to mirror this
-				view in Google Calendar or Outlook.
-			</p>
-		</div>
-		<div class="flex items-center gap-2">
+<PageShell
+	eyebrow="Project Management"
+	title="Project Calendar"
+	description="Recurring projects appear on every occurrence's deadline. Subscribe via ICS to mirror this view in Google Calendar or Outlook."
+>
+	{#snippet actions()}
+		<div class="flex flex-wrap items-center gap-2">
 			<a
-				class="rounded-md border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50"
-				href={prevMonthHref}
+				class="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+				href="/projects"
 			>
-				← Prev
+				All projects
 			</a>
 			<a
-				class="rounded-md border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50"
-				href={`/projects/calendar`}
+				class="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+				href="/projects/dashboard"
 			>
-				Today
+				Dashboard
 			</a>
 			<a
-				class="rounded-md border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50"
-				href={nextMonthHref}
-			>
-				Next →
-			</a>
-			<a
-				class="rounded-md border border-[var(--sf-green)] bg-[var(--sf-green-soft)] px-3 py-1.5 text-xs font-medium text-[var(--sf-green)] hover:bg-emerald-100"
+				class="inline-flex items-center justify-center rounded-md border border-[var(--sf-gold)] bg-[var(--sf-gold-soft)] px-3 py-1.5 text-sm font-medium text-[#7a5a07] hover:bg-[#f6e8b8]"
 				href={icsHref}
 			>
 				Download .ics
 			</a>
+			<a
+				class="inline-flex items-center justify-center rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c]"
+				href="/projects/new"
+			>
+				Create project
+			</a>
 		</div>
-	</header>
+	{/snippet}
 
+	<!-- KPI strip -->
+	<section class="grid grid-cols-2 gap-4 md:grid-cols-4">
+		<article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+			<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Deadlines this month</p>
+			<p class="mt-1 text-2xl font-semibold text-slate-900">{totalThisMonth}</p>
+			<p class="mt-1 text-[11px] text-slate-500">{monthLabel}</p>
+		</article>
+		<article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+			<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Completed</p>
+			<p class="mt-1 text-2xl font-semibold text-slate-900">{completedThisMonth}</p>
+			<p class="mt-1 text-[11px] text-slate-500">marked done</p>
+		</article>
+		<article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+			<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Recurring</p>
+			<p class="mt-1 text-2xl font-semibold text-slate-900">{recurringThisMonth}</p>
+			<p class="mt-1 text-[11px] text-slate-500">on a series</p>
+		</article>
+		<article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+			<p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Overdue</p>
+			<p
+				class="mt-1 text-2xl font-semibold {overdueThisMonth > 0 ? 'text-rose-600' : 'text-slate-900'}"
+			>
+				{overdueThisMonth}
+			</p>
+			<p class="mt-1 text-[11px] text-slate-500">past their deadline</p>
+		</article>
+	</section>
+
+	<!-- Month navigator + legend -->
+	<section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div class="flex items-center gap-2">
+				<a
+					class="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+					href={prevMonthHref}
+					aria-label="Previous month"
+				>
+					←
+				</a>
+				<h2 class="px-1 text-base font-semibold text-slate-900">{monthLabel}</h2>
+				<a
+					class="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+					href={nextMonthHref}
+					aria-label="Next month"
+				>
+					→
+				</a>
+				<a
+					class="ml-1 inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-600 hover:bg-slate-100"
+					href="/projects/calendar"
+				>
+					Today
+				</a>
+			</div>
+			<div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+				<span class="inline-flex items-center gap-1">
+					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fecaca"></span>
+					Priority 8-10
+				</span>
+				<span class="inline-flex items-center gap-1">
+					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fde68a"></span>
+					Priority 5-7
+				</span>
+				<span class="inline-flex items-center gap-1">
+					<span class="inline-block h-2 w-2 rounded-sm" style="background:#bbf7d0"></span>
+					Priority 1-4
+				</span>
+				<span class="inline-flex items-center gap-1">
+					<span class="opacity-60">⟳</span>
+					Recurring
+				</span>
+			</div>
+		</div>
+	</section>
+
+	<!-- Calendar grid -->
 	<section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-		<div class="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-center text-[11px] font-medium uppercase tracking-wide text-slate-500">
-			<div class="py-2">Sun</div>
-			<div class="py-2">Mon</div>
-			<div class="py-2">Tue</div>
-			<div class="py-2">Wed</div>
-			<div class="py-2">Thu</div>
-			<div class="py-2">Fri</div>
-			<div class="py-2">Sat</div>
+		<div
+			class="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-center text-[11px] font-medium uppercase tracking-wide text-slate-500"
+		>
+			<div class="py-2.5">Sun</div>
+			<div class="py-2.5">Mon</div>
+			<div class="py-2.5">Tue</div>
+			<div class="py-2.5">Wed</div>
+			<div class="py-2.5">Thu</div>
+			<div class="py-2.5">Fri</div>
+			<div class="py-2.5">Sat</div>
 		</div>
 		<div class="grid grid-cols-7">
 			{#each cells as cell, i}
 				<div
-					class="min-h-[110px] border-b border-r border-slate-100 p-2 text-[11px] last:border-b-0 {cell.inMonth
-						? ''
-						: 'bg-slate-50/60 text-slate-300'}"
-					class:bg-emerald-50={cell.iso === todayIso}
+					class="relative min-h-[124px] border-b border-r border-slate-100 p-2 text-[11px] {cell.inMonth
+						? cell.isWeekend
+							? 'bg-slate-50/40'
+							: ''
+						: 'bg-slate-50/70 text-slate-300'}"
+					class:bg-[var(--sf-green-soft)]={cell.iso === todayIso}
 				>
 					{#if cell.day !== null}
-						<div class="mb-1 flex items-center justify-between">
-							<span class="font-medium text-slate-700">{cell.day}</span>
+						<div class="mb-1.5 flex items-center justify-between">
+							<span
+								class="text-xs font-semibold {cell.iso === todayIso
+									? 'text-[var(--sf-green)]'
+									: 'text-slate-700'}"
+							>
+								{cell.day}
+							</span>
 							{#if cell.iso === todayIso}
-								<span class="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[9px] text-white">today</span>
+								<span class="rounded-full bg-[var(--sf-green)] px-1.5 py-0.5 text-[9px] font-medium text-white">
+									Today
+								</span>
 							{/if}
 						</div>
 						{#if cell.iso}
 							{@const entries = dayMap.get(cell.iso) ?? []}
-							<ul class="space-y-1">
-								{#each entries as entry}
-									<li>
-										<a
-											href={`/projects/${entry.id}`}
-											class="block truncate rounded border px-1.5 py-0.5 {priorityColor(entry.priority ?? 5)}"
-											title={`${entry.name} (${entry.status})`}
-										>
-											{#if entry.recurrenceFrequency}
-												<span class="opacity-70">⟳</span>
-											{/if}
-											{entry.name}
-										</a>
-									</li>
-								{/each}
-							</ul>
+							{#if entries.length > 0}
+								<ul class="space-y-1">
+									{#each entries.slice(0, 3) as entry (entry.id)}
+										{@const pm = priorityMeta(entry.priority ?? 5)}
+										{@const meta = statusMeta(entry.status)}
+										<li>
+											<a
+												href={`/projects/${entry.id}`}
+												class="block truncate rounded border px-1.5 py-1 text-[10.5px] leading-tight"
+												style={`background:${pm.soft};color:${pm.text};border-color:${pm.border}`}
+												title={`${entry.name} · ${meta.label} · P${entry.priority}`}
+											>
+												<span class="font-medium">
+													{#if entry.recurrenceFrequency}<span class="opacity-70">⟳ </span>{/if}{entry.name}
+												</span>
+											</a>
+										</li>
+									{/each}
+									{#if entries.length > 3}
+										<li class="px-1.5 text-[10px] text-slate-500">+ {entries.length - 3} more</li>
+									{/if}
+								</ul>
+							{/if}
 						{/if}
 					{/if}
 				</div>
@@ -172,9 +292,17 @@
 		</div>
 	</section>
 
-	<p class="text-xs text-slate-500">
-		Two-way Google/Outlook sync requires per-user OAuth that lives in a separate platform
-		integration. The ICS feed above is a read-only subscription that any external calendar can
-		consume.
-	</p>
-</div>
+	<!-- Subscribe note -->
+	<section class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+		<p class="font-medium text-slate-700">Sync to Google Calendar or Outlook</p>
+		<p class="mt-1">
+			Click <span class="font-medium text-[var(--sf-green)]">Download .ics</span> for a one-off
+			snapshot, or paste
+			<code class="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
+				{icsHref}
+			</code>
+			into your calendar app to subscribe to the live feed. Two-way edits will land in v2 once the
+			platform-side OAuth integration ships.
+		</p>
+	</section>
+</PageShell>
