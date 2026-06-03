@@ -50,6 +50,10 @@ export {
 	procurementPurchaseOrderItems,
 	procurementPurchaseOrderReceipts
 } from '$modules/procurement/repositories/rfq.schema';
+export {
+	procurementSupplierInvoices,
+	procurementSupplierInvoiceLines
+} from '$modules/procurement/repositories/supplier-invoice.schema';
 
 // Project module
 export {

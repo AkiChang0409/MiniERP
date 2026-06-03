@@ -3,10 +3,13 @@
 	import { enhance } from '$app/forms';
 
 	let { data, form } = $props();
-	const formAny = $derived(form as { message?: string; recorded?: number; posted?: boolean; cancelled?: boolean } | null | undefined);
+	const formAny = $derived(form as { message?: string; recorded?: number; posted?: boolean; cancelled?: boolean; documentAttached?: boolean; fileName?: string } | null | undefined);
 
 	const s = $derived(data.session);
 	const editable = $derived(s.status === 'counting' || s.status === 'draft');
+	const docRef = $derived(s.documentRef as string | null);
+	const uploadedDoc = $derived(typeof docRef === 'string' && docRef.startsWith('r2:'));
+	const uploadedFileName = $derived(uploadedDoc ? (docRef as string).split('/').pop() ?? 'signed document' : null);
 </script>
 
 <PageShell
@@ -38,19 +41,40 @@
 	{#if formAny?.cancelled}
 		<p class="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">Session cancelled.</p>
 	{/if}
+	{#if formAny?.documentAttached}
+		<p class="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Signed count document attached{formAny.fileName ? ` — ${formAny.fileName}` : ''}. IA002 alerts will be suppressed when posting variances.</p>
+	{/if}
 
 	<div class="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm md:grid-cols-3">
-		<div>
-			<div class="text-xs uppercase text-slate-500">Document reference</div>
-			<div class="font-mono">{s.documentRef ?? '—'}</div>
-			<div class="text-xs text-slate-500 mt-1">{s.documentRef ? 'Signed count doc on file — IA002 alerts suppressed when posting.' : 'No signed count doc. Variances &gt; SGD 10k will trigger IA002.'}</div>
+		<div class="md:col-span-2">
+			<div class="text-xs uppercase text-slate-500">Signed physical-count document</div>
+			{#if uploadedDoc}
+				<div class="flex flex-wrap items-center gap-2">
+					<a class="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700" href={`/api/inventory/cycle-counts/${s.id}/document`} target="_blank" rel="noopener">View</a>
+					<a class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" href={`/api/inventory/cycle-counts/${s.id}/document?download=1`}>Download</a>
+					<span class="font-mono text-xs text-slate-600">{uploadedFileName}</span>
+				</div>
+				<div class="text-xs text-emerald-700 mt-1">Signed count doc on file — IA002 alerts suppressed when posting.</div>
+			{:else if docRef}
+				<div class="font-mono text-xs">{docRef}</div>
+				<div class="text-xs text-emerald-700 mt-1">Manual reference recorded — IA002 alerts suppressed when posting.</div>
+			{:else}
+				<div class="font-mono text-xs text-slate-500">— none attached —</div>
+				<div class="text-xs text-amber-700 mt-1">No signed count doc. Variances &gt; SGD 10k will trigger IA002 when posting.</div>
+			{/if}
+			{#if editable}
+				<form method="POST" action="?/attachDocument" enctype="multipart/form-data" use:enhance class="mt-3 flex flex-wrap items-center gap-2">
+					<input type="file" name="file" accept=".pdf,image/*" class="text-xs" />
+					<span class="text-[10px] uppercase text-slate-500">or</span>
+					<input name="documentRef" placeholder="Manual reference (file id / URL)" class="rounded-md border border-slate-300 px-2 py-1 text-xs" />
+					<button class="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700">{docRef ? 'Replace' : 'Attach'}</button>
+				</form>
+			{/if}
 		</div>
 		<div>
 			<div class="text-xs uppercase text-slate-500">Counted at</div>
 			<div>{s.countedAt ?? '—'}</div>
-		</div>
-		<div>
-			<div class="text-xs uppercase text-slate-500">Posted at</div>
+			<div class="text-xs uppercase text-slate-500 mt-2">Posted at</div>
 			<div>{s.postedAt ?? '—'}</div>
 			{#if s.approvedByEmail}
 				<div class="text-xs text-slate-500">by {s.approvedByEmail}</div>

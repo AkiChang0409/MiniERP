@@ -26,6 +26,11 @@ export function createProcurementApi(ctx: ModuleContext) {
 		recordPurchaseOrderAcknowledgment: svc.recordPurchaseOrderAcknowledgment.bind(svc),
 		recordPurchaseOrderReceipt: svc.recordPurchaseOrderReceipt.bind(svc),
 		recordReceiptInspection: svc.recordReceiptInspection.bind(svc),
-		listPurchaseOrders: svc.listPurchaseOrders.bind(svc)
+		listPurchaseOrders: svc.listPurchaseOrders.bind(svc),
+		listSupplierInvoices: svc.listSupplierInvoices.bind(svc),
+		getSupplierInvoiceDetail: svc.getSupplierInvoiceDetail.bind(svc),
+		createSupplierInvoice: svc.createSupplierInvoice.bind(svc),
+		recordSupplierInvoiceDecision: svc.recordSupplierInvoiceDecision.bind(svc),
+		runSupplierInvoiceRematch: svc.runSupplierInvoiceRematch.bind(svc)
 	};
 }

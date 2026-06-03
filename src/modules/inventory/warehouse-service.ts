@@ -982,6 +982,45 @@ export class WarehouseService {
 		});
 	}
 
+	/**
+	 * Attach a signed physical-count document to an existing cycle count.
+	 * Caller has already PUT the bytes into R2; this just records the
+	 * reference so `postCycleCount` will pick it up as `physicalCountDocumentRef`
+	 * and suppress IA002 alerts on variance adjustments.
+	 *
+	 * `documentRef` is stored as-is. When it starts with `r2:` the UI knows
+	 * to render a download link via `/api/inventory/cycle-counts/[id]/document`;
+	 * plain text refs (legacy / out-of-system PDFs) keep working.
+	 */
+	async attachCycleCountDocument(
+		id: string,
+		input: { documentRef: string; fileName?: string; contentType?: string; sizeBytes?: number }
+	) {
+		const session = await this.repo.findCycleCountById(id);
+		if (!session) throw new NotFoundError('CycleCount', id);
+		if (session.status === 'cancelled') {
+			throw new ValidationError('Cancelled cycle count cannot accept a document');
+		}
+		const documentRef = nullable(input.documentRef);
+		if (!documentRef) throw new ValidationError('documentRef is required');
+		await this.repo.updateCycleCount(id, { documentRef });
+		await this.audit.writeLog({
+			action: 'inventory.cycle_count.document_attached',
+			entityType: 'inventory_cycle_count',
+			entityId: id,
+			module: 'inventory',
+			actionType: 'update',
+			metadata: {
+				countNumber: session.countNumber,
+				documentRef,
+				fileName: input.fileName ?? null,
+				contentType: input.contentType ?? null,
+				sizeBytes: input.sizeBytes ?? null
+			}
+		});
+		return { documentRef };
+	}
+
 	// ------------------------- Aging -------------------------
 
 	/**

@@ -22,6 +22,10 @@ import {
 	procurementSupplierQuotationItems,
 	procurementSupplierQuotations
 } from './repositories/rfq.schema';
+import {
+	procurementSupplierInvoiceLines,
+	procurementSupplierInvoices
+} from './repositories/supplier-invoice.schema';
 
 type SupplierType = 'individual' | 'corporate_local' | 'corporate_international';
 type SupplierStatus = 'approved' | 'preferred' | 'on_hold' | 'blacklisted';
@@ -258,6 +262,52 @@ export type ReceiptInspectionInput = {
 	notes?: string;
 	returnRequired?: boolean;
 };
+
+// PUR006 — Supplier invoice 3-way matching.
+export type SupplierInvoiceLineInput = {
+	poItemId?: string;
+	description?: string;
+	itemCode?: string;
+	quantityInvoiced: number;
+	unitPriceInvoiced: number;
+	taxCode?: TaxCode;
+	notes?: string;
+};
+
+export type CreateSupplierInvoiceInput = {
+	invoiceNumber: string;
+	invoiceReference?: string;
+	supplierId?: string;
+	poId?: string;
+	projectId?: string;
+	invoiceDate?: string;
+	receivedDate?: string;
+	dueDate?: string;
+	currency?: string;
+	shippingAmount?: number;
+	taxAmount?: number;
+	dutiesAmount?: number;
+	discountAmount?: number;
+	subtotalAmount?: number;
+	totalAmount?: number;
+	notes?: string;
+	lines: SupplierInvoiceLineInput[];
+};
+
+export type SupplierInvoiceDecisionInput = {
+	action: 'approve' | 'reject' | 'override_approve';
+	reason?: string;
+};
+
+// Price variance > IA004_PRICE_VARIANCE_THRESHOLD_PCT triggers IA004 audit
+// alert and forces manual review even on otherwise matched invoices.
+const IA004_PRICE_VARIANCE_THRESHOLD_PCT = 5;
+// Anything within MATCH_PRICE_TOLERANCE_PCT is considered a clean match;
+// between that and the IA threshold is "price_variance — review" but no IA.
+const MATCH_PRICE_TOLERANCE_PCT = 1;
+// Allow tiny rounding drift between invoice qty and received qty before
+// flagging a qty mismatch (matches the receive tolerance UI).
+const MATCH_QTY_TOLERANCE = 1e-6;
 
 function nullable(value?: string) {
 	const trimmed = value?.trim();
@@ -1860,6 +1910,639 @@ export class ProcurementService {
 				updatedAt: now
 			});
 		}
+	}
+
+	// ──────────────────────────────────────────────────────────────────────
+	// PUR006 — Supplier invoice + 3-way matching
+	// ──────────────────────────────────────────────────────────────────────
+
+	async listSupplierInvoices() {
+		const invoices = await this.db
+			.select()
+			.from(procurementSupplierInvoices)
+			.where(isNull(procurementSupplierInvoices.deletedAt))
+			.orderBy(desc(procurementSupplierInvoices.createdAt));
+		if (invoices.length === 0) return [];
+		const suppliers = await this.listSuppliers();
+		const supplierById = new Map(suppliers.map((s) => [s.id, s]));
+		const lineRows = await this.db
+			.select()
+			.from(procurementSupplierInvoiceLines)
+			.where(
+				and(
+					inArray(
+						procurementSupplierInvoiceLines.invoiceId,
+						invoices.map((i) => i.id)
+					),
+					isNull(procurementSupplierInvoiceLines.deletedAt)
+				)
+			);
+		const linesByInvoice = new Map<string, (typeof procurementSupplierInvoiceLines.$inferSelect)[]>();
+		for (const row of lineRows) {
+			const list = linesByInvoice.get(row.invoiceId) ?? [];
+			list.push(row);
+			linesByInvoice.set(row.invoiceId, list);
+		}
+		return invoices.map((inv) => ({
+			...inv,
+			supplier: inv.supplierId ? supplierById.get(inv.supplierId) ?? null : null,
+			lines: linesByInvoice.get(inv.id) ?? []
+		}));
+	}
+
+	async getSupplierInvoiceDetail(id: string) {
+		const rows = await this.db
+			.select()
+			.from(procurementSupplierInvoices)
+			.where(
+				and(
+					eq(procurementSupplierInvoices.id, id),
+					isNull(procurementSupplierInvoices.deletedAt)
+				)
+			)
+			.limit(1);
+		const invoice = rows[0];
+		if (!invoice) throw new NotFoundError('Supplier invoice', id);
+		const lines = await this.db
+			.select()
+			.from(procurementSupplierInvoiceLines)
+			.where(
+				and(
+					eq(procurementSupplierInvoiceLines.invoiceId, id),
+					isNull(procurementSupplierInvoiceLines.deletedAt)
+				)
+			)
+			.orderBy(procurementSupplierInvoiceLines.createdAt);
+		const supplier = invoice.supplierId
+			? (await this.listSuppliers()).find((s) => s.id === invoice.supplierId) ?? null
+			: null;
+		const po = invoice.poId
+			? (await this.db
+					.select()
+					.from(procurementPurchaseOrders)
+					.where(eq(procurementPurchaseOrders.id, invoice.poId))
+					.limit(1))[0] ?? null
+			: null;
+		return { invoice, lines, supplier, purchaseOrder: po };
+	}
+
+	async createSupplierInvoice(input: CreateSupplierInvoiceInput) {
+		const invoiceNumber = input.invoiceNumber?.trim();
+		if (!invoiceNumber) throw new ValidationError('Supplier invoice number is required');
+		if (!input.lines || input.lines.length === 0) {
+			throw new ValidationError('Supplier invoice must have at least one line');
+		}
+
+		const now = new Date().toISOString();
+		const invoiceId = crypto.randomUUID();
+		const invoiceReference = nullable(input.invoiceReference) ?? generatedNumber('SI');
+		const subtotalAmount = input.lines.reduce(
+			(sum, line) =>
+				sum + roundMoney(finiteNumber(line.quantityInvoiced) * finiteNumber(line.unitPriceInvoiced)),
+			0
+		);
+		const shippingAmount = Math.max(0, finiteNumber(input.shippingAmount));
+		const taxAmount = Math.max(0, finiteNumber(input.taxAmount));
+		const dutiesAmount = Math.max(0, finiteNumber(input.dutiesAmount));
+		const discountAmount = Math.max(0, finiteNumber(input.discountAmount));
+		const totalAmount = roundMoney(
+			subtotalAmount + shippingAmount + taxAmount + dutiesAmount - discountAmount
+		);
+
+		// We need the supplier on the PO to validate ownership when both are
+		// provided — refuse mismatches up front rather than surface a confusing
+		// "no_po" downstream.
+		let supplierId = nullable(input.supplierId);
+		if (input.poId) {
+			const po = await this.getPurchaseOrder(input.poId);
+			if (supplierId && po.supplierId && supplierId !== po.supplierId) {
+				throw new ValidationError('Invoice supplier does not match PO supplier');
+			}
+			supplierId = supplierId ?? po.supplierId;
+		}
+
+		await this.db.insert(procurementSupplierInvoices).values({
+			id: invoiceId,
+			invoiceNumber,
+			invoiceReference,
+			supplierId: supplierId ?? null,
+			poId: nullable(input.poId),
+			projectId: nullable(input.projectId),
+			invoiceDate: nullable(input.invoiceDate) ?? now.slice(0, 10),
+			receivedDate: nullable(input.receivedDate) ?? now.slice(0, 10),
+			dueDate: nullable(input.dueDate),
+			currency: nullable(input.currency) ?? 'SGD',
+			subtotalAmount: input.subtotalAmount ?? subtotalAmount,
+			shippingAmount,
+			taxAmount,
+			dutiesAmount,
+			discountAmount,
+			totalAmount: input.totalAmount ?? totalAmount,
+			matchStatus: 'unmatched',
+			status: 'pending_match',
+			approvalStatus: 'pending_review',
+			createdByUserId: this.user?.id ?? null,
+			createdByEmail: this.user?.email ?? null,
+			notes: nullable(input.notes),
+			createdAt: now,
+			updatedAt: now
+		} as any);
+
+		for (const line of input.lines) {
+			const quantityInvoiced = Math.max(0, finiteNumber(line.quantityInvoiced));
+			const unitPriceInvoiced = Math.max(0, finiteNumber(line.unitPriceInvoiced));
+			const lineSubtotal = roundMoney(quantityInvoiced * unitPriceInvoiced);
+			const description = (line.description ?? line.itemCode ?? '').trim() || 'Line item';
+			await this.db.insert(procurementSupplierInvoiceLines).values({
+				id: crypto.randomUUID(),
+				invoiceId,
+				poItemId: nullable(line.poItemId),
+				receiptId: null,
+				description,
+				itemCode: nullable(line.itemCode),
+				quantityInvoiced,
+				unitPriceInvoiced,
+				lineSubtotal,
+				taxCode: line.taxCode ?? null,
+				poUnitPrice: null,
+				poQuantityOrdered: null,
+				quantityReceivedMatched: 0,
+				quantityPreviouslyInvoiced: 0,
+				priceVariancePct: null,
+				qtyVariance: null,
+				lineMatchStatus: 'unmatched',
+				iaExceptionCode: null,
+				approvalOverride: false,
+				approvalOverrideReason: null,
+				notes: nullable(line.notes),
+				createdAt: now,
+				updatedAt: now
+			} as any);
+		}
+
+		await this.audit.writeLog({
+			module: 'procurement',
+			actionType: 'create',
+			action: 'supplier_invoice.created',
+			entityType: 'supplier_invoice',
+			entityId: invoiceId,
+			metadata: {
+				invoiceNumber,
+				invoiceReference,
+				supplierId,
+				poId: input.poId ?? null,
+				totalAmount
+			}
+		});
+
+		// Immediately try a 3-way match so the user sees the verdict on the
+		// detail page. Auto-approval only happens when all lines clean-match.
+		await this.runThreeWayMatch(invoiceId);
+		return this.getSupplierInvoiceDetail(invoiceId);
+	}
+
+	/** Recomputes the per-line + header match verdict for an invoice. Safe to
+	 * call repeatedly — wipes prior IA004 flags and re-derives from PO + GRN
+	 * snapshots. */
+	private async runThreeWayMatch(invoiceId: string) {
+		const detail = await this.getSupplierInvoiceDetail(invoiceId);
+		const { invoice, lines } = detail;
+		const now = new Date().toISOString();
+
+		// Cache PO items + receipts for the lines we will touch.
+		const poItemIds = lines.map((l) => l.poItemId).filter(Boolean) as string[];
+		const poItemsById = new Map<string, typeof procurementPurchaseOrderItems.$inferSelect>();
+		const receiptsByPoItem = new Map<
+			string,
+			(typeof procurementPurchaseOrderReceipts.$inferSelect)[]
+		>();
+		if (poItemIds.length > 0) {
+			const poItemRows = await this.db
+				.select()
+				.from(procurementPurchaseOrderItems)
+				.where(
+					and(
+						inArray(procurementPurchaseOrderItems.id, poItemIds),
+						isNull(procurementPurchaseOrderItems.deletedAt)
+					)
+				);
+			for (const row of poItemRows) poItemsById.set(row.id, row);
+			const receiptRows = await this.db
+				.select()
+				.from(procurementPurchaseOrderReceipts)
+				.where(
+					and(
+						inArray(procurementPurchaseOrderReceipts.poItemId, poItemIds),
+						isNull(procurementPurchaseOrderReceipts.deletedAt)
+					)
+				);
+			for (const row of receiptRows) {
+				const list = receiptsByPoItem.get(row.poItemId) ?? [];
+				list.push(row);
+				receiptsByPoItem.set(row.poItemId, list);
+			}
+		}
+
+		// Compute how much was already invoiced on each PO item (excluding this
+		// invoice) so partial deliveries split across invoices match cleanly.
+		const previouslyInvoicedByPoItem = await this.computePreviouslyInvoiced(
+			poItemIds,
+			invoiceId
+		);
+
+		let maxPriceVariancePct = 0;
+		let anyIa004 = false;
+		const lineVerdicts: Array<{
+			lineId: string;
+			status: typeof procurementSupplierInvoiceLines.$inferSelect.lineMatchStatus;
+			priceVariancePct: number | null;
+			qtyVariance: number | null;
+			receiptId: string | null;
+			poUnitPrice: number | null;
+			poQuantityOrdered: number | null;
+			quantityReceivedMatched: number;
+			quantityPreviouslyInvoiced: number;
+			iaExceptionCode: string | null;
+		}> = [];
+
+		for (const line of lines) {
+			const quantityInvoiced = finiteNumber(line.quantityInvoiced);
+			const unitPriceInvoiced = finiteNumber(line.unitPriceInvoiced);
+			const poItem = line.poItemId ? poItemsById.get(line.poItemId) ?? null : null;
+
+			if (!poItem) {
+				lineVerdicts.push({
+					lineId: line.id,
+					status: invoice.poId ? 'no_po' : 'unmatched',
+					priceVariancePct: null,
+					qtyVariance: null,
+					receiptId: null,
+					poUnitPrice: null,
+					poQuantityOrdered: null,
+					quantityReceivedMatched: 0,
+					quantityPreviouslyInvoiced: 0,
+					iaExceptionCode: null
+				});
+				continue;
+			}
+
+			const poUnitPrice = finiteNumber(poItem.unitPrice);
+			const poQuantityOrdered = finiteNumber(poItem.quantity);
+			const acceptedReceipts = (receiptsByPoItem.get(poItem.id) ?? []).filter(
+				(r) => r.status === 'accepted' || r.inspectionStatus === 'accepted'
+			);
+			const quantityReceivedMatched = acceptedReceipts.reduce(
+				(sum, r) => sum + finiteNumber(r.acceptedQuantity),
+				0
+			);
+			const quantityPreviouslyInvoiced = previouslyInvoicedByPoItem.get(poItem.id) ?? 0;
+			const matchedReceipt = acceptedReceipts[acceptedReceipts.length - 1] ?? null;
+
+			// Price variance — compute against PO unit price. Zero PO price is
+			// treated as "no price to compare" so a brand new line shows as
+			// price_variance instead of dividing by zero.
+			const priceVariancePct =
+				poUnitPrice > 0
+					? roundScore(((unitPriceInvoiced - poUnitPrice) / poUnitPrice) * 100)
+					: null;
+			const absVariance = priceVariancePct !== null ? Math.abs(priceVariancePct) : Infinity;
+			if (priceVariancePct !== null && absVariance > maxPriceVariancePct) {
+				maxPriceVariancePct = absVariance;
+			}
+
+			// Qty check — does the invoiced qty fit inside the unbilled accepted
+			// qty? Over-invoice means accepted < invoiced + previously invoiced.
+			const unbilledReceived = quantityReceivedMatched - quantityPreviouslyInvoiced;
+			const qtyVariance = roundMoney(quantityInvoiced - Math.max(0, unbilledReceived));
+
+			let status: typeof procurementSupplierInvoiceLines.$inferSelect.lineMatchStatus = 'matched';
+			let iaExceptionCode: string | null = null;
+
+			if (quantityReceivedMatched <= MATCH_QTY_TOLERANCE) {
+				status = 'missing_grn';
+			} else if (qtyVariance > MATCH_QTY_TOLERANCE) {
+				// Invoicing more than was received — could be over-invoice (line)
+				// or qty mismatch (header). Distinguish for the chip.
+				status = quantityInvoiced > quantityReceivedMatched ? 'over_invoiced' : 'qty_mismatch';
+			} else if (priceVariancePct === null) {
+				status = 'price_variance';
+			} else if (absVariance > IA004_PRICE_VARIANCE_THRESHOLD_PCT) {
+				status = 'price_variance';
+				iaExceptionCode = 'IA004';
+				anyIa004 = true;
+			} else if (absVariance > MATCH_PRICE_TOLERANCE_PCT) {
+				status = 'price_variance';
+			}
+
+			lineVerdicts.push({
+				lineId: line.id,
+				status,
+				priceVariancePct,
+				qtyVariance,
+				receiptId: matchedReceipt?.id ?? null,
+				poUnitPrice,
+				poQuantityOrdered,
+				quantityReceivedMatched,
+				quantityPreviouslyInvoiced,
+				iaExceptionCode
+			});
+		}
+
+		// Persist line verdicts.
+		for (const verdict of lineVerdicts) {
+			await this.db
+				.update(procurementSupplierInvoiceLines)
+				.set({
+					receiptId: verdict.receiptId,
+					poUnitPrice: verdict.poUnitPrice,
+					poQuantityOrdered: verdict.poQuantityOrdered,
+					quantityReceivedMatched: verdict.quantityReceivedMatched,
+					quantityPreviouslyInvoiced: verdict.quantityPreviouslyInvoiced,
+					priceVariancePct: verdict.priceVariancePct,
+					qtyVariance: verdict.qtyVariance,
+					lineMatchStatus: verdict.status,
+					iaExceptionCode: verdict.iaExceptionCode,
+					updatedAt: now
+				} as any)
+				.where(eq(procurementSupplierInvoiceLines.id, verdict.lineId));
+		}
+
+		// Roll line verdicts up to a header status.
+		const headerMatch = this.summarizeMatch(lineVerdicts.map((v) => v.status));
+		const allMatched = lineVerdicts.length > 0 && lineVerdicts.every((v) => v.status === 'matched');
+		const nextStatus = allMatched ? 'matched' : 'pending_match';
+		const nextApproval = allMatched && !anyIa004 ? 'auto_approved' : 'pending_review';
+		const headerUpdates = {
+			matchStatus: headerMatch,
+			status: nextStatus,
+			approvalStatus: nextApproval,
+			iaExceptionCode: anyIa004 ? 'IA004' : null,
+			iaExceptionReason: anyIa004
+				? `Price variance exceeds ${IA004_PRICE_VARIANCE_THRESHOLD_PCT}% on at least one line vs PO`
+				: null,
+			maxPriceVariancePct: maxPriceVariancePct === 0 ? null : maxPriceVariancePct,
+			approvedAt: allMatched && !anyIa004 ? now : invoice.approvedAt,
+			approvedByUserId:
+				allMatched && !anyIa004 ? this.user?.id ?? null : invoice.approvedByUserId,
+			approvedByEmail:
+				allMatched && !anyIa004 ? this.user?.email ?? null : invoice.approvedByEmail,
+			updatedAt: now
+		};
+		await this.db
+			.update(procurementSupplierInvoices)
+			.set(headerUpdates as any)
+			.where(eq(procurementSupplierInvoices.id, invoiceId));
+
+		if (anyIa004) {
+			await this.audit.writeLog({
+				module: 'procurement',
+				actionType: 'permission_change',
+				action: 'supplier_invoice.alert.ia004',
+				entityType: 'supplier_invoice',
+				entityId: invoiceId,
+				metadata: {
+					invoiceReference: invoice.invoiceReference,
+					maxPriceVariancePct,
+					thresholdPct: IA004_PRICE_VARIANCE_THRESHOLD_PCT,
+					poId: invoice.poId
+				}
+			});
+		}
+
+		await this.audit.writeLog({
+			module: 'procurement',
+			actionType: 'update',
+			action: 'supplier_invoice.match.evaluated',
+			entityType: 'supplier_invoice',
+			entityId: invoiceId,
+			metadata: {
+				matchStatus: headerMatch,
+				approvalStatus: nextApproval,
+				maxPriceVariancePct,
+				iaExceptionCode: anyIa004 ? 'IA004' : null,
+				lineVerdicts: lineVerdicts.map((v) => ({
+					lineId: v.lineId,
+					status: v.status,
+					priceVariancePct: v.priceVariancePct,
+					qtyVariance: v.qtyVariance
+				}))
+			}
+		});
+
+		// Auto-approval shortcut: trigger payment immediately so AP / finance
+		// can pick the payable up without a reviewer touching it.
+		if (allMatched && !anyIa004) {
+			await this.triggerSupplierInvoicePayment(invoiceId);
+		}
+	}
+
+	async recordSupplierInvoiceDecision(
+		invoiceId: string,
+		input: SupplierInvoiceDecisionInput
+	) {
+		const detail = await this.getSupplierInvoiceDetail(invoiceId);
+		const invoice = detail.invoice;
+		const now = new Date().toISOString();
+
+		if (invoice.status === 'paid' || invoice.status === 'cancelled') {
+			throw new ValidationError(`Invoice already ${invoice.status}`);
+		}
+
+		// override_approve = "I know there is a variance, approve anyway".
+		// reject closes the invoice; approve only allowed when matched.
+		if (input.action === 'approve') {
+			if (invoice.matchStatus !== 'matched') {
+				throw new ValidationError(
+					`Invoice match status is ${invoice.matchStatus}; use override_approve to bypass review`
+				);
+			}
+			await this.db
+				.update(procurementSupplierInvoices)
+				.set({
+					status: 'approved',
+					approvalStatus: 'approved',
+					approvedByUserId: this.user?.id ?? null,
+					approvedByEmail: this.user?.email ?? null,
+					approvedAt: now,
+					updatedAt: now
+				} as any)
+				.where(eq(procurementSupplierInvoices.id, invoiceId));
+			await this.audit.writeLog({
+				module: 'procurement',
+				actionType: 'update',
+				action: 'supplier_invoice.approved',
+				entityType: 'supplier_invoice',
+				entityId: invoiceId,
+				metadata: { reason: input.reason ?? null }
+			});
+			await this.triggerSupplierInvoicePayment(invoiceId);
+		} else if (input.action === 'override_approve') {
+			const reason = nullable(input.reason);
+			if (!reason) {
+				throw new ValidationError('Override approval requires a reason');
+			}
+			await this.db
+				.update(procurementSupplierInvoices)
+				.set({
+					status: 'approved',
+					approvalStatus: 'approved',
+					approvedByUserId: this.user?.id ?? null,
+					approvedByEmail: this.user?.email ?? null,
+					approvedAt: now,
+					notes: invoice.notes
+						? `${invoice.notes}\n[override approval] ${reason}`
+						: `[override approval] ${reason}`,
+					updatedAt: now
+				} as any)
+				.where(eq(procurementSupplierInvoices.id, invoiceId));
+			await this.audit.writeLog({
+				module: 'procurement',
+				actionType: 'update',
+				action: 'supplier_invoice.override_approved',
+				entityType: 'supplier_invoice',
+				entityId: invoiceId,
+				metadata: {
+					reason,
+					matchStatus: invoice.matchStatus,
+					iaExceptionCode: invoice.iaExceptionCode
+				}
+			});
+			await this.triggerSupplierInvoicePayment(invoiceId);
+		} else if (input.action === 'reject') {
+			const reason = nullable(input.reason);
+			if (!reason) throw new ValidationError('Rejection requires a reason');
+			await this.db
+				.update(procurementSupplierInvoices)
+				.set({
+					status: 'rejected',
+					approvalStatus: 'rejected',
+					rejectionReason: reason,
+					updatedAt: now
+				} as any)
+				.where(eq(procurementSupplierInvoices.id, invoiceId));
+			await this.audit.writeLog({
+				module: 'procurement',
+				actionType: 'update',
+				action: 'supplier_invoice.rejected',
+				entityType: 'supplier_invoice',
+				entityId: invoiceId,
+				metadata: { reason, matchStatus: invoice.matchStatus }
+			});
+		}
+		return this.getSupplierInvoiceDetail(invoiceId);
+	}
+
+	async runSupplierInvoiceRematch(invoiceId: string) {
+		await this.runThreeWayMatch(invoiceId);
+		return this.getSupplierInvoiceDetail(invoiceId);
+	}
+
+	private async triggerSupplierInvoicePayment(invoiceId: string) {
+		const detail = await this.getSupplierInvoiceDetail(invoiceId);
+		const invoice = detail.invoice;
+		if (invoice.paymentTriggeredAt) return;
+		const now = new Date().toISOString();
+		// Reuse the GRN payment reference when we have one — keeps the audit
+		// trail joinable across PUR005 + PUR006. Otherwise mint a fresh AP-...
+		// reference so AP still has a key to hang the payable off.
+		const grnPaymentReference =
+			detail.lines.find((l) => l.receiptId)?.receiptId
+				? (
+						await this.db
+							.select({ ref: procurementPurchaseOrderReceipts.paymentReference })
+							.from(procurementPurchaseOrderReceipts)
+							.where(
+								eq(
+									procurementPurchaseOrderReceipts.id,
+									detail.lines.find((l) => l.receiptId)?.receiptId as string
+								)
+							)
+							.limit(1)
+				  )[0]?.ref ?? null
+				: null;
+		const paymentReference = grnPaymentReference ?? generatedNumber('AP');
+
+		await this.db
+			.update(procurementSupplierInvoices)
+			.set({
+				paymentReference,
+				paymentTriggeredAt: now,
+				updatedAt: now
+			} as any)
+			.where(eq(procurementSupplierInvoices.id, invoiceId));
+
+		await this.audit.writeLog({
+			module: 'procurement',
+			actionType: 'create',
+			action: 'supplier_invoice.payment.triggered',
+			entityType: 'supplier_invoice',
+			entityId: invoiceId,
+			metadata: {
+				invoiceReference: invoice.invoiceReference,
+				paymentReference,
+				totalAmount: invoice.totalAmount,
+				supplierId: invoice.supplierId
+			}
+		});
+
+		this.ctx.eventBus?.emit(
+			createEvent('supplier_invoice.approved.for_payment', 'procurement', {
+				invoiceId,
+				invoiceNumber: invoice.invoiceNumber,
+				invoiceReference: invoice.invoiceReference,
+				paymentReference,
+				supplierId: invoice.supplierId,
+				poId: invoice.poId,
+				totalAmount: invoice.totalAmount,
+				currency: invoice.currency,
+				dueDate: invoice.dueDate
+			})
+		);
+	}
+
+	private async computePreviouslyInvoiced(poItemIds: string[], excludeInvoiceId: string) {
+		const map = new Map<string, number>();
+		if (poItemIds.length === 0) return map;
+		// Sum lines from invoices that are not rejected / cancelled and not the
+		// invoice we are currently re-matching.
+		const peers = await this.db
+			.select({
+				poItemId: procurementSupplierInvoiceLines.poItemId,
+				quantityInvoiced: procurementSupplierInvoiceLines.quantityInvoiced,
+				invoiceId: procurementSupplierInvoiceLines.invoiceId,
+				invoiceStatus: procurementSupplierInvoices.status
+			})
+			.from(procurementSupplierInvoiceLines)
+			.innerJoin(
+				procurementSupplierInvoices,
+				eq(procurementSupplierInvoiceLines.invoiceId, procurementSupplierInvoices.id)
+			)
+			.where(
+				and(
+					inArray(procurementSupplierInvoiceLines.poItemId, poItemIds),
+					isNull(procurementSupplierInvoiceLines.deletedAt),
+					isNull(procurementSupplierInvoices.deletedAt)
+				)
+			);
+		for (const row of peers) {
+			if (!row.poItemId) continue;
+			if (row.invoiceId === excludeInvoiceId) continue;
+			if (row.invoiceStatus === 'rejected' || row.invoiceStatus === 'cancelled') continue;
+			map.set(row.poItemId, (map.get(row.poItemId) ?? 0) + finiteNumber(row.quantityInvoiced));
+		}
+		return map;
+	}
+
+	private summarizeMatch(
+		statuses: Array<typeof procurementSupplierInvoiceLines.$inferSelect.lineMatchStatus>
+	): typeof procurementSupplierInvoices.$inferSelect.matchStatus {
+		if (statuses.length === 0) return 'unmatched';
+		if (statuses.every((s) => s === 'matched')) return 'matched';
+		if (statuses.some((s) => s === 'no_po')) return 'no_po';
+		if (statuses.some((s) => s === 'missing_grn')) return 'missing_grn';
+		if (statuses.some((s) => s === 'price_variance')) return 'price_variance';
+		if (statuses.some((s) => s === 'qty_mismatch' || s === 'over_invoiced')) return 'qty_mismatch';
+		return 'unmatched';
 	}
 
 	private async getQuotationItems(quotationIds: string[]) {

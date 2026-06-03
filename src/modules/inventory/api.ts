@@ -55,6 +55,7 @@ export function createInventoryApi(ctx: ModuleContext) {
 		recordCycleCounts: whSvc.recordCycleCounts.bind(whSvc),
 		postCycleCount: whSvc.postCycleCount.bind(whSvc),
 		cancelCycleCount: whSvc.cancelCycleCount.bind(whSvc),
+		attachCycleCountDocument: whSvc.attachCycleCountDocument.bind(whSvc),
 		getInventoryAging: whSvc.getInventoryAging.bind(whSvc)
 	};
 }

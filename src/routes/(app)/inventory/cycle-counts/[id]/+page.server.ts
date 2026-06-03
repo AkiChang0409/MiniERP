@@ -78,5 +78,38 @@ export const actions: Actions = {
 		} catch (e) {
 			return fail(400, { message: (e as Error).message });
 		}
+	},
+
+	attachDocument: async (event) => {
+		if (!event.platform) return fail(503, { message: 'Platform unavailable' });
+		const form = await event.request.formData();
+		const file = form.get('file');
+		const manualRef = String(form.get('documentRef') ?? '').trim();
+		const sessionId = event.params.id!;
+		try {
+			const ctx = await createModuleContext(event);
+			const inventory = createInventoryApi(ctx);
+			if (file instanceof File && file.size > 0) {
+				const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || 'signed-count.pdf';
+				const key = `cycle-counts/${sessionId}/${Date.now()}-${safeName}`;
+				await event.platform.env.R2.put(key, await file.arrayBuffer(), {
+					httpMetadata: { contentType: file.type || 'application/octet-stream' }
+				});
+				await inventory.attachCycleCountDocument(sessionId, {
+					documentRef: `r2:${key}`,
+					fileName: file.name,
+					contentType: file.type || 'application/octet-stream',
+					sizeBytes: file.size
+				});
+				return { documentAttached: true, fileName: file.name };
+			}
+			if (manualRef) {
+				await inventory.attachCycleCountDocument(sessionId, { documentRef: manualRef });
+				return { documentAttached: true, fileName: manualRef };
+			}
+			return fail(400, { message: 'Upload a file or provide a manual reference.' });
+		} catch (e) {
+			return fail(400, { message: (e as Error).message });
+		}
 	}
 };
