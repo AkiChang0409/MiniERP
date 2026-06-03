@@ -12,7 +12,7 @@
 	title="New cycle count"
 	description="Schedule a cycle count session. Expected on-hand is snapshot from current stock levels; the clerk then records counted quantity per line."
 >
-	<form method="POST" class="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+	<form method="POST" enctype="multipart/form-data" class="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
 		{#if formAny?.message}
 			<p class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{formAny.message}</p>
 		{/if}
@@ -34,13 +34,17 @@
 					<option value="full_physical">Full physical inventory</option>
 				</select>
 			</label>
-			<label class="space-y-1 text-sm md:col-span-2">
+			<div class="space-y-1 text-sm md:col-span-2">
 				<span class="text-slate-700">
-					Physical count document reference
-					<span class="text-xs text-slate-500">(signed PDF / file ID; required for variances &gt; SGD 10k to suppress IA002)</span>
+					Signed physical count document
+					<span class="text-xs text-slate-500">(required for variances &gt; SGD 10k to suppress IA002 — you can also attach this later)</span>
 				</span>
-				<input name="documentRef" class="w-full rounded-md border border-slate-300 px-3 py-2" placeholder="e.g. Q2-physical-count-signed.pdf" />
-			</label>
+				<div class="grid gap-2 md:grid-cols-[1fr_auto_1fr]">
+					<input type="file" name="file" accept=".pdf,image/*" class="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+					<span class="self-center text-[10px] uppercase text-slate-500">or</span>
+					<input name="documentRef" class="rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="Manual reference (file id / URL)" />
+				</div>
+			</div>
 			<label class="space-y-1 text-sm md:col-span-2">
 				<span class="text-slate-700">Notes</span>
 				<textarea name="notes" rows="2" class="w-full rounded-md border border-slate-300 px-3 py-2"></textarea>

@@ -85,6 +85,13 @@
       "when": 1780106400000,
       "tag": "0017_hr_overtime_management",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1780110000000,
+      "tag": "0018_pur006_supplier_invoices",
+      "breakpoints": true
     }
   ]
 }

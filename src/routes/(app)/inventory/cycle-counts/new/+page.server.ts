@@ -28,19 +28,34 @@ export const actions: Actions = {
 			return fail(400, { message: 'Warehouse is required' });
 		}
 		const countType = (data.get('countType') as string) || 'cycle_count';
-		const documentRef = (data.get('documentRef') as string | null)?.trim() || undefined;
+		const manualRef = (data.get('documentRef') as string | null)?.trim() || undefined;
 		const notes = (data.get('notes') as string | null)?.trim() || undefined;
 		const binIds = data.getAll('binIds').map((v) => String(v)).filter(Boolean);
+		const uploadedFile = data.get('file');
 		try {
 			const ctx = await createModuleContext(event);
 			const inventory = createInventoryApi(ctx);
 			const { id } = await inventory.createCycleCount({
 				warehouseId,
 				countType: countType as any,
-				documentRef,
+				documentRef: manualRef,
 				notes,
 				binIds: binIds.length > 0 ? binIds : undefined
 			});
+			// If the user picked a file at creation time, upload now and attach.
+			if (uploadedFile instanceof File && uploadedFile.size > 0) {
+				const safeName = uploadedFile.name.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || 'signed-count.pdf';
+				const key = `cycle-counts/${id}/${Date.now()}-${safeName}`;
+				await event.platform.env.R2.put(key, await uploadedFile.arrayBuffer(), {
+					httpMetadata: { contentType: uploadedFile.type || 'application/octet-stream' }
+				});
+				await inventory.attachCycleCountDocument(id, {
+					documentRef: `r2:${key}`,
+					fileName: uploadedFile.name,
+					contentType: uploadedFile.type || 'application/octet-stream',
+					sizeBytes: uploadedFile.size
+				});
+			}
 			throw redirect(303, `/inventory/cycle-counts/${id}`);
 		} catch (e) {
 			if (e instanceof Response) throw e;
