@@ -151,25 +151,31 @@
 	.cropper {
 		display: flex;
 		flex-direction: column;
+		align-items: center; /* center the shrink-wrapped stage */
 		gap: 12px;
 		width: 100%;
 	}
+	/* Shrink-wrap the image so the stage box === the rendered image box. The
+	   crop overlay is positioned in fractions of the stage, so any letterboxing
+	   (object-fit/contain) here would misalign the crop with what the user sees.
+	   Sizing the stage to the image eliminates that. */
 	.stage {
 		position: relative;
-		width: 100%;
-		max-height: 440px;
+		display: inline-block;
+		max-width: 100%;
 		overflow: hidden;
 		border-radius: 10px;
 		background: #111;
+		line-height: 0;
 		user-select: none;
 		touch-action: none;
 	}
 	.stage img {
 		display: block;
-		width: 100%;
-		height: auto;
+		max-width: 100%;
 		max-height: 440px;
-		object-fit: contain;
+		width: auto;
+		height: auto;
 		pointer-events: none;
 	}
 	.shade {
