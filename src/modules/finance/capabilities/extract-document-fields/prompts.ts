@@ -8,7 +8,7 @@
  * corresponding schema in `schemas.ts` expects.
  */
 
-export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v5';
+export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v6';
 
 const SECURITY_FOOTER = `
 SECURITY:
@@ -39,6 +39,10 @@ EXTRACTION RULES:
 - Prefer values near explicit labels over values from tables, filenames, headers, or footers.
 - Ignore OCR noise, duplicated page headers/footers, and repeated totals unless one value is clearly the final payable total.
 
+LAYOUT / OCR CONTEXT:
+- This is OCR text. A label and its value are often split onto SEPARATE LINES or sit in different columns of the same row (e.g. a line "Estimated Import Duties & Taxes" followed by a line "47.81"). Read the WHOLE document and associate each label with the nearest adjacent number — the value on the next line, the end of the same line, or the aligned column — not only text on the same physical line.
+- Do not skip a value just because it is not immediately after its label. If a labelled amount clearly exists somewhere in the document, capture it.
+
 AMOUNT RULES:
 - totalAmount must be the final grand total / amount due / balance due / invoice total, normally GST-inclusive when GST is charged.
 - Do NOT use subtotal, tax-exclusive amount, unit price, line-item amount, discount, deposit, previous balance, paid amount, or GST amount as totalAmount.
@@ -46,7 +50,9 @@ AMOUNT RULES:
 - Numeric amounts must be plain numbers with no currency symbols or thousands separators.
 
 GST/VAT RULES:
-- If an explicit GST/VAT/tax amount is shown, use that exact amount.
+- gstAmount is the tax/duty amount charged on this document. Tax appears under many labels — treat ALL of these as the tax amount: "GST", "VAT", "Tax", "Sales Tax", "Service Tax", "Duties & Taxes", "Import Duties & Taxes", "Estimated Import Duties & Taxes", "Tax Amount". The label may be on a different line/column than its number (see LAYOUT rule).
+- If an explicit tax amount is shown, use that exact amount.
+- If SEVERAL tax-like figures appear (e.g. a "VAT" summary line showing 0.00 AND a separate non-zero "Import Duties & Taxes" or "Tax" total), prefer the clearly-labelled NON-ZERO tax/duty total actually charged on the document. Only use 0.00 as gstAmount when it is unambiguously the document's final/only tax.
 - If only a GST/VAT rate is shown, calculate gstAmount only when the tax base is clear:
   - If subtotal / taxable amount / amount before tax is shown, gstAmount = subtotal * rate / 100.
   - If only a clearly GST-inclusive grand total is shown, gstAmount = totalAmount * rate / (100 + rate).
