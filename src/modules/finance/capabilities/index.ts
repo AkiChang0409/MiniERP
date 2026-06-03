@@ -1,3 +1,4 @@
+import { classifyDocumentCategoryCapability } from './classify-document-category';
 import { detectDuplicateCapability } from './detect-duplicate';
 import { extractDocumentFieldsCapability } from './extract-document-fields';
 import { extractInvoiceFieldsCapability } from './extract-invoice-fields';
@@ -29,6 +30,11 @@ export {
 	type ExtractDocumentFieldsInput,
 	type ExtractDocumentFieldsOutput
 } from './extract-document-fields';
+export {
+	classifyDocumentCategoryCapability,
+	type ClassifyDocumentCategoryInput,
+	type ClassifyDocumentCategoryOutput
+} from './classify-document-category';
 export {
 	matchSupplierCapability,
 	type MatchSupplierInput,
@@ -62,6 +68,7 @@ export {
 export const financeCapabilities = [
 	extractInvoiceFieldsCapability,
 	extractDocumentFieldsCapability,
+	classifyDocumentCategoryCapability,
 	matchSupplierCapability,
 	matchPurchaseOrderCapability,
 	detectDuplicateCapability,

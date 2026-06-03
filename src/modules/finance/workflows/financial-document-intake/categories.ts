@@ -418,6 +418,49 @@ export function findCategoryById(id: string): CategoryDefinition | undefined {
 	return FINANCE_CATEGORY_CATALOG.find((c) => c.id === id);
 }
 
+/** Document-type enum value used by the intake artifact (`documentArtifacts.documentType`). */
+export type IntakeDocumentType =
+	| 'supplier_invoice'
+	| 'customer_invoice'
+	| 'receipt'
+	| 'purchase_order'
+	| 'contract'
+	| 'quotation'
+	| 'bank_statement'
+	| 'tax_document'
+	| 'logistics_document'
+	| 'unknown';
+
+/**
+ * Reverse of {@link categoryIdForDocumentType}: derive the coarse intake
+ * `documentType` from a (finer) finance category. With category-first
+ * classification the category is the source of truth; `documentType` is kept
+ * only as a coarse display label, derived here from the category's
+ * `categoryDocType`.
+ */
+export function documentTypeForCategory(
+	categoryId: string | null | undefined
+): IntakeDocumentType {
+	const cat = categoryId ? findCategoryById(categoryId) : undefined;
+	switch (cat?.categoryDocType) {
+		case 'invoice':
+			return 'supplier_invoice';
+		case 'invoice_out':
+			return 'customer_invoice';
+		case 'receipt':
+			return 'receipt';
+		case 'po':
+		case 'purchase_order_doc':
+			return 'purchase_order';
+		case 'contract':
+			return 'contract';
+		case 'quotation':
+			return 'quotation';
+		default:
+			return 'unknown';
+	}
+}
+
 export function getCategoriesByBucket(bucket: Bucket): CategoryDefinition[] {
 	return FINANCE_CATEGORY_CATALOG.filter((c) => c.bucket === bucket);
 }

@@ -120,7 +120,15 @@
 
 	const getInitialArtifact = () => initialArtifact;
 	let artifact = $state<DocumentArtifactView>(getInitialArtifact());
-	const getInitialCategoryId = () => artifact.suggestedCategoryId ?? categories[0]?.id ?? '';
+	// Source of truth is the category the field-extraction LLM actually used
+	// (`suggestedCategoryId`). When the AI could not determine one (e.g. it
+	// classified the doc as logistics/bank/tax/unknown, which have no auto
+	// category, or text extraction was too thin), leave it UNSELECTED rather
+	// than silently defaulting to the first catalog entry — defaulting to
+	// "supplier invoice" misled users into thinking the AI had chosen it.
+	const getInitialCategoryId = () => artifact.suggestedCategoryId ?? '';
+	const documentTypeLabel = (t: string | undefined) =>
+		t && t !== 'unknown' ? t.replaceAll('_', ' ') : null;
 	let selectedCategoryId = $state<string>(getInitialCategoryId());
 	let categoryConfirmed = $state(false);
 	let currentStep = $state<ReviewStep>('category');
@@ -572,6 +580,18 @@
 					{/if}
 				</div>
 
+				{#if !selectedCategoryId}
+					<p class="mt-3 rounded-md border border-amber-300 bg-amber-50/50 px-3 py-2 text-xs text-amber-800">
+						{#if documentTypeLabel(artifact.documentType)}
+							The AI read this as a <span class="font-medium">{documentTypeLabel(artifact.documentType)}</span>, which has no
+							auto-fill category. Pick the correct category below — fields are extracted against your choice.
+						{:else}
+							The AI couldn't confidently determine this document's category. Pick the correct one below — fields
+							are extracted against your choice.
+						{/if}
+					</p>
+				{/if}
+
 				{#if categorySuggestions.length > 0}
 					<div class="mt-4 grid gap-2">
 						{#each categorySuggestions as suggestion}
@@ -605,6 +625,9 @@
 						onchange={(e) => handleCategoryChange((e.currentTarget as HTMLSelectElement).value)}
 						disabled={isReclassifying || isConfirming || isAbandoning || isClosed || !canReclassify}
 					>
+						{#if !selectedCategoryId}
+							<option value="" disabled>— Select a category —</option>
+						{/if}
 						{#each ['expense', 'revenue', 'document_only'] as bucket}
 							<optgroup label={bucket === 'expense' ? 'Expense' : bucket === 'revenue' ? 'Revenue' : 'Archive only'}>
 								{#each categories.filter((c) => c.bucket === bucket) as cat}

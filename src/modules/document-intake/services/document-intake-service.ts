@@ -100,7 +100,44 @@ export interface FieldExtractorInput {
 	text: string;
 	documentType: DocumentArtifact['documentType'];
 	classificationConfidence: number;
+	/** Category id chosen by the `categoryClassifier` (category-first path). When
+	 *  present, the extractor should use it directly instead of mapping from
+	 *  `documentType`. Undefined on the legacy documentType-only path. */
+	categoryId?: string;
 }
+
+/**
+ * Optional category-first classifier (inversion of control). When provided,
+ * processDocument uses it INSTEAD of the built-in documentType classifier +
+ * lossy documentType→category map: it classifies the text straight into a
+ * finance category, sets that as the source of truth (`suggestedCategoryId`),
+ * derives the coarse `documentType` for display, and passes the categoryId to
+ * the field extractor. Lives in finance (category-aware), injected to keep the
+ * module boundary. Returns `categoryId: null` when it cannot decide — the
+ * service then falls back to the built-in documentType classifier.
+ */
+export interface CategoryClassifierInput {
+	tenantId: string;
+	documentId: string;
+	fileName: string;
+	text: string;
+	mimeType: string;
+}
+
+export interface CategoryClassifierResult {
+	categoryId: string | null;
+	confidence: number;
+	documentType: NonNullable<DocumentArtifact['documentType']>;
+	possibleTypes?: Array<{
+		documentType: NonNullable<DocumentArtifact['documentType']>;
+		confidence: number;
+	}>;
+	reason?: string;
+}
+
+export type CategoryClassifier = (
+	input: CategoryClassifierInput
+) => Promise<CategoryClassifierResult | null>;
 
 export interface FieldExtractorResult {
 	fields: Record<string, unknown>;
@@ -140,6 +177,13 @@ export interface ProcessDocumentInput {
 	 * control — document-intake never imports finance.
 	 */
 	fieldExtractor?: FieldExtractor;
+	/**
+	 * Optional category-first classifier (see {@link CategoryClassifier}). When
+	 * present, replaces the built-in documentType classifier as the routing
+	 * source of truth. Async pipeline / inline route supply it; legacy callers
+	 * omit it and get the documentType classifier.
+	 */
+	categoryClassifier?: CategoryClassifier;
 }
 
 export interface DocumentArtifactView {
@@ -499,30 +543,67 @@ export function createDocumentIntakeService(
 			});
 
 			await setStatusOrAbort('classification_pending');
-			const classification = await classifyDocumentCapability.execute(
-				{
-					text: extraction.text,
-					fileName: artifact.originalFile.fileName,
-					mimeType: artifact.originalFile.mimeType
-				},
-				{ tenantId, userId: ctx.user?.id, env: ctx.env, useMock: false }
-			);
-			await repo.setClassification(artifact.id, classification);
+
+			// Category-first classification (preferred): the injected finance
+			// classifier picks the canonical category directly, which becomes the
+			// source of truth (`suggestedCategoryId`). `documentType` is derived
+			// from it for display. Falls back to the built-in documentType
+			// classifier when no classifier is injected or it can't decide.
+			let classification: DocumentClassificationResult;
+			let classifiedCategoryId: string | null = null;
+			if (input.categoryClassifier) {
+				const cat = await input
+					.categoryClassifier({
+						tenantId,
+						documentId: artifact.id,
+						fileName: artifact.originalFile.fileName,
+						text: extraction.text,
+						mimeType: artifact.originalFile.mimeType
+					})
+					.catch((err) => {
+						console.warn('[processDocument] categoryClassifier threw:', err);
+						return null;
+					});
+				if (cat && cat.categoryId) {
+					classifiedCategoryId = cat.categoryId;
+					classification = {
+						documentType: cat.documentType,
+						confidence: cat.confidence,
+						possibleTypes: cat.possibleTypes,
+						reason: cat.reason
+					};
+					// Set the category as source of truth immediately, so the inbox
+					// shows the AI's category even if field extraction yields nothing.
+					await repo.update(artifact.id, { suggestedCategoryId: cat.categoryId });
+				}
+			}
+			if (!classifiedCategoryId) {
+				classification = await classifyDocumentCapability.execute(
+					{
+						text: extraction.text,
+						fileName: artifact.originalFile.fileName,
+						mimeType: artifact.originalFile.mimeType
+					},
+					{ tenantId, userId: ctx.user?.id, env: ctx.env, useMock: false }
+				);
+			}
+			await repo.setClassification(artifact.id, classification!);
 
 			const afterClass = await repo.findById(artifact.id, tenantId);
 			await audit(afterClass!, 'document.classified', 'ok', {
 				outputRefs: {
-					documentType: classification.documentType,
-					confidence: classification.confidence
+					documentType: classification!.documentType,
+					confidence: classification!.confidence,
+					categoryId: classifiedCategoryId ?? undefined
 				}
 			});
 
 			// Low classification confidence is a hint, not a blocker. The downstream
-			// BucketStep / KindStep let the user pick the correct bucket+kind, so a
+			// review step lets the user pick the correct category, so a
 			// low-confidence classification just means "AI couldn't pre-fill, user
 			// will choose". Mark a soft security flag for audit but keep the
 			// artifact moving forward.
-			if (classification.confidence < MIN_CLASSIFICATION_CONFIDENCE) {
+			if (classification!.confidence < MIN_CLASSIFICATION_CONFIDENCE) {
 				await repo.addSecurityFlag(artifact.id, 'low_ocr_confidence');
 			}
 
@@ -536,8 +617,9 @@ export function createDocumentIntakeService(
 						documentId: artifact.id,
 						fileName: artifact.originalFile.fileName,
 						text: extraction.text,
-						documentType: classification.documentType,
-						classificationConfidence: classification.confidence
+						documentType: classification!.documentType,
+						classificationConfidence: classification!.confidence,
+						categoryId: classifiedCategoryId ?? undefined
 					});
 					if (extracted) {
 						const result: SuggestedFieldsResult = {

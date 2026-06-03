@@ -182,6 +182,7 @@ async function processInlineFallback(
 	// queue-driven prod path doesn't pull them into the HTTP worker bundle.
 	const {
 		extractDocumentFieldsCapability,
+		classifyDocumentCategoryCapability,
 		categoryIdForDocumentType
 	} = await import('$modules/finance');
 
@@ -191,15 +192,30 @@ async function processInlineFallback(
 			documentId: message.documentId,
 			clientExtractedText: message.clientExtractedText,
 			clientExtractionMethod: message.clientExtractionMethod,
+			categoryClassifier: async ({ tenantId, documentId, fileName, text }) => {
+				const r = await classifyDocumentCategoryCapability.execute(
+					{ documentId, fileName, text },
+					{ tenantId, userId: message.userId, env, useMock: !env.AI }
+				);
+				return {
+					categoryId: r.categoryId,
+					confidence: r.confidence,
+					documentType: r.documentType,
+					possibleTypes: r.possibleTypes,
+					reason: r.reason
+				};
+			},
 			fieldExtractor: async ({
 				tenantId,
 				documentId,
 				fileName,
 				text,
 				documentType,
-				classificationConfidence
+				classificationConfidence,
+				categoryId: classifiedCategoryId
 			}) => {
-				const categoryId = categoryIdForDocumentType(documentType ?? 'unknown');
+				const categoryId =
+					classifiedCategoryId ?? categoryIdForDocumentType(documentType ?? 'unknown');
 				if (!categoryId) return null;
 				if (classificationConfidence < 0.4) return null;
 

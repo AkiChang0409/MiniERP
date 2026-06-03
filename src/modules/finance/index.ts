@@ -42,13 +42,19 @@ export { financeCapabilities, financeCapabilityIds };
 // barrel so cross-module callers don't violate Rule 2 of the boundary linter.
 export { extractDocumentFieldsCapability } from './capabilities/extract-document-fields';
 export {
+	classifyDocumentCategoryCapability,
+	type ClassifyDocumentCategoryInput,
+	type ClassifyDocumentCategoryOutput
+} from './capabilities/classify-document-category';
+export {
 	categoryIdForDocumentType,
+	documentTypeForCategory,
 	findCategoryById,
 	FALLBACK_CATEGORY_ID,
 	DEFAULT_SUPPLIER_INVOICE_CATEGORY_ID,
 	FINANCE_CATEGORY_CATALOG
 } from './workflows/financial-document-intake/categories';
-export type { CategoryDefinition } from './workflows/financial-document-intake/categories';
+export type { CategoryDefinition, IntakeDocumentType } from './workflows/financial-document-intake/categories';
 export {
 	createFinanceTaskService,
 	type FinanceTaskService,

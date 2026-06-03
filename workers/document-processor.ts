@@ -37,6 +37,7 @@ import {
 } from '../src/modules/document-intake';
 import {
 	extractDocumentFieldsCapability,
+	classifyDocumentCategoryCapability,
 	categoryIdForDocumentType
 } from '../src/modules/finance';
 import { getDb } from '../src/infrastructure/db';
@@ -106,19 +107,35 @@ async function processOne(
 		documentId: payload.documentId,
 		clientExtractedText: payload.clientExtractedText,
 		clientExtractionMethod: payload.clientExtractionMethod,
+		// Category-first classification: classify straight into a finance
+		// category (source of truth), instead of documentType → lossy map.
+		categoryClassifier: async ({ tenantId, documentId, fileName, text }) => {
+			const r = await classifyDocumentCategoryCapability.execute(
+				{ documentId, fileName, text },
+				{ tenantId, userId: payload.userId, env, useMock: !env.AI }
+			);
+			return {
+				categoryId: r.categoryId,
+				confidence: r.confidence,
+				documentType: r.documentType,
+				possibleTypes: r.possibleTypes,
+				reason: r.reason
+			};
+		},
 		fieldExtractor: async ({
 			tenantId,
 			documentId,
 			fileName,
 			text,
 			documentType,
-			classificationConfidence
+			classificationConfidence,
+			categoryId: classifiedCategoryId
 		}) => {
-			// Map classifier-emitted documentType to the canonical category id.
-			// null = no auto-extract (bank_statement / tax_document /
-			// logistics_document / unknown). Ready_for_review with no
-			// suggestedFields tells the inbox UI "user picks category".
-			const categoryId = categoryIdForDocumentType(documentType ?? 'unknown');
+			// Prefer the category-first classifier's choice; fall back to the
+			// documentType→category map only when it didn't run. null categoryId =
+			// no auto-extract (the inbox asks the user to pick a category).
+			const categoryId =
+				classifiedCategoryId ?? categoryIdForDocumentType(documentType ?? 'unknown');
 			if (!categoryId) return null;
 
 			// Extra guard: skip extraction when classification confidence is

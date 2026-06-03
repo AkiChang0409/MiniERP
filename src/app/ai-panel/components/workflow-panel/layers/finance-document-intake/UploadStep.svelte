@@ -39,6 +39,10 @@
 	let previewOriginalUrl = $state<string | null>(null);
 	let previewEnhancedUrl = $state<string | null>(null);
 	let previewMetrics = $state<Record<string, unknown> | null>(null);
+	// Optional OpenCV perspective de-warp (off by default — keeps the pipeline
+	// pure-Canvas and fast; lazy-loads the 10 MB WASM only when toggled on).
+	let previewDewarp = $state(false);
+	let previewBusy = $state(false);
 
 	const TERMINAL_BAD: DocumentProcessingStatus[] = ['needs_manual_review', 'failed'];
 	const MIN_USEFUL_CLIENT_TEXT = 48;
@@ -237,7 +241,10 @@
 		}
 	}
 
-	async function buildClientExtraction(file: File): Promise<ClientExtraction> {
+	async function buildClientExtraction(
+		file: File,
+		opts: { dewarp?: boolean } = {}
+	): Promise<ClientExtraction> {
 		const mime = (file.type || '').toLowerCase();
 		const name = file.name.toLowerCase();
 		const isPdf = mime === 'application/pdf' || name.endsWith('.pdf');
@@ -250,12 +257,17 @@
 		if (isImage) {
 			// Financial photo: build TWO versions. `original` is uploaded as the
 			// artifact's untouched primary (audit / human review / vision
-			// fallback); `visionEnhanced` is document-cropped, deskewed,
-			// illumination-normalised and gently sharpened, and is uploaded as the
-			// derived ref that server-side OCR/vision actually reads. Best-effort —
-			// any failure falls back to uploading the original alone.
+			// fallback); `visionEnhanced` is illumination-normalised, contrast-
+			// stretched and gently sharpened (pure Canvas2D, fast — no OpenCV
+			// unless `dewarp` is requested), and is uploaded as the derived ref
+			// that server-side OCR/vision reads. Best-effort — any failure falls
+			// back to uploading the original alone.
 			try {
-				const { original, visionEnhanced, metrics } = await buildFinancialVersions(file);
+				const { original, visionEnhanced, metrics } = await buildFinancialVersions(
+					file,
+					undefined,
+					{ dewarp: opts.dewarp }
+				);
 				if (visionEnhanced !== original) {
 					return {
 						text: '',
@@ -426,7 +438,7 @@
 		fileName = files[0].name;
 		stage = 'parsing';
 		try {
-			const extraction = await buildClientExtraction(files[0]);
+			const extraction = await buildClientExtraction(files[0], { dewarp: previewDewarp });
 			revokePreviewUrls();
 			previewFiles = files;
 			previewExtraction = extraction;
@@ -439,6 +451,28 @@
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not build the preprocessing preview.';
 			stage = 'error';
+		}
+	}
+
+	// Re-run the preview with the de-warp toggle flipped. Loads OpenCV the first
+	// time de-warp is turned on.
+	async function togglePreviewDewarp() {
+		if (previewBusy || previewFiles.length === 0) return;
+		previewDewarp = !previewDewarp;
+		previewBusy = true;
+		try {
+			const extraction = await buildClientExtraction(previewFiles[0], { dewarp: previewDewarp });
+			revokePreviewUrls();
+			previewExtraction = extraction;
+			previewOriginalUrl = URL.createObjectURL(extraction.uploadFile);
+			previewEnhancedUrl = extraction.derived
+				? URL.createObjectURL(extraction.derived.file)
+				: null;
+			previewMetrics = extraction.derived?.preprocessing ?? null;
+		} catch {
+			/* keep previous preview */
+		} finally {
+			previewBusy = false;
 		}
 	}
 
@@ -554,13 +588,16 @@
 		const fmtBool = (v: unknown) => (v ? 'yes' : 'no');
 		const num = (v: unknown) => (typeof v === 'number' ? v : undefined);
 		const rows: { label: string; value: string }[] = [];
-		rows.push({ label: 'Document de-warp', value: fmtBool(m.warped) });
+		rows.push({ label: 'Illumination', value: fmtBool(m.normalized) });
+		rows.push({ label: 'Contrast', value: fmtBool(m.contrastApplied) });
+		rows.push({ label: 'Sharpen', value: fmtBool(m.sharpened) });
+		if (m.warped) {
+			rows.push({ label: 'De-warp', value: 'yes' });
+			const area = num(m.areaRatio);
+			if (area !== undefined) rows.push({ label: 'Doc coverage', value: `${Math.round(area * 100)}%` });
+		}
 		const deskew = num(m.deskewedDeg) ?? 0;
-		rows.push({ label: 'Deskew', value: deskew ? `${deskew.toFixed(1)}°` : 'none' });
-		const area = num(m.areaRatio);
-		if (area !== undefined) rows.push({ label: 'Doc coverage', value: `${Math.round(area * 100)}%` });
-		rows.push({ label: 'CLAHE', value: fmtBool(m.claheApplied) });
-		rows.push({ label: 'Denoise', value: fmtBool(m.denoised) });
+		if (deskew) rows.push({ label: 'Deskew', value: `${deskew.toFixed(1)}°` });
 		const w = num(m.outputWidth);
 		const h = num(m.outputHeight);
 		if (w && h) rows.push({ label: 'Output size', value: `${w}×${h}px` });
@@ -620,11 +657,25 @@
 					{/each}
 				</dl>
 			{/if}
+			<label class="preview-toggle">
+				<input
+					type="checkbox"
+					checked={previewDewarp}
+					disabled={previewBusy}
+					onchange={togglePreviewDewarp}
+				/>
+				<span>Perspective de-warp {previewBusy ? '(processing…)' : '(slower, loads OpenCV)'}</span>
+			</label>
 			<div class="quality-actions">
-				<button type="button" class="quality-btn is-primary" onclick={continuePreview}>
+				<button
+					type="button"
+					class="quality-btn is-primary"
+					disabled={previewBusy}
+					onclick={continuePreview}
+				>
 					Looks good — send to AI
 				</button>
-				<button type="button" class="quality-btn" onclick={cancelPreview}>
+				<button type="button" class="quality-btn" disabled={previewBusy} onclick={cancelPreview}>
 					Cancel
 				</button>
 			</div>
@@ -854,6 +905,19 @@
 		margin: 0;
 		color: var(--panel-fg);
 		font-variant-numeric: tabular-nums;
+	}
+	.preview-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 12.5px;
+		color: var(--panel-fg-muted);
+		cursor: pointer;
+		margin-top: 2px;
+	}
+	.preview-toggle input {
+		accent-color: var(--panel-gold);
+		cursor: pointer;
 	}
 
 	.drop-area {
