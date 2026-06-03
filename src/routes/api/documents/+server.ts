@@ -70,6 +70,34 @@ export const POST: RequestHandler = async (event) => {
 			? clientExtractionMethodRaw
 			: undefined;
 
+	// Optional client-preprocessed sibling (vision-enhanced image). When the
+	// browser de-warps / normalises a phone photo it uploads the enhanced JPEG
+	// here while `file` stays the untouched original. Stored alongside; OCR
+	// reads the derived ref. Best-effort — a malformed field is just ignored.
+	const derivedFileRaw = form.get('derivedFile');
+	const preprocessingRaw = form.get('preprocessing');
+	let derived:
+		| { kind: 'vision_enhanced'; body: Uint8Array; mimeType: string; fileName: string; preprocessing?: Record<string, unknown> }
+		| undefined;
+	if (derivedFileRaw instanceof File && derivedFileRaw.size > 0) {
+		let preprocessing: Record<string, unknown> | undefined;
+		if (typeof preprocessingRaw === 'string' && preprocessingRaw.length > 0) {
+			try {
+				const parsed = JSON.parse(preprocessingRaw);
+				if (parsed && typeof parsed === 'object') preprocessing = parsed as Record<string, unknown>;
+			} catch {
+				/* ignore malformed metrics */
+			}
+		}
+		derived = {
+			kind: 'vision_enhanced',
+			body: new Uint8Array(await derivedFileRaw.arrayBuffer()),
+			mimeType: derivedFileRaw.type || 'image/jpeg',
+			fileName: derivedFileRaw.name || 'document_vision.jpg',
+			preprocessing
+		};
+	}
+
 	const env = event.platform.env;
 	const tenantId = 'default';
 	const service = createDocumentIntakeService({
@@ -88,7 +116,8 @@ export const POST: RequestHandler = async (event) => {
 			fileName: file.name,
 			mimeType: file.type || 'application/octet-stream',
 			body,
-			sizeBytes: body.byteLength
+			sizeBytes: body.byteLength,
+			derived
 		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Upload failed';

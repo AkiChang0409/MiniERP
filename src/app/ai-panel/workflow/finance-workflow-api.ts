@@ -360,6 +360,13 @@ export function uploadDocument(
 		uploadedFrom?: 'ai_panel' | 'finance_workspace' | 'task_mode';
 		clientExtractedText?: string;
 		clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
+		/** Client-preprocessed sibling. `file` stays the untouched original;
+		 *  this enhanced image is what OCR/vision reads server-side. */
+		derived?: {
+			file: File;
+			kind?: 'vision_enhanced';
+			preprocessing?: Record<string, unknown>;
+		};
 	} = {}
 ): Promise<DocumentArtifactPostResponse> {
 	const form = new FormData();
@@ -368,6 +375,13 @@ export function uploadDocument(
 	if (opts.clientExtractedText) {
 		form.append('clientExtractedText', opts.clientExtractedText);
 		form.append('clientExtractionMethod', opts.clientExtractionMethod ?? 'manual');
+	}
+	if (opts.derived) {
+		form.append('derivedFile', opts.derived.file);
+		form.append('derivedKind', opts.derived.kind ?? 'vision_enhanced');
+		if (opts.derived.preprocessing) {
+			form.append('preprocessing', JSON.stringify(opts.derived.preprocessing));
+		}
 	}
 	return postMultipart<DocumentArtifactPostResponse>('/api/documents', form);
 }

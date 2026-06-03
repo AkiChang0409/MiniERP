@@ -47,7 +47,8 @@
       "Bash(npm test *)",
       "Bash(grep -E 'modules|\\\\$modules' C:/Users/akiwc/Documents/Axiom/MiniERP/svelte.config.js C:/Users/akiwc/Documents/Axiom/MiniERP/tsconfig.json)",
       "Bash(awk '/Record receipt/,/<\\\\/form>/' \"C:/Users/akiwc/Documents/Axiom/MiniERP/src/routes/\\(app\\)/procurement/rfqs/+page.svelte\")",
-      "Bash(mkdir -p \"src/routes/api/procurement/supplier-invoices/[id]/decision\" \"src/routes/api/procurement/supplier-invoices/[id]/rematch\" \"src/routes/\\(app\\)/procurement/supplier-invoices\")"
+      "Bash(mkdir -p \"src/routes/api/procurement/supplier-invoices/[id]/decision\" \"src/routes/api/procurement/supplier-invoices/[id]/rematch\" \"src/routes/\\(app\\)/procurement/supplier-invoices\")",
+      "Bash(git check-ignore *)"
     ]
   }
 }

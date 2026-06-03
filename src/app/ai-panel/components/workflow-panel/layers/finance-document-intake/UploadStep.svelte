@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { UploadCloud, FileText, Loader2, AlertTriangle } from 'lucide-svelte';
 	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 	import { panel } from '$app-layer/ai-panel/workflow/panel.svelte';
@@ -8,9 +9,18 @@
 		type DocumentProcessingStatus
 	} from '$app-layer/ai-panel/workflow/finance-workflow-api';
 	import { extractEmlClientText } from '$app-layer/ai-panel/workflow/extract-eml-client';
-	import { preprocessImageForOcr } from '$lib/utils/preprocess-image';
+	import { buildFinancialVersions } from '$lib/utils/preprocess-image';
+	import { assessImageQuality, type QualityFinding } from '$lib/utils/image-quality';
 
-	type Stage = 'idle' | 'expanding' | 'parsing' | 'storing' | 'queued' | 'error';
+	type Stage =
+		| 'idle'
+		| 'expanding'
+		| 'parsing'
+		| 'storing'
+		| 'queued'
+		| 'quality_gate'
+		| 'preprocess_preview'
+		| 'error';
 
 	let fileInput: HTMLInputElement | null = $state(null);
 	let dragOver = $state(false);
@@ -19,6 +29,16 @@
 	let batchTotal = $state(0);
 	let batchIndex = $state(0);
 	let error = $state('');
+	// Pre-upload quality gate (single-image capture flow).
+	let pendingFiles = $state<File[]>([]);
+	let qualityFindings = $state<QualityFinding[]>([]);
+	// Dev preprocessing-preview gate: inspect original vs vision-enhanced
+	// BEFORE anything is uploaded / sent to AI (single-image flow only).
+	let previewFiles = $state<File[]>([]);
+	let previewExtraction = $state<ClientExtraction | null>(null);
+	let previewOriginalUrl = $state<string | null>(null);
+	let previewEnhancedUrl = $state<string | null>(null);
+	let previewMetrics = $state<Record<string, unknown> | null>(null);
 
 	const TERMINAL_BAD: DocumentProcessingStatus[] = ['needs_manual_review', 'failed'];
 	const MIN_USEFUL_CLIENT_TEXT = 48;
@@ -99,6 +119,9 @@
 		text: string;
 		method: 'pdfjs' | 'vision_first_page' | 'manual';
 		uploadFile: File;
+		/** Client-preprocessed sibling. `uploadFile` stays the untouched original;
+		 *  the vision-enhanced image (if any) is uploaded as the derived ref. */
+		derived?: { file: File; preprocessing?: Record<string, unknown> };
 	};
 
 	function isZipFile(file: File): boolean {
@@ -225,18 +248,26 @@
 			name.endsWith('.docx');
 
 		if (isImage) {
-			// OpenAI Vision handles JPEG/PNG/WebP/GIF natively — upload as-is so
-			// we don't pay the OpenCV.js (~10 MB WASM) first-load cost on the
-			// critical path. Only TIFF and BMP need a client-side re-encode to
-			// JPEG (the vision API can't decode them), and we use the lightweight
-			// `'convert'` mode which skips the OpenCV warp + unsharp steps —
-			// pure format conversion only.
-			const needsClientReencode =
-				/\.(tiff?|bmp)$/i.test(name) || /^image\/(tiff?|bmp|x-bmp)$/i.test(mime);
-			const uploadFile = needsClientReencode
-				? await preprocessImageForOcr(file, undefined, { mode: 'convert' }).catch(() => file)
-				: file;
-			return { text: '', method: 'manual', uploadFile };
+			// Financial photo: build TWO versions. `original` is uploaded as the
+			// artifact's untouched primary (audit / human review / vision
+			// fallback); `visionEnhanced` is document-cropped, deskewed,
+			// illumination-normalised and gently sharpened, and is uploaded as the
+			// derived ref that server-side OCR/vision actually reads. Best-effort —
+			// any failure falls back to uploading the original alone.
+			try {
+				const { original, visionEnhanced, metrics } = await buildFinancialVersions(file);
+				if (visionEnhanced !== original) {
+					return {
+						text: '',
+						method: 'manual',
+						uploadFile: original,
+						derived: { file: visionEnhanced, preprocessing: metrics as unknown as Record<string, unknown> }
+					};
+				}
+				return { text: '', method: 'manual', uploadFile: original };
+			} catch {
+				return { text: '', method: 'manual', uploadFile: file };
+			}
 		}
 
 		if (isDocx) {
@@ -289,18 +320,35 @@
 		return { text: '', method: 'manual', uploadFile: file };
 	}
 
-	async function uploadOne(file: File): Promise<DocumentArtifactPostResponse> {
+	async function uploadOne(
+		file: File,
+		prebuilt?: ClientExtraction
+	): Promise<DocumentArtifactPostResponse> {
 		fileName = file.name;
 		stage = 'parsing';
 
-		const extraction = await buildClientExtraction(file);
+		const extraction = prebuilt ?? (await buildClientExtraction(file));
 
 		stage = 'storing';
 		return await uploadDocument(extraction.uploadFile, {
 			uploadedFrom: 'ai_panel',
 			clientExtractedText: extraction.text || undefined,
-			clientExtractionMethod: extraction.method
+			clientExtractionMethod: extraction.method,
+			derived: extraction.derived
+				? {
+						file: extraction.derived.file,
+						kind: 'vision_enhanced',
+						preprocessing: extraction.derived.preprocessing
+					}
+				: undefined
 		});
+	}
+
+	function isImageFile(file: File): boolean {
+		return (
+			(file.type || '').toLowerCase().startsWith('image/') ||
+			/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name)
+		);
 	}
 
 	async function onFiles(inputFiles: File[]) {
@@ -309,14 +357,111 @@
 		batchIndex = 0;
 		batchTotal = inputFiles.length;
 		error = '';
+		qualityFindings = [];
 		stage = 'expanding';
 
+		let files: File[];
 		try {
-			const files = await expandInputFiles(inputFiles);
+			files = await expandInputFiles(inputFiles);
 			if (files.length === 0) {
 				throw new Error('No supported files were found. Accepted: PDF, Word (.docx), email (.eml), and images.');
 			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not read the files.';
+			stage = 'error';
+			return;
+		}
 
+		// Step 1: pre-upload quality check for the single-photo capture flow.
+		// Fast, WASM-free metrics (resolution / focus / exposure). Soft reminder
+		// only — the user can always upload anyway, since financial documents are
+		// often one-of-a-kind and cannot be re-shot.
+		if (files.length === 1 && isImageFile(files[0])) {
+			stage = 'parsing';
+			const quality = await assessImageQuality(files[0]).catch(() => null);
+			if (quality && quality.findings.length > 0) {
+				pendingFiles = files;
+				qualityFindings = quality.findings;
+				fileName = files[0].name;
+				stage = 'quality_gate';
+				return;
+			}
+			await buildPreview(files);
+			return;
+		}
+
+		await runUpload(files);
+	}
+
+	async function proceedAfterQuality() {
+		const files = pendingFiles;
+		pendingFiles = [];
+		qualityFindings = [];
+		// Single-image flow always lands on the preprocessing preview next.
+		if (files.length === 1 && isImageFile(files[0])) {
+			await buildPreview(files);
+		} else if (files.length > 0) {
+			await runUpload(files);
+		}
+	}
+
+	function cancelQuality() {
+		pendingFiles = [];
+		qualityFindings = [];
+		onRetry();
+	}
+
+	function revokePreviewUrls() {
+		if (previewOriginalUrl) URL.revokeObjectURL(previewOriginalUrl);
+		if (previewEnhancedUrl) URL.revokeObjectURL(previewEnhancedUrl);
+		previewOriginalUrl = null;
+		previewEnhancedUrl = null;
+	}
+
+	onDestroy(revokePreviewUrls);
+
+	// Build the original + vision-enhanced versions and show them for
+	// inspection. Nothing is uploaded / sent to AI until the user confirms.
+	async function buildPreview(files: File[]) {
+		fileName = files[0].name;
+		stage = 'parsing';
+		try {
+			const extraction = await buildClientExtraction(files[0]);
+			revokePreviewUrls();
+			previewFiles = files;
+			previewExtraction = extraction;
+			previewOriginalUrl = URL.createObjectURL(extraction.uploadFile);
+			previewEnhancedUrl = extraction.derived
+				? URL.createObjectURL(extraction.derived.file)
+				: null;
+			previewMetrics = extraction.derived?.preprocessing ?? null;
+			stage = 'preprocess_preview';
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not build the preprocessing preview.';
+			stage = 'error';
+		}
+	}
+
+	async function continuePreview() {
+		const files = previewFiles;
+		const extraction = previewExtraction;
+		revokePreviewUrls();
+		previewFiles = [];
+		previewExtraction = null;
+		previewMetrics = null;
+		if (files.length > 0) await runUpload(files, extraction ?? undefined);
+	}
+
+	function cancelPreview() {
+		revokePreviewUrls();
+		previewFiles = [];
+		previewExtraction = null;
+		previewMetrics = null;
+		onRetry();
+	}
+
+	async function runUpload(files: File[], prebuiltForSingle?: ClientExtraction) {
+		try {
 			batchTotal = files.length;
 			const artifacts: DocumentArtifactPostResponse[] = [];
 			const uploadErrors: string[] = [];
@@ -324,7 +469,9 @@
 			for (const [index, file] of files.entries()) {
 				batchIndex = index + 1;
 				try {
-					artifacts.push(await uploadOne(file));
+					const prebuilt =
+						files.length === 1 && prebuiltForSingle ? prebuiltForSingle : undefined;
+					artifacts.push(await uploadOne(file, prebuilt));
 				} catch (err) {
 					uploadErrors.push(
 						`${file.name}: ${err instanceof Error ? err.message : 'Upload failed'}`
@@ -400,9 +547,89 @@
 		batchIndex = 0;
 		batchTotal = 0;
 	}
+
+	function previewMetricRows(): { label: string; value: string }[] {
+		const m = previewMetrics;
+		if (!m) return [];
+		const fmtBool = (v: unknown) => (v ? 'yes' : 'no');
+		const num = (v: unknown) => (typeof v === 'number' ? v : undefined);
+		const rows: { label: string; value: string }[] = [];
+		rows.push({ label: 'Document de-warp', value: fmtBool(m.warped) });
+		const deskew = num(m.deskewedDeg) ?? 0;
+		rows.push({ label: 'Deskew', value: deskew ? `${deskew.toFixed(1)}°` : 'none' });
+		const area = num(m.areaRatio);
+		if (area !== undefined) rows.push({ label: 'Doc coverage', value: `${Math.round(area * 100)}%` });
+		rows.push({ label: 'CLAHE', value: fmtBool(m.claheApplied) });
+		rows.push({ label: 'Denoise', value: fmtBool(m.denoised) });
+		const w = num(m.outputWidth);
+		const h = num(m.outputHeight);
+		if (w && h) rows.push({ label: 'Output size', value: `${w}×${h}px` });
+		return rows;
+	}
 </script>
 
 <div class="intake-drop">
+	{#if stage === 'quality_gate'}
+		<div class="quality-gate" role="alert">
+			<span class="drop-icon quality-icon">
+				<AlertTriangle size={30} strokeWidth={1.6} />
+			</span>
+			<span class="drop-heading">Check this photo before uploading</span>
+			<span class="drop-sub">{fileName}</span>
+			<ul class="quality-list">
+				{#each qualityFindings as finding (finding.metric + finding.message)}
+					<li class="quality-item is-{finding.severity}">{finding.message}</li>
+				{/each}
+			</ul>
+			<div class="quality-actions">
+				<button type="button" class="quality-btn is-primary" onclick={proceedAfterQuality}>
+					Upload anyway
+				</button>
+				<button type="button" class="quality-btn" onclick={cancelQuality}>
+					Choose another
+				</button>
+			</div>
+		</div>
+	{:else if stage === 'preprocess_preview'}
+		<div class="preview-gate">
+			<span class="drop-heading">Preprocessing preview</span>
+			<span class="drop-sub">Inspect the result before sending to AI · {fileName}</span>
+			<div class="preview-grid">
+				<figure class="preview-cell">
+					<figcaption>Original</figcaption>
+					{#if previewOriginalUrl}
+						<img src={previewOriginalUrl} alt="Original upload" />
+					{/if}
+				</figure>
+				<figure class="preview-cell">
+					<figcaption>Vision-enhanced {previewEnhancedUrl ? '' : '(none — passed through)'}</figcaption>
+					{#if previewEnhancedUrl}
+						<img src={previewEnhancedUrl} alt="Vision-enhanced result" />
+					{:else if previewOriginalUrl}
+						<img src={previewOriginalUrl} alt="No enhancement; original used" />
+					{/if}
+				</figure>
+			</div>
+			{#if previewMetricRows().length > 0}
+				<dl class="preview-metrics">
+					{#each previewMetricRows() as row (row.label)}
+						<div class="preview-metric">
+							<dt>{row.label}</dt>
+							<dd>{row.value}</dd>
+						</div>
+					{/each}
+				</dl>
+			{/if}
+			<div class="quality-actions">
+				<button type="button" class="quality-btn is-primary" onclick={continuePreview}>
+					Looks good — send to AI
+				</button>
+				<button type="button" class="quality-btn" onclick={cancelPreview}>
+					Cancel
+				</button>
+			</div>
+		</div>
+	{:else}
 	<button
 		type="button"
 		class="drop-area"
@@ -473,6 +700,7 @@
 			{/if}
 		</span>
 	</button>
+	{/if}
 
 	<input
 		bind:this={fileInput}
@@ -489,6 +717,143 @@
 		display: flex;
 		flex-direction: column;
 		gap: 18px;
+	}
+
+	.quality-gate {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 12px;
+		padding: 32px 28px;
+		background: var(--panel-surface);
+		border: 1.5px solid rgba(234, 188, 60, 0.35);
+		border-radius: 20px;
+		text-align: center;
+	}
+	.quality-icon {
+		color: var(--panel-gold-bright);
+		background: rgba(234, 188, 60, 0.08);
+		border: 1px solid rgba(234, 188, 60, 0.24);
+	}
+	.quality-list {
+		list-style: none;
+		margin: 4px 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		width: 100%;
+		max-width: 46ch;
+	}
+	.quality-item {
+		font-size: 13px;
+		line-height: 1.5;
+		padding: 8px 12px;
+		border-radius: 10px;
+		text-align: left;
+	}
+	.quality-item.is-warn {
+		color: var(--panel-fg-muted);
+		background: rgba(234, 188, 60, 0.08);
+		border: 1px solid rgba(234, 188, 60, 0.22);
+	}
+	.quality-item.is-reshoot {
+		color: var(--panel-fg);
+		background: rgba(225, 118, 118, 0.08);
+		border: 1px solid rgba(225, 118, 118, 0.3);
+	}
+	.quality-actions {
+		display: flex;
+		gap: 10px;
+		margin-top: 6px;
+	}
+	.quality-btn {
+		padding: 9px 18px;
+		border-radius: 10px;
+		font-family: inherit;
+		font-size: 13px;
+		cursor: pointer;
+		background: var(--panel-surface-raised);
+		border: 1px solid rgba(234, 188, 60, 0.28);
+		color: var(--panel-fg);
+		transition: border-color var(--panel-dur-fast) var(--panel-ease);
+	}
+	.quality-btn:hover {
+		border-color: var(--panel-gold);
+	}
+	.quality-btn.is-primary {
+		background: rgba(234, 188, 60, 0.14);
+		border-color: var(--panel-gold);
+		color: var(--panel-gold-bright);
+	}
+
+	.preview-gate {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 12px;
+		padding: 24px 20px;
+		background: var(--panel-surface);
+		border: 1.5px solid rgba(234, 188, 60, 0.3);
+		border-radius: 20px;
+		text-align: center;
+	}
+	.preview-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 12px;
+		width: 100%;
+		margin-top: 6px;
+	}
+	.preview-cell {
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.preview-cell figcaption {
+		font-size: 11px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--panel-fg-faint);
+	}
+	.preview-cell img {
+		width: 100%;
+		height: auto;
+		max-height: 360px;
+		object-fit: contain;
+		border-radius: 10px;
+		border: 1px solid rgba(234, 188, 60, 0.18);
+		background: #ffffff;
+	}
+	.preview-metrics {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 6px 10px;
+		margin: 4px 0 0;
+		width: 100%;
+	}
+	.preview-metric {
+		display: flex;
+		gap: 6px;
+		align-items: baseline;
+		font-size: 12px;
+		padding: 4px 10px;
+		border-radius: 999px;
+		background: var(--panel-surface-raised);
+		border: 1px solid rgba(234, 188, 60, 0.18);
+	}
+	.preview-metric dt {
+		color: var(--panel-fg-faint);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		font-size: 10.5px;
+	}
+	.preview-metric dd {
+		margin: 0;
+		color: var(--panel-fg);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.drop-area {

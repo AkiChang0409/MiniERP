@@ -70,6 +70,20 @@ export interface CreateDocumentFromUploadInput {
 	mimeType: string;
 	body: ArrayBuffer | Uint8Array;
 	sizeBytes?: number;
+	/**
+	 * Optional client-preprocessed sibling (e.g. a `vision_enhanced` JPEG for a
+	 * phone-captured invoice). When present it is stored alongside the original
+	 * and `originalFile.derived` points to it; text extraction / vision OCR
+	 * reads the derived ref while the original is kept untouched for audit and
+	 * fallback.
+	 */
+	derived?: {
+		kind: 'vision_enhanced';
+		body: ArrayBuffer | Uint8Array;
+		mimeType: string;
+		fileName: string;
+		preprocessing?: Record<string, unknown>;
+	};
 }
 
 /**
@@ -187,6 +201,34 @@ function toView(artifact: DocumentArtifact): DocumentArtifactView {
 		securityFlags: artifact.securityFlags,
 		createdAt: artifact.createdAt,
 		updatedAt: artifact.updatedAt
+	};
+}
+
+/**
+ * Resolve which stored file the processing pipeline (OCR / vision) should read:
+ * the client-preprocessed `vision_enhanced` sibling when present, otherwise the
+ * untouched original. The original is never overwritten.
+ */
+export function resolveProcessingFileRef(originalFile: DocumentArtifact['originalFile']): {
+	key: string;
+	mimeType: string;
+	fileName: string;
+	sizeBytes: number;
+} {
+	const d = originalFile.derived;
+	if (d) {
+		return {
+			key: d.storageRef,
+			mimeType: d.mimeType,
+			fileName: originalFile.fileName,
+			sizeBytes: d.sizeBytes
+		};
+	}
+	return {
+		key: originalFile.storageRef,
+		mimeType: originalFile.mimeType,
+		fileName: originalFile.fileName,
+		sizeBytes: originalFile.sizeBytes
 	};
 }
 
@@ -316,6 +358,35 @@ export function createDocumentIntakeService(
 			);
 		}
 
+		// Store the optional client-preprocessed sibling (vision-enhanced image).
+		// Best-effort: if it fails we still keep the artifact pointing at the
+		// original — the pipeline degrades to reading the un-enhanced upload.
+		let derived: DocumentArtifact['originalFile']['derived'];
+		if (input.derived) {
+			try {
+				const derivedKey = buildArtifactStorageKey({
+					tenantId,
+					fileName: input.derived.fileName,
+					artifactId: `${id}-derived`
+				});
+				const storedDerived = await fileService.putBlob({
+					key: derivedKey,
+					body: input.derived.body,
+					contentType: input.derived.mimeType
+				});
+				derived = {
+					kind: input.derived.kind,
+					mimeType: input.derived.mimeType,
+					sizeBytes: storedDerived.sizeBytes,
+					storageRef: storedDerived.key,
+					checksum: storedDerived.checksum,
+					preprocessing: input.derived.preprocessing
+				};
+			} catch (err) {
+				console.error('[createDocumentFromUpload] derived file store failed:', err);
+			}
+		}
+
 		const artifact = await repo.create({
 			id,
 			tenantId,
@@ -333,7 +404,8 @@ export function createDocumentIntakeService(
 				mimeType: input.mimeType,
 				sizeBytes: stored.sizeBytes,
 				storageRef: stored.key,
-				checksum: stored.checksum
+				checksum: stored.checksum,
+				derived
 			},
 			securityFlags: ['untrusted_external_content']
 		});
@@ -385,13 +457,11 @@ export function createDocumentIntakeService(
 					provider: `client_${input.clientExtractionMethod ?? 'manual'}`
 				};
 			} else {
+				// Prefer the client-preprocessed sibling (vision-enhanced image) for
+				// OCR / vision when present; fall back to the untouched original.
+				const ocrRef = resolveProcessingFileRef(artifact.originalFile);
 				extraction = await extractTextFromBlob({
-					fileRef: {
-						key: artifact.originalFile.storageRef,
-						mimeType: artifact.originalFile.mimeType,
-						fileName: artifact.originalFile.fileName,
-						sizeBytes: artifact.originalFile.sizeBytes
-					},
+					fileRef: ocrRef,
 					fileService,
 					env: ctx.env,
 					useMock

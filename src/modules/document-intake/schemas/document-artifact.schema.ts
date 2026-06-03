@@ -64,13 +64,34 @@ export const documentSecurityFlagSchema = z.enum([
 
 export type DocumentSecurityFlag = z.infer<typeof documentSecurityFlagSchema>;
 
+/**
+ * A processed sibling of the original upload. For phone-captured financial
+ * images the client produces a `vision_enhanced` version (document-cropped,
+ * deskewed, illumination-normalised, gently sharpened) and uploads it
+ * alongside the untouched original. Text extraction / vision OCR reads this
+ * derived ref when present; the original is kept for audit, human review and
+ * vision fallback. Stored inside `originalFile` JSON — no column migration.
+ */
+export const derivedFileSchema = z.object({
+	kind: z.enum(['vision_enhanced']),
+	mimeType: z.string(),
+	sizeBytes: z.number().int().nonnegative(),
+	storageRef: z.string(),
+	checksum: z.string().optional(),
+	/** Client preprocessing provenance (which steps ran). Free-form. */
+	preprocessing: z.record(z.string(), z.unknown()).optional()
+});
+
+export type DerivedFileMeta = z.infer<typeof derivedFileSchema>;
+
 export const originalFileMetaSchema = z.object({
 	fileId: z.string(),
 	fileName: z.string(),
 	mimeType: z.string(),
 	sizeBytes: z.number().int().nonnegative(),
 	storageRef: z.string(),
-	checksum: z.string().optional()
+	checksum: z.string().optional(),
+	derived: derivedFileSchema.optional()
 });
 
 export type OriginalFileMeta = z.infer<typeof originalFileMetaSchema>;
