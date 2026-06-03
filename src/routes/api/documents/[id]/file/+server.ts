@@ -32,11 +32,21 @@ export const GET: RequestHandler = async (event) => {
 	const artifact = await service.getDocumentArtifact({ tenantId: 'default', documentId: id });
 	if (!artifact) return fail('Document not found', 404);
 
-	const object = await event.platform.env.R2.get(artifact.originalFile.storageRef);
+	// `?variant=enhanced` serves the client-preprocessed vision-enhanced JPEG
+	// (when present) instead of the original. Used for inline preview because
+	// the original may be a format the browser can't render in <img> (e.g.
+	// TIFF). Falls back to the original when there's no derived file.
+	const wantEnhanced = event.url.searchParams.get('variant') === 'enhanced';
+	const derived = artifact.originalFile.derived;
+	const useDerived = wantEnhanced && !!derived;
+	const storageRef = useDerived ? derived!.storageRef : artifact.originalFile.storageRef;
+	const mimeType = useDerived ? derived!.mimeType : artifact.originalFile.mimeType;
+
+	const object = await event.platform.env.R2.get(storageRef);
 	if (!object) return fail('File not found in R2.', 404);
 
 	const headers = new Headers();
-	headers.set('Content-Type', artifact.originalFile.mimeType || 'application/octet-stream');
+	headers.set('Content-Type', mimeType || 'application/octet-stream');
 	const disposition =
 		event.url.searchParams.get('download') === '1' ||
 		event.url.searchParams.get('attachment') === '1'

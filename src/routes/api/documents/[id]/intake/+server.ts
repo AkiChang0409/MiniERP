@@ -46,7 +46,21 @@ export const GET: RequestHandler = async (event) => {
 	if (!artifact) return fail('Document not found', 404);
 
 	const text = artifact.textExtraction?.text ?? '';
-	const fileViewUrl = `/api/documents/${encodeURIComponent(artifact.id)}/file`;
+
+	// The browser can't render some original formats in <img> (notably TIFF).
+	// When that's the case and we stored a client-preprocessed JPEG sibling
+	// (`originalFile.derived`), point the inline preview at that enhanced
+	// variant so the reviewer sees the page instead of a broken image.
+	const origMime = (artifact.originalFile.mimeType ?? '').toLowerCase();
+	const origName = (artifact.originalFile.fileName ?? '').toLowerCase();
+	const originalIsTiff = /^image\/tiff?$/.test(origMime) || /\.tiff?$/.test(origName);
+	const useEnhancedPreview = originalIsTiff && !!artifact.originalFile.derived;
+
+	const baseFileUrl = `/api/documents/${encodeURIComponent(artifact.id)}/file`;
+	const fileViewUrl = useEnhancedPreview ? `${baseFileUrl}?variant=enhanced` : baseFileUrl;
+	const previewContentType = useEnhancedPreview
+		? artifact.originalFile.derived!.mimeType
+		: artifact.originalFile.mimeType;
 	return ok({
 		id: artifact.id,
 		processingStatus: artifact.processingStatus,
@@ -60,9 +74,9 @@ export const GET: RequestHandler = async (event) => {
 			url: fileViewUrl,
 			kind: inferFileInlinePreviewKind({
 				fileViewUrl,
-				fileNameHint: artifact.originalFile.fileName,
-				storageKey: artifact.originalFile.storageRef,
-				contentType: artifact.originalFile.mimeType
+				fileNameHint: useEnhancedPreview ? 'document.jpg' : artifact.originalFile.fileName,
+				storageKey: useEnhancedPreview ? null : artifact.originalFile.storageRef,
+				contentType: previewContentType
 			})
 		},
 		textExtraction: artifact.textExtraction
