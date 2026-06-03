@@ -32,8 +32,15 @@ const SHARPEN_AMOUNT = 0.8;
 const SHARPEN_RADIUS = 1;
 
 // --- Financial "vision-enhanced" pipeline tuning ---------------------------
-/** Long edge for the version sent to the vision LLM. Spec: 2500–3500px. */
-const FINANCIAL_MAX_LONG_SIDE = 3000;
+/**
+ * Long edge for the version sent to the vision LLM. Capped well below the
+ * 2500–3500px "ideal" because every enhancement step runs on the main thread:
+ * at 3000px the per-pixel JS loops + OpenCV ops froze the tab ("page not
+ * responding") and could exhaust the WASM heap. 1800px keeps glyphs legible
+ * for the vision model while staying responsive. (Move to a Web Worker later to
+ * lift this back up.)
+ */
+const FINANCIAL_MAX_LONG_SIDE = 1800;
 /** JPEG quality for the vision-enhanced version. Spec: 90–95. */
 const FINANCIAL_JPEG_QUALITY = 0.92;
 /** Gentler sharpening than the legacy OCR path (spec: 0.4–0.7). */
@@ -44,6 +51,15 @@ const DESKEW_MIN_DEG = 0.6;
 /** Above this we assume the detection is wrong / the doc is rotated 90°+; the
  *  vision LLM handles coarse orientation, so we don't auto-rotate that far. */
 const DESKEW_MAX_DEG = 15;
+
+/** Yield to the event loop so the browser can paint between heavy main-thread
+ *  steps — prevents the "page not responding" dialog. */
+function yieldToMain(): Promise<void> {
+	return new Promise((resolve) => {
+		if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+		else setTimeout(resolve, 0);
+	});
+}
 
 export interface PreprocessImageOptions {
 	/**
@@ -205,6 +221,7 @@ async function enhanceForVision(
 	};
 
 	// Steps 2–4: detect document → perspective de-warp, else deskew.
+	await yieldToMain();
 	try {
 		const detection = await detectDocumentQuad(canvas);
 		if (detection) {
@@ -230,6 +247,7 @@ async function enhanceForVision(
 	}
 
 	// Step 5: shadow / background illumination normalisation (colour-preserving).
+	await yieldToMain();
 	try {
 		applyShadowNormalization(canvas);
 	} catch {
@@ -237,6 +255,7 @@ async function enhanceForVision(
 	}
 
 	// Step 6: local contrast equalisation (CLAHE, gentle).
+	await yieldToMain();
 	try {
 		metrics.claheApplied = await applyClaheGain(canvas, 2.0, 8);
 	} catch {
@@ -244,13 +263,17 @@ async function enhanceForVision(
 	}
 
 	// Step 7: light denoise (preserves small marks: decimals, commas, dashes).
+	// medianBlur(3) — fast native op; bilateral was too slow / memory-heavy on
+	// the main thread for large photos.
+	await yieldToMain();
 	try {
-		metrics.denoised = await applyLightBilateral(canvas);
+		metrics.denoised = await applyLightDenoise(canvas);
 	} catch {
 		/* skip */
 	}
 
 	// Step 8: gentle unsharp sharpening.
+	await yieldToMain();
 	try {
 		const ctx = canvas.getContext('2d');
 		if (ctx) applyUnsharpMask(ctx, FINANCIAL_SHARPEN_AMOUNT, FINANCIAL_SHARPEN_RADIUS);
@@ -282,8 +305,9 @@ function applyShadowNormalization(canvas: HTMLCanvasElement): void {
 	bgCanvas.height = height;
 	const bctx = bgCanvas.getContext('2d', { willReadFrequently: true });
 	if (!bctx) return;
-	// Large-radius blur ≈ background illumination. Scale with image size.
-	const radius = Math.max(15, Math.round(Math.max(width, height) / 24));
+	// Large-radius blur ≈ background illumination. Scale with image size but
+	// cap it (spec sigma ≈ 25–45) so a huge CSS blur can't stall a CPU fallback.
+	const radius = Math.min(40, Math.max(18, Math.round(Math.max(width, height) / 40)));
 	bctx.filter = `blur(${radius}px)`;
 	bctx.drawImage(canvas, 0, 0);
 
@@ -314,7 +338,7 @@ interface CvLoose {
 	imread: (c: HTMLCanvasElement) => CvMatLoose;
 	imshow: (c: HTMLCanvasElement, m: CvMatLoose) => void;
 	cvtColor: (src: CvMatLoose, dst: CvMatLoose, code: number) => void;
-	bilateralFilter: (src: CvMatLoose, dst: CvMatLoose, d: number, sc: number, ss: number) => void;
+	medianBlur: (src: CvMatLoose, dst: CvMatLoose, ksize: number) => void;
 	Mat: new () => CvMatLoose;
 	CLAHE?: new (clip: number, tile: unknown) => { apply: (s: CvMatLoose, d: CvMatLoose) => void; delete?: () => void };
 	Size: new (w: number, h: number) => unknown;
@@ -375,21 +399,27 @@ async function applyClaheGain(canvas: HTMLCanvasElement, clip: number, tile: num
 	}
 }
 
-/** Step 7 — light bilateral filter (edge-preserving denoise). */
-async function applyLightBilateral(canvas: HTMLCanvasElement): Promise<boolean> {
+/**
+ * Step 7 — light denoise via a 3×3 median blur. Fast native op that removes
+ * sensor speckle / JPEG noise without the cost of a bilateral filter (which
+ * was seconds-slow and memory-heavy on the main thread for large photos). A
+ * 3×3 kernel is gentle enough to keep small marks (decimals, commas, dashes).
+ */
+async function applyLightDenoise(canvas: HTMLCanvasElement): Promise<boolean> {
 	let cv: CvLoose;
 	try {
 		cv = (await loadOpenCv()) as unknown as CvLoose;
 	} catch {
 		return false;
 	}
+	if (typeof cv.medianBlur !== 'function') return false;
 	const src = cv.imread(canvas);
 	const rgb = new cv.Mat();
 	const dst = new cv.Mat();
 	const rgba = new cv.Mat();
 	try {
 		cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
-		cv.bilateralFilter(rgb, dst, 5, 30, 30);
+		cv.medianBlur(rgb, dst, 3);
 		cv.cvtColor(dst, rgba, cv.COLOR_RGB2RGBA);
 		cv.imshow(canvas, rgba);
 		return true;
