@@ -22,7 +22,6 @@
  */
 
 import { tryWarpDocument, detectDocumentQuad, warpToQuad } from './document-warp';
-import { loadOpenCv } from './opencv-loader';
 
 const OCR_MAX_LONG_SIDE = 2048;
 const JPEG_QUALITY = 0.95;
@@ -33,14 +32,10 @@ const SHARPEN_RADIUS = 1;
 
 // --- Financial "vision-enhanced" pipeline tuning ---------------------------
 /**
- * Long edge for the version sent to the vision LLM. Capped well below the
- * 2500–3500px "ideal" because every enhancement step runs on the main thread:
- * at 3000px the per-pixel JS loops + OpenCV ops froze the tab ("page not
- * responding") and could exhaust the WASM heap. 1800px keeps glyphs legible
- * for the vision model while staying responsive. (Move to a Web Worker later to
- * lift this back up.)
+ * Long edge for the version sent to the vision LLM. The default pipeline is
+ * pure Canvas2D (no OpenCV/WASM), so 2200px stays fast on the main thread.
  */
-const FINANCIAL_MAX_LONG_SIDE = 1800;
+const FINANCIAL_MAX_LONG_SIDE = 2200;
 /** JPEG quality for the vision-enhanced version. Spec: 90–95. */
 const FINANCIAL_JPEG_QUALITY = 0.92;
 /** Gentler sharpening than the legacy OCR path (spec: 0.4–0.7). */
@@ -127,16 +122,20 @@ export async function preprocessImageForOcr(
 }
 
 // ===========================================================================
-// Financial "vision-enhanced" pipeline (Steps 2–8 of the capture spec).
+// Financial "vision-enhanced" pipeline.
 //
 // Produces TWO versions of a financial photo:
 //   - `original`: the untouched upload (audit, human review, vision fallback).
 //     We never overwrite it.
-//   - `visionEnhanced`: document-cropped, deskewed, illumination-normalised,
-//     locally contrast-equalised, lightly denoised and gently sharpened — the
-//     version we send to the vision LLM. Colour is preserved (no binarisation,
-//     no table-line removal) because the LLM uses colour for stamps, ink-vs-
-//     paper cues and highlights.
+//   - `visionEnhanced`: illumination-normalised, gently contrast-stretched and
+//     sharpened — the version we send to the vision LLM. Colour is preserved
+//     (no binarisation, no table-line removal) because the LLM uses colour for
+//     stamps, ink-vs-paper cues and highlights.
+//
+// The DEFAULT pipeline is pure Canvas2D — no OpenCV / no WASM — so it runs in
+// well under a second on the main thread. Perspective de-warp (which needs
+// OpenCV contour detection + a 10 MB WASM download) is OPT-IN via
+// `options.dewarp`; OpenCV is only loaded when that flag is set.
 //
 // Every enhancement step is best-effort: a failure in any step falls through
 // to the canvas as it was, so we always emit a usable JPEG.
@@ -145,14 +144,18 @@ export async function preprocessImageForOcr(
 export interface FinancialPreprocessMetrics {
 	/** False when the source could not be decoded (visionEnhanced === original). */
 	processed: boolean;
-	/** True when a document quad was detected and perspective-corrected. */
+	/** True when perspective de-warp ran AND found a document (opt-in, OpenCV). */
 	warped: boolean;
 	/** Degrees rotated by the deskew fallback (0 when not deskewed). */
 	deskewedDeg: number;
 	/** Detected document coverage 0–1, when a boundary was found. */
 	areaRatio?: number;
-	claheApplied: boolean;
-	denoised: boolean;
+	/** Shadow / background illumination normalisation applied. */
+	normalized: boolean;
+	/** Gentle contrast stretch applied. */
+	contrastApplied: boolean;
+	/** Unsharp sharpening applied. */
+	sharpened: boolean;
 	outputWidth: number;
 	outputHeight: number;
 }
@@ -163,13 +166,20 @@ export interface FinancialVersions {
 	metrics: FinancialPreprocessMetrics;
 }
 
+export interface BuildFinancialVersionsOptions {
+	/** Run OpenCV document detection + perspective de-warp first. Lazy-loads the
+	 *  ~10 MB OpenCV WASM bundle only when true. Default false. */
+	dewarp?: boolean;
+}
+
 /**
  * Build the original + vision-enhanced versions of a financial image. The
  * caller uploads both; the vision-enhanced one is what OCR/vision reads.
  */
 export async function buildFinancialVersions(
 	input: Blob,
-	fileName?: string
+	fileName?: string,
+	options: BuildFinancialVersionsOptions = {}
 ): Promise<FinancialVersions> {
 	const sourceName = fileName ?? (input instanceof File ? input.name : 'image.jpg');
 	const original =
@@ -181,8 +191,9 @@ export async function buildFinancialVersions(
 		processed: false,
 		warped: false,
 		deskewedDeg: 0,
-		claheApplied: false,
-		denoised: false,
+		normalized: false,
+		contrastApplied: false,
+		sharpened: false,
 		outputWidth: 0,
 		outputHeight: 0
 	};
@@ -197,7 +208,7 @@ export async function buildFinancialVersions(
 	const canvas = await decodeToCanvas(input, looksTiff, FINANCIAL_MAX_LONG_SIDE).catch(() => null);
 	if (!canvas) return { original, visionEnhanced: original, metrics: idle };
 
-	const { canvas: enhanced, metrics } = await enhanceForVision(canvas);
+	const { canvas: enhanced, metrics } = await enhanceForVision(canvas, options.dewarp ?? false);
 	const blob = await canvasToBlob(enhanced, 'image/jpeg', FINANCIAL_JPEG_QUALITY);
 	if (!blob) return { original, visionEnhanced: original, metrics: idle };
 
@@ -207,76 +218,77 @@ export async function buildFinancialVersions(
 }
 
 async function enhanceForVision(
-	input: HTMLCanvasElement
+	input: HTMLCanvasElement,
+	dewarp: boolean
 ): Promise<{ canvas: HTMLCanvasElement; metrics: FinancialPreprocessMetrics }> {
 	let canvas = input;
 	const metrics: FinancialPreprocessMetrics = {
 		processed: true,
 		warped: false,
 		deskewedDeg: 0,
-		claheApplied: false,
-		denoised: false,
+		normalized: false,
+		contrastApplied: false,
+		sharpened: false,
 		outputWidth: canvas.width,
 		outputHeight: canvas.height
 	};
 
-	// Steps 2–4: detect document → perspective de-warp, else deskew.
-	await yieldToMain();
-	try {
-		const detection = await detectDocumentQuad(canvas);
-		if (detection) {
-			metrics.areaRatio = detection.areaRatio;
-			const warped = await warpToQuad(canvas, detection.quad);
-			if (warped) {
-				const refit = fitToLongSide(warped.width, warped.height, FINANCIAL_MAX_LONG_SIDE);
-				canvas = drawCanvasTo(warped, refit.width, refit.height) ?? warped;
-				metrics.warped = true;
-			} else {
-				const skew = detection.skewAngle;
-				if (Math.abs(skew) >= DESKEW_MIN_DEG && Math.abs(skew) <= DESKEW_MAX_DEG) {
-					const rotated = rotateCanvas(canvas, -skew);
-					if (rotated) {
-						canvas = rotated;
-						metrics.deskewedDeg = -skew;
+	// OPT-IN: detect document → perspective de-warp, else deskew. Loads OpenCV
+	// (~10 MB WASM) only when requested.
+	if (dewarp) {
+		await yieldToMain();
+		try {
+			const detection = await detectDocumentQuad(canvas);
+			if (detection) {
+				metrics.areaRatio = detection.areaRatio;
+				const warped = await warpToQuad(canvas, detection.quad);
+				if (warped) {
+					const refit = fitToLongSide(warped.width, warped.height, FINANCIAL_MAX_LONG_SIDE);
+					canvas = drawCanvasTo(warped, refit.width, refit.height) ?? warped;
+					metrics.warped = true;
+				} else {
+					const skew = detection.skewAngle;
+					if (Math.abs(skew) >= DESKEW_MIN_DEG && Math.abs(skew) <= DESKEW_MAX_DEG) {
+						const rotated = rotateCanvas(canvas, -skew);
+						if (rotated) {
+							canvas = rotated;
+							metrics.deskewedDeg = -skew;
+						}
 					}
 				}
 			}
+		} catch {
+			/* keep canvas as-is */
 		}
-	} catch {
-		/* keep canvas as-is */
 	}
 
-	// Step 5: shadow / background illumination normalisation (colour-preserving).
+	// Shadow / background illumination normalisation (colour-preserving). Pure
+	// Canvas2D — the single most useful step for phone photos of paper.
 	await yieldToMain();
 	try {
 		applyShadowNormalization(canvas);
+		metrics.normalized = true;
 	} catch {
 		/* skip */
 	}
 
-	// Step 6: local contrast equalisation (CLAHE, gentle).
+	// Gentle global contrast stretch (CLAHE substitute, pure Canvas2D).
 	await yieldToMain();
 	try {
-		metrics.claheApplied = await applyClaheGain(canvas, 2.0, 8);
+		applyContrastStretch(canvas);
+		metrics.contrastApplied = true;
 	} catch {
 		/* skip */
 	}
 
-	// Step 7: light denoise (preserves small marks: decimals, commas, dashes).
-	// medianBlur(3) — fast native op; bilateral was too slow / memory-heavy on
-	// the main thread for large photos.
-	await yieldToMain();
-	try {
-		metrics.denoised = await applyLightDenoise(canvas);
-	} catch {
-		/* skip */
-	}
-
-	// Step 8: gentle unsharp sharpening.
+	// Gentle unsharp sharpening.
 	await yieldToMain();
 	try {
 		const ctx = canvas.getContext('2d');
-		if (ctx) applyUnsharpMask(ctx, FINANCIAL_SHARPEN_AMOUNT, FINANCIAL_SHARPEN_RADIUS);
+		if (ctx) {
+			applyUnsharpMask(ctx, FINANCIAL_SHARPEN_AMOUNT, FINANCIAL_SHARPEN_RADIUS);
+			metrics.sharpened = true;
+		}
 	} catch {
 		/* skip */
 	}
@@ -334,101 +346,64 @@ function applyShadowNormalization(canvas: HTMLCanvasElement): void {
 	ctx.putImageData(orig, 0, 0);
 }
 
-interface CvLoose {
-	imread: (c: HTMLCanvasElement) => CvMatLoose;
-	imshow: (c: HTMLCanvasElement, m: CvMatLoose) => void;
-	cvtColor: (src: CvMatLoose, dst: CvMatLoose, code: number) => void;
-	medianBlur: (src: CvMatLoose, dst: CvMatLoose, ksize: number) => void;
-	Mat: new () => CvMatLoose;
-	CLAHE?: new (clip: number, tile: unknown) => { apply: (s: CvMatLoose, d: CvMatLoose) => void; delete?: () => void };
-	Size: new (w: number, h: number) => unknown;
-	COLOR_RGBA2GRAY: number;
-	COLOR_RGBA2RGB: number;
-	COLOR_RGB2RGBA: number;
-	[key: string]: unknown;
-}
-
-interface CvMatLoose {
-	delete(): void;
-	data: Uint8Array;
-}
-
 /**
- * Step 6 — CLAHE on luma, applied back to colour as a per-pixel gain. Gentle
- * (clipLimit ~2.0) so we don't amplify paper texture, dotted table rules or
- * sensor noise into fake glyphs.
+ * Gentle contrast stretch — a fast, pure-Canvas2D substitute for CLAHE. Builds
+ * a luma histogram, finds the 0.5% / 99.5% percentiles, and remaps luma to
+ * stretch that range to (near) full scale. Applied as a per-pixel luma gain so
+ * colour is preserved. Conservative percentiles + a slight pull-back keep it
+ * from amplifying paper texture / dotted table rules into fake glyphs.
  */
-async function applyClaheGain(canvas: HTMLCanvasElement, clip: number, tile: number): Promise<boolean> {
-	let cv: CvLoose;
-	try {
-		cv = (await loadOpenCv()) as unknown as CvLoose;
-	} catch {
-		return false;
+function applyContrastStretch(canvas: HTMLCanvasElement): void {
+	const { width, height } = canvas;
+	const ctx = canvas.getContext('2d', { willReadFrequently: true });
+	if (!ctx) return;
+
+	const img = ctx.getImageData(0, 0, width, height);
+	const d = img.data;
+	const n = d.length / 4;
+	if (n === 0) return;
+
+	const hist = new Uint32Array(256);
+	for (let i = 0; i < d.length; i += 4) {
+		const luma = (0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!) | 0;
+		hist[luma > 255 ? 255 : luma]!++;
 	}
-	if (typeof cv.CLAHE !== 'function') return false;
 
-	const src = cv.imread(canvas);
-	const gray = new cv.Mat();
-	const claheOut = new cv.Mat();
-	try {
-		cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-		const clahe = new cv.CLAHE(clip, new cv.Size(tile, tile));
-		clahe.apply(gray, claheOut);
-		clahe.delete?.();
-
-		const g = gray.data;
-		const c = claheOut.data;
-		const ctx = canvas.getContext('2d', { willReadFrequently: true });
-		if (!ctx) return false;
-		const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-		const d = img.data;
-		for (let p = 0, i = 0; p < g.length; p++, i += 4) {
-			const og = g[p]!;
-			if (og < 1) continue;
-			const gain = c[p]! / og;
-			d[i] = clamp8(d[i]! * gain);
-			d[i + 1] = clamp8(d[i + 1]! * gain);
-			d[i + 2] = clamp8(d[i + 2]! * gain);
+	const lowCut = n * 0.005;
+	const highCut = n * 0.005;
+	let low = 0;
+	let acc = 0;
+	for (let v = 0; v < 256; v++) {
+		acc += hist[v]!;
+		if (acc >= lowCut) {
+			low = v;
+			break;
 		}
-		ctx.putImageData(img, 0, 0);
-		return true;
-	} finally {
-		src.delete();
-		gray.delete();
-		claheOut.delete();
 	}
-}
+	let high = 255;
+	acc = 0;
+	for (let v = 255; v >= 0; v--) {
+		acc += hist[v]!;
+		if (acc >= highCut) {
+			high = v;
+			break;
+		}
+	}
+	if (high - low < 16) return; // already full-range; nothing useful to do
 
-/**
- * Step 7 — light denoise via a 3×3 median blur. Fast native op that removes
- * sensor speckle / JPEG noise without the cost of a bilateral filter (which
- * was seconds-slow and memory-heavy on the main thread for large photos). A
- * 3×3 kernel is gentle enough to keep small marks (decimals, commas, dashes).
- */
-async function applyLightDenoise(canvas: HTMLCanvasElement): Promise<boolean> {
-	let cv: CvLoose;
-	try {
-		cv = (await loadOpenCv()) as unknown as CvLoose;
-	} catch {
-		return false;
+	// Map [low, high] → [8, 247] (slight pull-back from pure 0–255 to avoid
+	// crushing faint small digits / blowing out highlights).
+	const scale = (247 - 8) / (high - low);
+	for (let i = 0; i < d.length; i += 4) {
+		const luma = 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
+		if (luma < 1) continue;
+		const stretched = clamp8((luma - low) * scale + 8);
+		const gain = stretched / luma;
+		d[i] = clamp8(d[i]! * gain);
+		d[i + 1] = clamp8(d[i + 1]! * gain);
+		d[i + 2] = clamp8(d[i + 2]! * gain);
 	}
-	if (typeof cv.medianBlur !== 'function') return false;
-	const src = cv.imread(canvas);
-	const rgb = new cv.Mat();
-	const dst = new cv.Mat();
-	const rgba = new cv.Mat();
-	try {
-		cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
-		cv.medianBlur(rgb, dst, 3);
-		cv.cvtColor(dst, rgba, cv.COLOR_RGB2RGBA);
-		cv.imshow(canvas, rgba);
-		return true;
-	} finally {
-		src.delete();
-		rgb.delete();
-		dst.delete();
-		rgba.delete();
-	}
+	ctx.putImageData(img, 0, 0);
 }
 
 /** Rotate a canvas by `deg` (clockwise positive), expanding to fit and padding
