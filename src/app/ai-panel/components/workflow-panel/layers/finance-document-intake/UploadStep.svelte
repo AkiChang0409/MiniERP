@@ -9,7 +9,11 @@
 		type DocumentProcessingStatus
 	} from '$app-layer/ai-panel/workflow/finance-workflow-api';
 	import { extractEmlClientText } from '$app-layer/ai-panel/workflow/extract-eml-client';
-	import { buildFinancialVersions, cropImageToFractions } from '$lib/utils/preprocess-image';
+	import {
+		buildFinancialVersions,
+		cropImageToFractions,
+		toDisplayImage
+	} from '$lib/utils/preprocess-image';
 	import { assessImageQuality, type QualityFinding } from '$lib/utils/image-quality';
 	import ImageCropper, { type CropRect } from './ImageCropper.svelte';
 
@@ -439,10 +443,14 @@
 		previewSourceUrl = null;
 	}
 
-	function openCrop() {
+	async function openCrop() {
 		if (previewBusy || !previewSourceFile) return;
+		const source = previewSourceFile;
+		// Crop on a browser-renderable rendition (TIFF can't display in <img>);
+		// cropImageToFractions still crops the real source via the TIFF decoder.
+		const displaySource = await toDisplayImage(source).catch(() => source);
 		if (previewSourceUrl) URL.revokeObjectURL(previewSourceUrl);
-		previewSourceUrl = URL.createObjectURL(previewSourceFile);
+		previewSourceUrl = URL.createObjectURL(displaySource);
 		previewCropOpen = true;
 	}
 
@@ -458,10 +466,15 @@
 	// the URLs + metrics. Nothing is uploaded until the user confirms.
 	async function renderPreviewFrom(file: File) {
 		const extraction = await buildClientExtraction(file, { dewarp: previewDewarp });
+		// TIFF (and other non-<img>-renderable formats) need a JPEG rendition for
+		// the "Original" panel — the browser can't display the raw TIFF.
+		const displayOriginal = await toDisplayImage(extraction.uploadFile).catch(
+			() => extraction.uploadFile
+		);
 		revokePreviewUrls();
 		previewFiles = [file];
 		previewExtraction = extraction;
-		previewOriginalUrl = URL.createObjectURL(extraction.uploadFile);
+		previewOriginalUrl = URL.createObjectURL(displayOriginal);
 		previewEnhancedUrl = extraction.derived
 			? URL.createObjectURL(extraction.derived.file)
 			: null;

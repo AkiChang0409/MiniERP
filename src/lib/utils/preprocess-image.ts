@@ -435,33 +435,62 @@ export async function cropImageToFractions(
 		return passthrough();
 	}
 
-	let bitmap: ImageBitmap;
-	try {
-		bitmap = await createImageBitmap(input, { imageOrientation: 'from-image' });
-	} catch {
-		return passthrough();
-	}
+	// Decode via the TIFF-aware canvas path (createImageBitmap can't decode
+	// TIFF; decodeToCanvas routes TIFF through utif2 and honours EXIF for the
+	// rest). Cap generously — the crop is re-encoded anyway.
+	const looksTiff = isTiff((input.type || '').toLowerCase(), sourceName);
+	const canvas = await decodeToCanvas(input, looksTiff, 4096).catch(() => null);
+	if (!canvas) return passthrough();
 
-	const sx = Math.max(0, Math.round(rect.x * bitmap.width));
-	const sy = Math.max(0, Math.round(rect.y * bitmap.height));
-	const sw = Math.max(1, Math.min(bitmap.width - sx, Math.round(rect.w * bitmap.width)));
-	const sh = Math.max(1, Math.min(bitmap.height - sy, Math.round(rect.h * bitmap.height)));
+	const sx = Math.max(0, Math.round(rect.x * canvas.width));
+	const sy = Math.max(0, Math.round(rect.y * canvas.height));
+	const sw = Math.max(1, Math.min(canvas.width - sx, Math.round(rect.w * canvas.width)));
+	const sh = Math.max(1, Math.min(canvas.height - sy, Math.round(rect.h * canvas.height)));
 
 	const out = document.createElement('canvas');
 	out.width = sw;
 	out.height = sh;
 	const ctx = out.getContext('2d');
-	if (!ctx) {
-		bitmap.close();
-		return passthrough();
-	}
-	ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
-	bitmap.close();
+	if (!ctx) return passthrough();
+	ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
 	const blob = await canvasToBlob(out, 'image/jpeg', 0.95);
 	if (!blob) return passthrough();
 	const baseName = sourceName.replace(/\.[^.]+$/, '') || 'document';
 	return new File([blob], `${baseName}_crop.jpg`, { type: 'image/jpeg' });
+}
+
+const BROWSER_RENDERABLE_RE = /^image\/(png|jpe?g|webp|gif|bmp|x-bmp)$/i;
+
+/** Whether the browser can render this image directly in an <img> (TIFF can't). */
+export function isBrowserRenderableImage(input: Blob, fileName?: string): boolean {
+	const mime = (input.type || '').toLowerCase();
+	const name = (fileName ?? (input instanceof File ? input.name : '')).toLowerCase();
+	if (isTiff(mime, name)) return false;
+	if (BROWSER_RENDERABLE_RE.test(mime)) return true;
+	return /\.(png|jpe?g|webp|gif|bmp)$/i.test(name);
+}
+
+/**
+ * Return a browser-renderable version of an image for PREVIEW / crop display.
+ * Renderable inputs pass through unchanged; TIFF (and other non-renderable
+ * formats) are decoded and re-encoded to a JPEG rendition. Best-effort.
+ */
+export async function toDisplayImage(input: Blob, fileName?: string): Promise<File> {
+	const sourceName = fileName ?? (input instanceof File ? input.name : 'image.jpg');
+	const asFile = (): File =>
+		input instanceof File
+			? input
+			: new File([input], sourceName, { type: input.type || 'image/jpeg' });
+	if (isBrowserRenderableImage(input, sourceName)) return asFile();
+
+	const looksTiff = isTiff((input.type || '').toLowerCase(), sourceName);
+	const canvas = await decodeToCanvas(input, looksTiff, 1600).catch(() => null);
+	if (!canvas) return asFile();
+	const blob = await canvasToBlob(canvas, 'image/jpeg', 0.9);
+	if (!blob) return asFile();
+	const baseName = sourceName.replace(/\.[^.]+$/, '') || 'document';
+	return new File([blob], `${baseName}_preview.jpg`, { type: 'image/jpeg' });
 }
 
 function clamp8(v: number): number {
