@@ -22,3 +22,14 @@ Phase 4 bridge status:
   public assembly boundary and defines the HR umbrella.
 - Legacy coupling inside this target module is intentionally isolated to
   `contracts.ts`, `adapters.ts`, and `compat.ts`.
+
+## Feature Context Documents
+
+Detailed implementation context for specific features lives separately to keep
+this file concise:
+
+- [`LEAVE_MANAGEMENT_CONTEXT.md`](./LEAVE_MANAGEMENT_CONTEXT.md) — schema,
+  service flows, payrollEffect design, seed data, and extension points for the
+  admin-side Leave Management feature (Sprint 2 MVP).
+- [`CLAUDE.md`](./CLAUDE.md) — short working rules for Claude Code sessions
+  operating inside this module.

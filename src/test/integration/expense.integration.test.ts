@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, isNull } from 'drizzle-orm';
@@ -18,9 +18,8 @@ function makeCtx(): ModuleContext {
 	};
 }
 
-// Apply all Drizzle migrations before any test runs
 beforeAll(async () => {
-	await applyD1Migrations(env.DB, { migrationsPath: './drizzle/migrations' });
+	await applyD1Migrations(env.DB, inject('d1Migrations'));
 });
 
 // ─── createStandaloneExpense → DB round-trip ─────────────────────────────────
