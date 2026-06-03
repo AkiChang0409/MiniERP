@@ -34,6 +34,8 @@ export const QUALITY_THRESHOLDS = {
 	blur: { reshootBelow: 80, warnBelow: 150 },
 	/** Mean luma 0–255. */
 	brightness: { darkReshoot: 60, darkWarn: 90, brightWarn: 220, brightReshoot: 240 },
+	/** Luma std-dev (contrast proxy) — lower is flatter / washed out. */
+	contrast: { reshootBelow: 22, warnBelow: 38 },
 	/** Detected document area ÷ frame area. */
 	areaRatio: { reshootBelow: 0.45, warnBelow: 0.6 },
 	/** Detected tilt (degrees, absolute). */
@@ -43,7 +45,7 @@ export const QUALITY_THRESHOLDS = {
 export type QualitySeverity = 'reshoot' | 'warn';
 
 export interface QualityFinding {
-	metric: 'resolution' | 'blur' | 'brightness' | 'coverage' | 'skew';
+	metric: 'resolution' | 'blur' | 'brightness' | 'contrast' | 'coverage' | 'skew';
 	severity: QualitySeverity;
 	/** Short user-facing message (English; the panel renders it verbatim). */
 	message: string;
@@ -60,6 +62,8 @@ export interface ImageQualityMetrics {
 	longestEdge: number;
 	laplacianVariance: number;
 	brightness: number;
+	/** Luma std-dev — low values mean a flat / washed-out (low-contrast) image. */
+	contrast: number;
 	documentAreaRatio?: number;
 	skewAngle?: number;
 }
@@ -89,7 +93,7 @@ export async function assessImageQuality(
 	options: AssessImageQualityOptions = {}
 ): Promise<ImageQualityResult> {
 	const empty: ImageQualityResult = {
-		metrics: { longestEdge: 0, laplacianVariance: 0, brightness: 0 },
+		metrics: { longestEdge: 0, laplacianVariance: 0, brightness: 0, contrast: 0 },
 		findings: [],
 		worst: null
 	};
@@ -122,6 +126,7 @@ export async function assessImageQuality(
 	const { data } = ctx.getImageData(0, 0, w, h);
 	const gray = toGrayscale(data, w * h);
 	const brightness = mean(gray);
+	const contrast = stdDev(gray, brightness);
 	const laplacianVariance = laplacianVar(gray, w, h);
 
 	let detection: DocumentDetection | null = null;
@@ -133,6 +138,7 @@ export async function assessImageQuality(
 		longestEdge,
 		laplacianVariance,
 		brightness,
+		contrast,
 		documentAreaRatio: detection?.areaRatio,
 		skewAngle: detection ? Math.abs(detection.skewAngle) : undefined
 	};
@@ -189,6 +195,22 @@ function deriveFindings(m: ImageQualityMetrics): QualityFinding[] {
 		}
 	}
 
+	if (m.contrast > 0) {
+		if (m.contrast < t.contrast.reshootBelow) {
+			findings.push({
+				metric: 'contrast',
+				severity: 'reshoot',
+				message: 'Very low contrast — the page looks washed out. Improve lighting / avoid glare.'
+			});
+		} else if (m.contrast < t.contrast.warnBelow) {
+			findings.push({
+				metric: 'contrast',
+				severity: 'warn',
+				message: "Low contrast — we'll boost it, but a crisper, evenly-lit shot reads best."
+			});
+		}
+	}
+
 	if (m.documentAreaRatio !== undefined) {
 		if (m.documentAreaRatio < t.areaRatio.reshootBelow) {
 			findings.push({ metric: 'coverage', severity: 'reshoot', message: 'Document fills too little of the frame. Move closer so it covers most of the photo.' });
@@ -231,6 +253,16 @@ function mean(values: Float32Array): number {
 	let sum = 0;
 	for (let i = 0; i < values.length; i++) sum += values[i]!;
 	return values.length ? sum / values.length : 0;
+}
+
+function stdDev(values: Float32Array, mu: number): number {
+	if (!values.length) return 0;
+	let sumSq = 0;
+	for (let i = 0; i < values.length; i++) {
+		const d = values[i]! - mu;
+		sumSq += d * d;
+	}
+	return Math.sqrt(sumSq / values.length);
 }
 
 /**

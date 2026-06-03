@@ -9,8 +9,9 @@
 		type DocumentProcessingStatus
 	} from '$app-layer/ai-panel/workflow/finance-workflow-api';
 	import { extractEmlClientText } from '$app-layer/ai-panel/workflow/extract-eml-client';
-	import { buildFinancialVersions } from '$lib/utils/preprocess-image';
+	import { buildFinancialVersions, cropImageToFractions } from '$lib/utils/preprocess-image';
 	import { assessImageQuality, type QualityFinding } from '$lib/utils/image-quality';
+	import ImageCropper, { type CropRect } from './ImageCropper.svelte';
 
 	type Stage =
 		| 'idle'
@@ -43,6 +44,12 @@
 	// pure-Canvas and fast; lazy-loads the 10 MB WASM only when toggled on).
 	let previewDewarp = $state(false);
 	let previewBusy = $state(false);
+	// Manual crop: `previewSourceFile` is the untouched original we always crop
+	// FROM (so re-cropping never compounds quality loss).
+	let previewSourceFile = $state<File | null>(null);
+	let previewSourceUrl = $state<string | null>(null);
+	let previewCropOpen = $state(false);
+	let previewCropped = $state(false);
 
 	const TERMINAL_BAD: DocumentProcessingStatus[] = ['needs_manual_review', 'failed'];
 	const MIN_USEFUL_CLIENT_TEXT = 48;
@@ -426,27 +433,49 @@
 	function revokePreviewUrls() {
 		if (previewOriginalUrl) URL.revokeObjectURL(previewOriginalUrl);
 		if (previewEnhancedUrl) URL.revokeObjectURL(previewEnhancedUrl);
+		if (previewSourceUrl) URL.revokeObjectURL(previewSourceUrl);
 		previewOriginalUrl = null;
 		previewEnhancedUrl = null;
+		previewSourceUrl = null;
+	}
+
+	function openCrop() {
+		if (previewBusy || !previewSourceFile) return;
+		if (previewSourceUrl) URL.revokeObjectURL(previewSourceUrl);
+		previewSourceUrl = URL.createObjectURL(previewSourceFile);
+		previewCropOpen = true;
+	}
+
+	function closeCrop() {
+		previewCropOpen = false;
+		if (previewSourceUrl) URL.revokeObjectURL(previewSourceUrl);
+		previewSourceUrl = null;
 	}
 
 	onDestroy(revokePreviewUrls);
 
-	// Build the original + vision-enhanced versions and show them for
-	// inspection. Nothing is uploaded / sent to AI until the user confirms.
+	// Build the preview (original + vision-enhanced) from a given file and show
+	// the URLs + metrics. Nothing is uploaded until the user confirms.
+	async function renderPreviewFrom(file: File) {
+		const extraction = await buildClientExtraction(file, { dewarp: previewDewarp });
+		revokePreviewUrls();
+		previewFiles = [file];
+		previewExtraction = extraction;
+		previewOriginalUrl = URL.createObjectURL(extraction.uploadFile);
+		previewEnhancedUrl = extraction.derived
+			? URL.createObjectURL(extraction.derived.file)
+			: null;
+		previewMetrics = extraction.derived?.preprocessing ?? null;
+	}
+
 	async function buildPreview(files: File[]) {
 		fileName = files[0].name;
 		stage = 'parsing';
+		previewSourceFile = files[0];
+		previewCropped = false;
+		previewCropOpen = false;
 		try {
-			const extraction = await buildClientExtraction(files[0], { dewarp: previewDewarp });
-			revokePreviewUrls();
-			previewFiles = files;
-			previewExtraction = extraction;
-			previewOriginalUrl = URL.createObjectURL(extraction.uploadFile);
-			previewEnhancedUrl = extraction.derived
-				? URL.createObjectURL(extraction.derived.file)
-				: null;
-			previewMetrics = extraction.derived?.preprocessing ?? null;
+			await renderPreviewFrom(files[0]);
 			stage = 'preprocess_preview';
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not build the preprocessing preview.';
@@ -461,16 +490,42 @@
 		previewDewarp = !previewDewarp;
 		previewBusy = true;
 		try {
-			const extraction = await buildClientExtraction(previewFiles[0], { dewarp: previewDewarp });
-			revokePreviewUrls();
-			previewExtraction = extraction;
-			previewOriginalUrl = URL.createObjectURL(extraction.uploadFile);
-			previewEnhancedUrl = extraction.derived
-				? URL.createObjectURL(extraction.derived.file)
-				: null;
-			previewMetrics = extraction.derived?.preprocessing ?? null;
+			await renderPreviewFrom(previewFiles[0]);
 		} catch {
 			/* keep previous preview */
+		} finally {
+			previewBusy = false;
+		}
+	}
+
+	// Crop the untouched original by the chosen rectangle, then rebuild the
+	// preview from the crop. Always crops FROM `previewSourceFile` so repeated
+	// crops don't compound quality loss.
+	async function applyCrop(rect: CropRect) {
+		if (previewBusy || !previewSourceFile) return;
+		previewBusy = true;
+		const sourceFile = previewSourceFile;
+		closeCrop();
+		try {
+			const cropped = await cropImageToFractions(sourceFile, rect, sourceFile.name);
+			previewCropped = cropped !== sourceFile;
+			await renderPreviewFrom(cropped);
+		} catch {
+			/* keep previous preview */
+		} finally {
+			previewBusy = false;
+		}
+	}
+
+	async function resetCrop() {
+		if (previewBusy || !previewSourceFile) return;
+		previewBusy = true;
+		closeCrop();
+		previewCropped = false;
+		try {
+			await renderPreviewFrom(previewSourceFile);
+		} catch {
+			/* keep */
 		} finally {
 			previewBusy = false;
 		}
@@ -483,6 +538,8 @@
 		previewFiles = [];
 		previewExtraction = null;
 		previewMetrics = null;
+		previewSourceFile = null;
+		previewCropOpen = false;
 		if (files.length > 0) await runUpload(files, extraction ?? undefined);
 	}
 
@@ -491,6 +548,9 @@
 		previewFiles = [];
 		previewExtraction = null;
 		previewMetrics = null;
+		previewSourceFile = null;
+		previewCropOpen = false;
+		previewCropped = false;
 		onRetry();
 	}
 
@@ -588,8 +648,14 @@
 		const fmtBool = (v: unknown) => (v ? 'yes' : 'no');
 		const num = (v: unknown) => (typeof v === 'number' ? v : undefined);
 		const rows: { label: string; value: string }[] = [];
-		rows.push({ label: 'Illumination', value: fmtBool(m.normalized) });
-		rows.push({ label: 'Contrast', value: fmtBool(m.contrastApplied) });
+		const brightness = num(m.brightness);
+		if (brightness !== undefined) rows.push({ label: 'Brightness', value: `${Math.round(brightness)}` });
+		const contrast = num(m.contrast);
+		if (contrast !== undefined) rows.push({ label: 'Contrast', value: `${Math.round(contrast)}` });
+		rows.push({ label: 'Illumination fix', value: fmtBool(m.normalized) });
+		const gamma = num(m.gamma) ?? 1;
+		rows.push({ label: 'Gamma', value: gamma === 1 ? 'none' : gamma.toFixed(2) });
+		rows.push({ label: 'Contrast stretch', value: fmtBool(m.contrastApplied) });
 		rows.push({ label: 'Sharpen', value: fmtBool(m.sharpened) });
 		if (m.warped) {
 			rows.push({ label: 'De-warp', value: 'yes' });
@@ -631,9 +697,18 @@
 		<div class="preview-gate">
 			<span class="drop-heading">Preprocessing preview</span>
 			<span class="drop-sub">Inspect the result before sending to AI · {fileName}</span>
+			{#if previewCropOpen && previewSourceUrl}
+				<span class="drop-sub">Drag the box to keep only the document — tighter crops read much better.</span>
+				<ImageCropper
+					src={previewSourceUrl}
+					disabled={previewBusy}
+					onApply={applyCrop}
+					onCancel={closeCrop}
+				/>
+			{:else}
 			<div class="preview-grid">
 				<figure class="preview-cell">
-					<figcaption>Original</figcaption>
+					<figcaption>Original {previewCropped ? '(cropped)' : ''}</figcaption>
 					{#if previewOriginalUrl}
 						<img src={previewOriginalUrl} alt="Original upload" />
 					{/if}
@@ -646,6 +721,16 @@
 						<img src={previewOriginalUrl} alt="No enhancement; original used" />
 					{/if}
 				</figure>
+			</div>
+			<div class="preview-crop-bar">
+				<button type="button" class="quality-btn" disabled={previewBusy} onclick={openCrop}>
+					Crop document
+				</button>
+				{#if previewCropped}
+					<button type="button" class="quality-btn" disabled={previewBusy} onclick={resetCrop}>
+						Undo crop
+					</button>
+				{/if}
 			</div>
 			{#if previewMetricRows().length > 0}
 				<dl class="preview-metrics">
@@ -679,6 +764,7 @@
 					Cancel
 				</button>
 			</div>
+			{/if}
 		</div>
 	{:else}
 	<button
@@ -905,6 +991,12 @@
 		margin: 0;
 		color: var(--panel-fg);
 		font-variant-numeric: tabular-nums;
+	}
+	.preview-crop-bar {
+		display: flex;
+		gap: 10px;
+		justify-content: center;
+		flex-wrap: wrap;
 	}
 	.preview-toggle {
 		display: inline-flex;

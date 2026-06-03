@@ -32,10 +32,21 @@ const SHARPEN_RADIUS = 1;
 
 // --- Financial "vision-enhanced" pipeline tuning ---------------------------
 /**
- * Long edge for the version sent to the vision LLM. The default pipeline is
- * pure Canvas2D (no OpenCV/WASM), so 2200px stays fast on the main thread.
+ * Long edge for the version sent to the vision LLM. Locked to 2048 to match
+ * OpenAI vision `detail:'high'`, which downscales anything larger to fit a
+ * 2048×2048 box before tiling — so sending more pixels just wastes upload
+ * bytes (the model never sees them). The pipeline is pure Canvas2D (no
+ * OpenCV/WASM), so this stays fast on the main thread.
  */
-const FINANCIAL_MAX_LONG_SIDE = 2200;
+const FINANCIAL_MAX_LONG_SIDE = 2048;
+/** Mean luma below this ⇒ dark photo ⇒ lift with gamma < 1. */
+const DARK_MEAN = 110;
+const DARK_GAMMA = 0.85;
+/** Std-dev of a 32×32 luma thumbnail above this ⇒ uneven lighting ⇒ run
+ *  shadow normalisation. Flat scans stay below it and skip the step. */
+const UNEVEN_BG_STDDEV = 22;
+/** Full-image luma std-dev above this ⇒ already high contrast ⇒ skip stretch. */
+const HIGH_CONTRAST_STDDEV = 62;
 /** JPEG quality for the vision-enhanced version. Spec: 90–95. */
 const FINANCIAL_JPEG_QUALITY = 0.92;
 /** Gentler sharpening than the legacy OCR path (spec: 0.4–0.7). */
@@ -150,12 +161,19 @@ export interface FinancialPreprocessMetrics {
 	deskewedDeg: number;
 	/** Detected document coverage 0–1, when a boundary was found. */
 	areaRatio?: number;
-	/** Shadow / background illumination normalisation applied. */
+	/** Shadow / background illumination normalisation applied (only when the
+	 *  photo had uneven lighting). */
 	normalized: boolean;
-	/** Gentle contrast stretch applied. */
+	/** Gamma applied (1 = none; <1 = brightened a dark photo). */
+	gamma: number;
+	/** Gentle contrast stretch applied (only when contrast was low). */
 	contrastApplied: boolean;
 	/** Unsharp sharpening applied. */
 	sharpened: boolean;
+	/** Measured mean luma (0–255) of the working image. */
+	brightness: number;
+	/** Measured luma std-dev (contrast proxy) of the working image. */
+	contrast: number;
 	outputWidth: number;
 	outputHeight: number;
 }
@@ -192,8 +210,11 @@ export async function buildFinancialVersions(
 		warped: false,
 		deskewedDeg: 0,
 		normalized: false,
+		gamma: 1,
 		contrastApplied: false,
 		sharpened: false,
+		brightness: 0,
+		contrast: 0,
 		outputWidth: 0,
 		outputHeight: 0
 	};
@@ -227,8 +248,11 @@ async function enhanceForVision(
 		warped: false,
 		deskewedDeg: 0,
 		normalized: false,
+		gamma: 1,
 		contrastApplied: false,
 		sharpened: false,
+		brightness: 0,
+		contrast: 0,
 		outputWidth: canvas.width,
 		outputHeight: canvas.height
 	};
@@ -262,26 +286,50 @@ async function enhanceForVision(
 		}
 	}
 
-	// Shadow / background illumination normalisation (colour-preserving). Pure
-	// Canvas2D — the single most useful step for phone photos of paper.
-	await yieldToMain();
-	try {
-		applyShadowNormalization(canvas);
-		metrics.normalized = true;
-	} catch {
-		/* skip */
+	// Measure the image so we only apply the corrections it actually needs —
+	// over-processing a clean scan introduces halos and crushes faint digits.
+	const stats = measureImageStats(canvas);
+	metrics.brightness = Math.round(stats.mean);
+	metrics.contrast = Math.round(stats.stddev);
+
+	// Illumination normalisation — only when lighting is uneven (the big win for
+	// phone photos with shadows / creases; skipped on flat scans).
+	if (stats.bgStddev > UNEVEN_BG_STDDEV) {
+		await yieldToMain();
+		try {
+			applyShadowNormalization(canvas);
+			metrics.normalized = true;
+		} catch {
+			/* skip */
+		}
 	}
 
-	// Gentle global contrast stretch (CLAHE substitute, pure Canvas2D).
-	await yieldToMain();
-	try {
-		applyContrastStretch(canvas);
-		metrics.contrastApplied = true;
-	} catch {
-		/* skip */
+	// Gamma — lift dark photos so paper reads white-ish. Tonal correction
+	// survives OpenAI's downscale (unlike sharpening), so it's worth doing.
+	if (stats.mean < DARK_MEAN) {
+		await yieldToMain();
+		try {
+			applyGamma(canvas, DARK_GAMMA);
+			metrics.gamma = DARK_GAMMA;
+		} catch {
+			/* skip */
+		}
 	}
 
-	// Gentle unsharp sharpening.
+	// Gentle contrast stretch — only when contrast is low (a high-contrast scan
+	// doesn't need it, and stretching would clip).
+	if (stats.stddev < HIGH_CONTRAST_STDDEV) {
+		await yieldToMain();
+		try {
+			applyContrastStretch(canvas);
+			metrics.contrastApplied = true;
+		} catch {
+			/* skip */
+		}
+	}
+
+	// Gentle unsharp sharpening (kept mild — the vision API downscales, which
+	// softens aggressive sharpening into ringing anyway).
 	await yieldToMain();
 	try {
 		const ctx = canvas.getContext('2d');
@@ -296,6 +344,124 @@ async function enhanceForVision(
 	metrics.outputWidth = canvas.width;
 	metrics.outputHeight = canvas.height;
 	return { canvas, metrics };
+}
+
+/**
+ * Measure mean luma + std-dev over the image, plus the std-dev of a 32×32 luma
+ * thumbnail (a cheap proxy for illumination unevenness — a flat scan has near-
+ * zero thumbnail variation; a shadowed photo has high variation).
+ */
+function measureImageStats(canvas: HTMLCanvasElement): {
+	mean: number;
+	stddev: number;
+	bgStddev: number;
+} {
+	const ctx = canvas.getContext('2d', { willReadFrequently: true });
+	if (!ctx) return { mean: 128, stddev: 64, bgStddev: 0 };
+
+	const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	let sum = 0;
+	let sumSq = 0;
+	const n = data.length / 4;
+	for (let i = 0; i < data.length; i += 4) {
+		const luma = 0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
+		sum += luma;
+		sumSq += luma * luma;
+	}
+	const mean = n ? sum / n : 128;
+	const variance = n ? sumSq / n - mean * mean : 0;
+	const stddev = Math.sqrt(Math.max(0, variance));
+
+	// Low-frequency illumination: downscale to 32×32 and take its luma std-dev.
+	let bgStddev = 0;
+	const tw = 32;
+	const th = Math.max(1, Math.round((canvas.height / canvas.width) * tw)) || 1;
+	const tc = drawTo(canvas, tw, th);
+	const tctx = tc?.getContext('2d', { willReadFrequently: true });
+	if (tc && tctx) {
+		const td = tctx.getImageData(0, 0, tw, th).data;
+		const tn = td.length / 4;
+		let ts = 0;
+		let tsq = 0;
+		for (let i = 0; i < td.length; i += 4) {
+			const luma = 0.299 * td[i]! + 0.587 * td[i + 1]! + 0.114 * td[i + 2]!;
+			ts += luma;
+			tsq += luma * luma;
+		}
+		const tm = tn ? ts / tn : 0;
+		bgStddev = Math.sqrt(Math.max(0, tn ? tsq / tn - tm * tm : 0));
+	}
+
+	return { mean, stddev, bgStddev };
+}
+
+/** Apply a gamma curve to RGB via a 256-entry LUT. gamma<1 brightens. */
+function applyGamma(canvas: HTMLCanvasElement, gamma: number): void {
+	if (gamma === 1) return;
+	const ctx = canvas.getContext('2d', { willReadFrequently: true });
+	if (!ctx) return;
+	const lut = new Uint8ClampedArray(256);
+	const inv = 1 / gamma;
+	for (let v = 0; v < 256; v++) lut[v] = clamp8(255 * Math.pow(v / 255, inv));
+	const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	const d = img.data;
+	for (let i = 0; i < d.length; i += 4) {
+		d[i] = lut[d[i]!]!;
+		d[i + 1] = lut[d[i + 1]!]!;
+		d[i + 2] = lut[d[i + 2]!]!;
+	}
+	ctx.putImageData(img, 0, 0);
+}
+
+/**
+ * Crop an image to a rectangle expressed as fractions (0–1) of the image's
+ * natural dimensions, honouring EXIF orientation. Returns a re-encoded JPEG
+ * (the crop becomes the new "original" for this upload). Best-effort: returns
+ * the input unchanged on failure or a near-full crop.
+ */
+export async function cropImageToFractions(
+	input: Blob,
+	rect: { x: number; y: number; w: number; h: number },
+	fileName?: string
+): Promise<File> {
+	const sourceName = fileName ?? (input instanceof File ? input.name : 'image.jpg');
+	const passthrough = (): File =>
+		input instanceof File
+			? input
+			: new File([input], sourceName, { type: input.type || 'image/jpeg' });
+
+	// No-op for a near-full crop.
+	if (rect.w >= 0.999 && rect.h >= 0.999 && rect.x <= 0.001 && rect.y <= 0.001) {
+		return passthrough();
+	}
+
+	let bitmap: ImageBitmap;
+	try {
+		bitmap = await createImageBitmap(input, { imageOrientation: 'from-image' });
+	} catch {
+		return passthrough();
+	}
+
+	const sx = Math.max(0, Math.round(rect.x * bitmap.width));
+	const sy = Math.max(0, Math.round(rect.y * bitmap.height));
+	const sw = Math.max(1, Math.min(bitmap.width - sx, Math.round(rect.w * bitmap.width)));
+	const sh = Math.max(1, Math.min(bitmap.height - sy, Math.round(rect.h * bitmap.height)));
+
+	const out = document.createElement('canvas');
+	out.width = sw;
+	out.height = sh;
+	const ctx = out.getContext('2d');
+	if (!ctx) {
+		bitmap.close();
+		return passthrough();
+	}
+	ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+	bitmap.close();
+
+	const blob = await canvasToBlob(out, 'image/jpeg', 0.95);
+	if (!blob) return passthrough();
+	const baseName = sourceName.replace(/\.[^.]+$/, '') || 'document';
+	return new File([blob], `${baseName}_crop.jpg`, { type: 'image/jpeg' });
 }
 
 function clamp8(v: number): number {
