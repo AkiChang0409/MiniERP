@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "smartfin-db-v4",
-      "database_id": "15944d96-71a5-4c5a-b42c-92f6ba0b16b4",
+      "database_id": "e802fb76-fdbf-4884-a2f6-bc2d826b8b50",
       "migrations_dir": "../drizzle/migrations"
     }
   ],
