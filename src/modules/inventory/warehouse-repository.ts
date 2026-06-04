@@ -197,6 +197,14 @@ export class WarehouseRepository {
 			.where(eq(inventoryStockLevels.id, id));
 	}
 
+	async updateStockLevelReserved(id: string, quantityReserved: number) {
+		const now = new Date().toISOString();
+		await this.db
+			.update(inventoryStockLevels)
+			.set({ quantityReserved, updatedAt: now } as any)
+			.where(eq(inventoryStockLevels.id, id));
+	}
+
 	// ----------------- movements -----------------
 
 	async insertMovement(row: Record<string, unknown>) {

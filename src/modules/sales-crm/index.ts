@@ -5,7 +5,7 @@ export const salesCrmModule: ModuleDefinition = {
 		id: 'sales-crm',
 		name: 'Sales & CRM',
 		layer: 'feature',
-		dependencies: ['core']
+		dependencies: ['core', 'inventory']
 	}
 };
 

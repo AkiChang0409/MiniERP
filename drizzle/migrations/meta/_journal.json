@@ -92,6 +92,13 @@
       "when": 1780110000000,
       "tag": "0018_pur006_supplier_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1780113600000,
+      "tag": "0019_sales_crm",
+      "breakpoints": true
     }
   ]
 }

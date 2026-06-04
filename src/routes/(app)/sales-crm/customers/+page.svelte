@@ -1,5 +1,6 @@
 <script lang="ts">
 	import PageShell from '$app-layer/components/PageShell.svelte';
+	import SalesSubNav from '$app-layer/components/sales-crm/SalesSubNav.svelte';
 	import { enhance } from '$app/forms';
 
 	let { data } = $props();
@@ -12,6 +13,7 @@
 	title="Customers"
 	description="Customer master data for projects, quotations, and customer-facing AR documents."
 >
+	<SalesSubNav />
 	<div class="mb-4 flex flex-wrap items-center gap-3">
 		<a
 			class="rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]"
@@ -79,10 +81,13 @@
 							</tr>
 						{:else}
 							<tr class="hover:bg-slate-50/80">
-								<td class="px-4 py-3 font-medium text-slate-900">{c.name}</td>
+								<td class="px-4 py-3 font-medium text-slate-900">
+									<a class="hover:text-[var(--sf-green)] hover:underline" href="/sales-crm/customers/{c.id}">{c.name}</a>
+								</td>
 								<td class="px-4 py-3 text-slate-600">{c.contact ?? '-'}</td>
 								<td class="max-w-md truncate px-4 py-3 text-slate-600" title={c.address ?? ''}>{c.address ?? '-'}</td>
 								<td class="px-4 py-3 text-right">
+									<a class="mr-2 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700" href="/sales-crm/customers/{c.id}">Open</a>
 									<button
 										type="button"
 										class="rounded-md px-2 py-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-700"

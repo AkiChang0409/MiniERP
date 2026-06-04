@@ -75,6 +75,32 @@ export class CustomerRepository {
 		return { id };
 	}
 
+	async update(
+		id: string,
+		data: Partial<{
+			name: string;
+			address: string | null;
+			contact: string | null;
+			gstRegNo: string | null;
+			registrationNo: string | null;
+			country: string | null;
+			currency: string | null;
+			metadata: string | null;
+		}>
+	) {
+		const now = new Date().toISOString();
+		await this.db
+			.update(businessPartners)
+			.set({ ...data, updatedAt: now } as any)
+			.where(
+				and(
+					eq(businessPartners.id, id),
+					inArray(businessPartners.type, CUSTOMER_TYPES),
+					isNull(businessPartners.deletedAt)
+				)
+			);
+	}
+
 	async softDelete(id: string) {
 		const now = new Date().toISOString();
 		await this.db

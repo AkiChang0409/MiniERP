@@ -29,8 +29,22 @@ export {
 // Sales CRM customer tables and shared customer/supplier base table
 export {
 	businessPartners,
-	partnerCustomerProfiles
+	partnerCustomerProfiles,
+	partnerCustomerContacts,
+	partnerCustomerCommunications,
+	partnerCustomerAttachments,
+	customerPriceLists,
+	customerPriceListItems
 } from '$modules/sales-crm/repositories/customer.schema';
+
+// Sales CRM — quotations + sales orders + shipments
+export {
+	salesQuotations,
+	salesQuotationItems,
+	salesOrders,
+	salesOrderItems,
+	salesOrderShipments
+} from '$modules/sales-crm/repositories/sales-order.schema';
 
 // Procurement supplier tables
 export {

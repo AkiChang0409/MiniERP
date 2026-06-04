@@ -38,6 +38,7 @@ export function createInventoryApi(ctx: ModuleContext) {
 		getStockLevelByItem: whSvc.getStockLevelByItem.bind(whSvc),
 		listStockMovementsForItem: whSvc.listStockMovementsForItem.bind(whSvc),
 		adjustStock: whSvc.adjustStock.bind(whSvc),
+		reserveStock: whSvc.reserveStock.bind(whSvc),
 
 		// Transfers
 		listTransfers: whSvc.listTransfers.bind(whSvc),

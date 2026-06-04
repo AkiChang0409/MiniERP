@@ -50,7 +50,8 @@
       "Bash(mkdir -p \"src/routes/api/procurement/supplier-invoices/[id]/decision\" \"src/routes/api/procurement/supplier-invoices/[id]/rematch\" \"src/routes/\\(app\\)/procurement/supplier-invoices\")",
       "Bash(git check-ignore *)",
       "Bash(ls -la .dev.vars*)",
-      "Bash(ls -la .dev.vars .dev.vars.example)"
+      "Bash(ls -la .dev.vars .dev.vars.example)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }

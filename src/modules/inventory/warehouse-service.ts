@@ -546,6 +546,49 @@ export class WarehouseService {
 		return { movementId, quantityAfter: next, valueDelta, iaAlertCode };
 	}
 
+	/**
+	 * Adjust the reserved quantity on a single (item, warehouse, bin) cell without
+	 * moving physical stock. Used by sales orders to hold stock at confirm and
+	 * release it as it ships. ATP = quantityOnHand − quantityReserved.
+	 */
+	async reserveStock(input: {
+		itemId: string;
+		warehouseId: string;
+		binLocationId: string;
+		quantityDelta: number;
+	}) {
+		const delta = Number(input.quantityDelta);
+		if (!Number.isFinite(delta) || delta === 0) {
+			throw new ValidationError('quantityDelta must be a non-zero number');
+		}
+		const existing = await this.repo.findStockLevel(
+			input.itemId,
+			input.warehouseId,
+			input.binLocationId
+		);
+		if (!existing) {
+			throw new ValidationError('Cannot reserve stock at a bin with no stock level');
+		}
+		const nextReserved = Number(existing.quantityReserved) + delta;
+		if (nextReserved < 0) {
+			throw new ValidationError(
+				`Reservation release would drive reserved quantity negative (current ${existing.quantityReserved}, delta ${delta})`
+			);
+		}
+		const available = Number(existing.quantityOnHand) - Number(existing.quantityReserved);
+		if (delta > 0 && delta > available) {
+			throw new ValidationError(
+				`Insufficient available-to-promise: requested ${delta}, available ${available}`
+			);
+		}
+		await this.repo.updateStockLevelReserved(existing.id, nextReserved);
+		return {
+			stockLevelId: existing.id,
+			quantityReserved: nextReserved,
+			available: Number(existing.quantityOnHand) - nextReserved
+		};
+	}
+
 	private async computeRollingAverage(
 		item: { id: string; averageCost: number | null },
 		incomingQty: number,

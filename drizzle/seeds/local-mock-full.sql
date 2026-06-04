@@ -34,6 +34,13 @@ VALUES
 	('cust-demo-002', 'Lion City Imports', 'customer', '80 Robinson Road, Singapore', 'ops@lioncity-imports.sg', 'GST-REG-DEMO-002', '{"source":"mock-seed"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
 	('cust-demo-003', 'Harbourline Logistics', 'customer', '10 Anson Road, Singapore', 'accounts@harbourline.sg', 'GST-REG-DEMO-003', '{"source":"mock-seed"}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL);
 
+-- Customer profiles (credit limit / terms / GST status) — Sales & CRM Story 1
+INSERT INTO partner_customer_profiles (id, partner_id, customer_status, customer_tier, gst_registration_status, tax_code, billing_address, shipping_address, billing_terms, credit_terms, credit_limit, credit_hold_flag, credit_hold_reason, preferred_currency, created_at, updated_at, deleted_at)
+VALUES
+	('ccp-demo-001', 'cust-demo-001', 'active', 'gold', 'registered', 'SR', '1 Raffles Place, Singapore', '1 Raffles Place, Singapore', 'Net 30', 'Net 30', '100000', 0, NULL, 'SGD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+	('ccp-demo-002', 'cust-demo-002', 'active', 'silver', 'registered', 'SR', '80 Robinson Road, Singapore', '80 Robinson Road, Singapore', 'Net 14', 'Net 14', '20000', 0, NULL, 'SGD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+	('ccp-demo-003', 'cust-demo-003', 'on_hold', 'bronze', 'not_registered', NULL, '10 Anson Road, Singapore', '10 Anson Road, Singapore', 'Prepaid', 'Prepaid', '5000', 1, 'Overdue invoices beyond 60 days', 'SGD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL);
+
 -- Projects
 INSERT INTO projects (id, business_partner_id, name, status, start_date, end_date, description, created_at, updated_at, deleted_at)
 VALUES
