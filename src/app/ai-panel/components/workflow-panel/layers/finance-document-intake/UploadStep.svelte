@@ -31,11 +31,11 @@
 
 	let fileInput: HTMLInputElement | null = $state(null);
 	let dragOver = $state(false);
-	// Image OCR route picked before upload. Two vision variants (External API =
-	// OpenAI, Workers AI = Cloudflare) + OCR.space. Default keeps the existing
-	// external-API vision behaviour. Only affects image files — PDFs/Word/email
-	// always go through their own text path.
-	let ocrStrategy = $state<OcrStrategy>('vision_openai');
+	// Image OCR route picked before upload. OCR.space (free, default) +/ two
+	// vision variants (Workers AI = Cloudflare, External API = OpenAI/own token).
+	// Default to the free OCR route to minimise paid API usage. Only affects
+	// image files — PDFs/Word/email always go through their own text path.
+	let ocrStrategy = $state<OcrStrategy>('ocr_api');
 	let stage = $state<Stage>('idle');
 	let fileName = $state('');
 	let batchTotal = $state(0);
@@ -851,11 +851,11 @@
 				<button
 					type="button"
 					class="ocr-route-btn"
-					class:is-active={ocrStrategy === 'vision_openai'}
-					aria-pressed={ocrStrategy === 'vision_openai'}
-					onclick={() => (ocrStrategy = 'vision_openai')}
+					class:is-active={ocrStrategy === 'ocr_api'}
+					aria-pressed={ocrStrategy === 'ocr_api'}
+					onclick={() => (ocrStrategy = 'ocr_api')}
 				>
-					Vision · External API
+					OCR API
 				</button>
 				<button
 					type="button"
@@ -869,11 +869,11 @@
 				<button
 					type="button"
 					class="ocr-route-btn"
-					class:is-active={ocrStrategy === 'ocr_api'}
-					aria-pressed={ocrStrategy === 'ocr_api'}
-					onclick={() => (ocrStrategy = 'ocr_api')}
+					class:is-active={ocrStrategy === 'vision_openai'}
+					aria-pressed={ocrStrategy === 'vision_openai'}
+					onclick={() => (ocrStrategy = 'vision_openai')}
 				>
-					OCR API
+					Vision · External API
 				</button>
 			</div>
 			<span class="ocr-route-hint">

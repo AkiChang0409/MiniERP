@@ -194,6 +194,21 @@ export const suggestedFieldsResultSchema = z.object({
 	/** Verbatim text excerpts keyed by LLM camelCase field name. Used by the review UI
 	 *  to highlight the source sentence in the raw-text panel when the user focuses a field. */
 	sourceQuotes: z.record(z.string(), z.string()).optional(),
+	/** Ranked alternative guesses for an ambiguous mandatory identifier (keyed by LLM
+	 *  camelCase field name). Present only when the extractor had to lower its bar and
+	 *  guess; the review UI flags the field and lets the user pick. */
+	fieldCandidates: z
+		.record(
+			z.string(),
+			z.array(
+				z.object({
+					value: z.string(),
+					confidence: z.number().min(0).max(1).optional(),
+					reason: z.string().optional()
+				})
+			)
+		)
+		.optional(),
 	categoryId: z.string(),
 	extractedAt: z.string()
 });

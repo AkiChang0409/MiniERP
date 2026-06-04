@@ -275,6 +275,24 @@
 		return [...new Set([...category.llmFields, ...category.userFields])];
 	}
 
+	type FieldCandidate = { value: string; confidence?: number; reason?: string };
+	/** Ranked alternative guesses for an ambiguous identifier field (e.g. an
+	 *  invoice number with no clear label). Resolves via FIELD_META aliases, same
+	 *  as quotes. Empty array when the AI had a confident, labelled match. */
+	function getFieldCandidates(key: string): FieldCandidate[] {
+		const cands = (artifact.suggestedFields as Record<string, unknown> | null)?.fieldCandidates as
+			| Record<string, FieldCandidate[]>
+			| undefined;
+		if (!cands) return [];
+		const meta = FIELD_META[key];
+		const searchKeys = [key, ...(meta?.aliases ?? [])];
+		for (const alias of searchKeys) {
+			const list = cands[alias];
+			if (Array.isArray(list) && list.length > 0) return list;
+		}
+		return [];
+	}
+
 	/** Return the verbatim source quote for a given category field key, or null if unavailable.
 	 *  Resolves via FIELD_META aliases (e.g. supplier_name → supplierName / counterpartyName). */
 	function getFieldQuote(key: string): string | null {
@@ -755,11 +773,20 @@
 				<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 					{#each editableFieldKeys as key}
 						{@const meta = metaFor(key)}
+						{@const candidates = getFieldCandidates(key)}
 						<label class="block text-sm {meta.span === 'full' ? 'sm:col-span-2' : ''}">
 							<span class="font-medium text-slate-700">{meta.label}</span>
 							{#if confidenceBadge(key)}
 								<span class="ml-1 text-[10px] {confidenceBadge(key)?.tone}">
 									{confidenceBadge(key)?.label}
+								</span>
+							{/if}
+							{#if candidates.length > 0}
+								<span
+									class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+									title="No clearly-labelled value — please confirm the AI's best guess."
+								>
+									verify
 								</span>
 							{/if}
 
@@ -808,6 +835,25 @@
 									onblur={() => onFieldHighlight?.(null)}
 								/>
 							{/if}
+
+							{#if candidates.length > 0}
+								<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+									<span class="text-[10px] text-amber-700">AI guessed — confirm or pick:</span>
+									{#each candidates as cand (cand.value)}
+										<button
+											type="button"
+											class="rounded-full border px-2 py-0.5 text-[11px] {String(draft[key]) === cand.value
+												? 'border-amber-400 bg-amber-50 text-amber-800'
+												: 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}"
+											title={cand.reason ?? ''}
+											onclick={() => (draft[key] = cand.value)}
+											disabled={isConfirming || isAbandoning || isClosed}
+										>
+											{cand.value}{cand.confidence != null ? ` · ${Math.round(cand.confidence * 100)}%` : ''}
+										</button>
+									{/each}
+								</div>
+							{/if}
 						</label>
 					{/each}
 				</div>
@@ -853,13 +899,13 @@
 									<tbody>
 										{#each lineItems as item, i (i)}
 											<tr class="border-t border-slate-100">
-												<td class="py-1 pr-2"><input type="text" bind:value={item.description} class="w-full rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
-												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.qty} class="w-16 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
-												<td class="py-1 px-1"><input type="text" bind:value={item.unit} class="w-16 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
-												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.unitPrice} class="w-24 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
-												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.amount} class="w-24 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
-												<td class="py-1 px-1"><input type="text" bind:value={item.sku} class="w-24 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
-												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.taxRate} class="w-14 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 pr-2"><input type="text" bind:value={item.description} class="w-full rounded border border-slate-200 bg-white px-2 py-1 text-slate-900 placeholder:text-slate-400" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.qty} class="w-16 rounded border border-slate-200 bg-white px-2 py-1 text-slate-900 placeholder:text-slate-400" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" bind:value={item.unit} class="w-16 rounded border border-slate-200 bg-white px-2 py-1 text-slate-900 placeholder:text-slate-400" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.unitPrice} class="w-24 rounded border border-slate-200 bg-white px-2 py-1 text-slate-900 placeholder:text-slate-400" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.amount} class="w-24 rounded border border-slate-200 bg-white px-2 py-1 text-slate-900 placeholder:text-slate-400" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" bind:value={item.sku} class="w-24 rounded border border-slate-200 bg-white px-2 py-1 text-slate-900 placeholder:text-slate-400" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.taxRate} class="w-14 rounded border border-slate-200 bg-white px-2 py-1 text-slate-900 placeholder:text-slate-400" disabled={isConfirming || isAbandoning || isClosed} /></td>
 												<td class="py-1 pl-1 text-right">
 													<button
 														type="button"

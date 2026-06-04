@@ -39,6 +39,23 @@ export type LineItemV1 = z.infer<typeof lineItemSchemaV1>;
 const lineItemsField = z.array(lineItemSchemaV1).nullable().optional();
 
 /**
+ * Alternative candidate values for an ambiguous field. Populated by the LLM
+ * only when a MANDATORY identifier (e.g. an invoice's reference number) has no
+ * clearly-labelled match and it had to lower its bar and guess — the chosen
+ * value is the field itself (with low confidence), and every plausible
+ * alternative (most-likely first, incl. the chosen one) is listed here so the
+ * UI can flag the field and let the user pick the right one.
+ */
+export const fieldCandidateSchema = z.object({
+	value: z.string(),
+	confidence: z.number().min(0).max(1).optional(),
+	reason: z.string().optional()
+});
+export type FieldCandidate = z.infer<typeof fieldCandidateSchema>;
+/** `_candidates` map: LLM-field-name → ranked candidate list. */
+const candidatesField = z.record(z.string(), z.array(fieldCandidateSchema)).optional();
+
+/**
  * Per-document-type LLM output schemas (v1).
  *
  * Each schema corresponds to one of the `categoryDocType` values declared in
@@ -66,7 +83,8 @@ export const invoiceSchemaV1 = z.object({
 	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
-	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
+	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional(),
+	_candidates: candidatesField
 });
 export type InvoiceLlmV1 = z.infer<typeof invoiceSchemaV1>;
 
@@ -87,7 +105,8 @@ export const receiptSchemaV1 = z.object({
 	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
-	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
+	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional(),
+	_candidates: candidatesField
 });
 export type ReceiptLlmV1 = z.infer<typeof receiptSchemaV1>;
 
@@ -105,7 +124,8 @@ export const poSchemaV1 = z.object({
 	lineItems: z.array(lineItemSchemaV1).nullable().optional(),
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
-	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
+	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional(),
+	_candidates: candidatesField
 });
 export type PoLlmV1 = z.infer<typeof poSchemaV1>;
 
@@ -125,7 +145,8 @@ export const customerInvoiceSchemaV1 = z.object({
 	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
-	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
+	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional(),
+	_candidates: candidatesField
 });
 export type CustomerInvoiceLlmV1 = z.infer<typeof customerInvoiceSchemaV1>;
 
@@ -144,7 +165,8 @@ export const contractSchemaV1 = z.object({
 	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
-	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
+	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional(),
+	_candidates: candidatesField
 });
 export type ContractLlmV1 = z.infer<typeof contractSchemaV1>;
 
@@ -158,8 +180,9 @@ export const quotationSchemaV1 = z.object({
 	lineItems: z.array(lineItemSchemaV1).nullable(),
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
-	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
+	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional(),
+	_candidates: candidatesField
 });
 export type QuotationLlmV1 = z.infer<typeof quotationSchemaV1>;
 
-export const EXTRACT_DOCUMENT_FIELDS_SCHEMA_VERSION = 'v4';
+export const EXTRACT_DOCUMENT_FIELDS_SCHEMA_VERSION = 'v5';

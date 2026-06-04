@@ -34,6 +34,7 @@ import {
 	quotationSchemaV1,
 	receiptSchemaV1,
 	EXTRACT_DOCUMENT_FIELDS_SCHEMA_VERSION,
+	type FieldCandidate,
 	type ContractLlmV1,
 	type CustomerInvoiceLlmV1,
 	type InvoiceLlmV1,
@@ -101,6 +102,11 @@ export interface ExtractDocumentFieldsOutput {
 	 *  Used in the review UI to highlight the source sentence in the raw-text panel when the user
 	 *  focuses a field. Only present when the LLM path was taken; undefined for mock/fixture runs. */
 	sourceQuotes?: Record<string, string>;
+	/** Ranked alternative guesses for an ambiguous mandatory identifier (keyed by
+	 *  the LLM camelCase field name, e.g. invoiceNumber). Present only when the
+	 *  LLM had to lower its bar and guess; the UI flags the field and offers the
+	 *  candidates. */
+	fieldCandidates?: Record<string, FieldCandidate[]>;
 	provider: ExtractionProvider;
 }
 
@@ -422,6 +428,7 @@ interface LlmExtractionResult {
 	confidence: number;
 	provider: ExtractionProvider;
 	quotes: Record<string, string>;
+	candidates: Record<string, FieldCandidate[]>;
 }
 
 /** Mean of the per-field confidences for keys whose value is actually present (non-null /
@@ -499,12 +506,36 @@ async function tryLlmExtraction(
 		}
 	}
 
+	// Extract ambiguous-field candidates from the optional _candidates key.
+	const rawCandidates = (raw as Record<string, unknown>)._candidates;
+	const candidates: Record<string, FieldCandidate[]> = {};
+	if (rawCandidates && typeof rawCandidates === 'object' && !Array.isArray(rawCandidates)) {
+		for (const [field, list] of Object.entries(rawCandidates as Record<string, unknown>)) {
+			if (!Array.isArray(list)) continue;
+			const cleaned: FieldCandidate[] = [];
+			for (const entry of list) {
+				const o = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+				const value = typeof o.value === 'string' ? o.value.trim() : '';
+				if (!value) continue;
+				cleaned.push({
+					value,
+					confidence: typeof o.confidence === 'number' ? o.confidence : undefined,
+					reason: typeof o.reason === 'string' ? o.reason.trim() || undefined : undefined
+				});
+			}
+			const seen = new Set<string>();
+			const deduped = cleaned.filter((c) => (seen.has(c.value) ? false : (seen.add(c.value), true)));
+			if (deduped.length > 0) candidates[field] = deduped.slice(0, 6);
+		}
+	}
+
 	return {
 		fields: mapped.fields,
 		fieldConfidence: mapped.fieldConfidence,
 		confidence,
 		provider,
-		quotes
+		quotes,
+		candidates
 	};
 }
 
@@ -757,6 +788,7 @@ export const extractDocumentFieldsCapability: FinanceCapability<
 				fieldConfidence: projected.fieldConfidence,
 				evidence: buildEvidenceForFields(llm.provider, projected.fields),
 				sourceQuotes: Object.keys(llm.quotes).length > 0 ? llm.quotes : undefined,
+				fieldCandidates: Object.keys(llm.candidates).length > 0 ? llm.candidates : undefined,
 				provider: llm.provider
 			};
 		}

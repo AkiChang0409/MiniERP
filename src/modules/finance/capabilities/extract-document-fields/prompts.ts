@@ -8,7 +8,7 @@
  * corresponding schema in `schemas.ts` expects.
  */
 
-export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v7';
+export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v8';
 
 const SECURITY_FOOTER = `
 SECURITY:
@@ -31,6 +31,14 @@ PER-FIELD CONFIDENCE:
   - 0.40–0.59: weak / partially obscured / multiple plausible candidates.
   - Below 0.40: prefer null over guessing.
 - Do NOT report your overall document confidence here — that goes in the top-level confidence field.`;
+
+const AMBIGUOUS_REFERENCE_RULE = `
+AMBIGUOUS REFERENCE NUMBER (IMPORTANT — general rule for this document type):
+- A real document of this type ALWAYS carries a reference / identifier number that serves as its primary number field (the "*Number" field listed above — invoiceNumber / receiptNumber / poNumber / quotationNumber / contractNumber). It exists even when it is NOT printed next to an explicit label like "Invoice No". Do not assume it is missing just because there is no obvious label.
+- STEP 1 — labelled match: if a clearly-labelled value exists, return it normally (normal/high confidence) and emit NO candidates for it.
+- STEP 2 — no labelled match: do NOT return null. Lower your bar and scan the WHOLE document for any token that could plausibly act as this number — e.g. codes under headings like "MARKS & NUMBERS", "REF", "ORDER", "JOB", "NO.", or a standalone alphanumeric ID. Exclude tokens that are clearly something else: phone/fax, tax / GST / UEN registration numbers, postal codes, dates, quantities, unit prices, and HS / tariff codes (e.g. 2204.21.4000).
+- Then: put the SINGLE most-likely token in the number field, but set its _confidence LOW (0.30–0.55). List EVERY plausible alternative — most-likely first, INCLUDING the one you chose — in _candidates under that same field name, each as { value, confidence, reason } where reason is a short phrase explaining why it could be the number.
+- Emit _candidates ONLY for this mandatory reference number, and ONLY when you had to guess (Step 2). NEVER fabricate candidates or down-bar-guess for genuinely optional fields (gstAmount, dueDate, a poNumber not present on a supplier invoice, etc.) — those stay null with no candidates.`;
 
 const EXTRACTION_RULES = `
 EXTRACTION RULES:
@@ -109,6 +117,7 @@ Required keys:
 - confidence: number between 0 and 1, your overall confidence.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
+- _candidates: object mapping the reference-number field to a ranked list of alternative guesses ({ value, confidence, reason }); include ONLY when the number had no clear label and you had to guess (see rule below). Omit otherwise.
 
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
@@ -116,6 +125,7 @@ ${REFERENCE_RULES}
 ${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
+${AMBIGUOUS_REFERENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const RECEIPT_SYSTEM_PROMPT = `You extract structured fields from a payment receipt OCR transcription.
@@ -136,12 +146,14 @@ Required keys:
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
+- _candidates: object mapping the reference-number field to a ranked list of alternative guesses ({ value, confidence, reason }); include ONLY when the number had no clear label and you had to guess (see rule below). Omit otherwise.
 
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
 ${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
+${AMBIGUOUS_REFERENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 const PO_FIELD_HINTS = `
@@ -169,6 +181,7 @@ Required keys:
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
+- _candidates: object mapping the reference-number field to a ranked list of alternative guesses ({ value, confidence, reason }); include ONLY when the number had no clear label and you had to guess (see rule below). Omit otherwise.
 
 Use null for any field you cannot confidently extract.
 ${PO_FIELD_HINTS}
@@ -178,6 +191,7 @@ ${ARCHIVE_RULES}
 ${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
+${AMBIGUOUS_REFERENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const CUSTOMER_INVOICE_SYSTEM_PROMPT = `You extract structured fields from a customer-facing invoice (one we issued to a customer).
@@ -198,6 +212,7 @@ Required keys:
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
+- _candidates: object mapping the reference-number field to a ranked list of alternative guesses ({ value, confidence, reason }); include ONLY when the number had no clear label and you had to guess (see rule below). Omit otherwise.
 
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
@@ -205,6 +220,7 @@ ${REFERENCE_RULES}
 ${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
+${AMBIGUOUS_REFERENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const CONTRACT_SYSTEM_PROMPT = `You extract structured fields from a business contract OCR transcription.
@@ -224,12 +240,14 @@ Required keys:
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
+- _candidates: object mapping the reference-number field to a ranked list of alternative guesses ({ value, confidence, reason }); include ONLY when the number had no clear label and you had to guess (see rule below). Omit otherwise.
 
 Use null for any field you cannot confidently extract.
 ${ARCHIVE_RULES}
 ${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
+${AMBIGUOUS_REFERENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export const QUOTATION_SYSTEM_PROMPT = `You extract structured fields from a business quotation, quote, or proposal OCR transcription.
@@ -247,12 +265,14 @@ Required keys:
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
+- _candidates: object mapping the reference-number field to a ranked list of alternative guesses ({ value, confidence, reason }); include ONLY when the number had no clear label and you had to guess (see rule below). Omit otherwise.
 
 Use null for any field you cannot confidently extract.
 ${ARCHIVE_RULES}
 ${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
+${AMBIGUOUS_REFERENCE_RULE}
 ${SECURITY_FOOTER}`;
 
 export function buildDocumentUserPrompt(rawText: string): string {

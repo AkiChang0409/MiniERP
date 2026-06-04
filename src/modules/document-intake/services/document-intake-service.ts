@@ -146,6 +146,9 @@ export interface FieldExtractorResult {
 	/** Verbatim source quotes keyed by LLM camelCase field name. Passed through
 	 *  to suggestedFields so the review UI can highlight the source sentence. */
 	sourceQuotes?: Record<string, string>;
+	/** Ranked alternative guesses for an ambiguous identifier (keyed by LLM
+	 *  camelCase field name). Passed through to suggestedFields. */
+	fieldCandidates?: Record<string, Array<{ value: string; confidence?: number; reason?: string }>>;
 	categoryId: string;
 }
 
@@ -319,6 +322,7 @@ export interface DocumentIntakeService {
 		confidence?: Record<string, number>;
 		evidence?: unknown;
 		sourceQuotes?: Record<string, string>;
+		fieldCandidates?: Record<string, Array<{ value: string; confidence?: number; reason?: string }>>;
 		categoryId: string;
 	}): Promise<DocumentArtifact | null>;
 	listDocumentArtifacts(input: DocumentArtifactLibraryFilters): Promise<{
@@ -636,6 +640,7 @@ export function createDocumentIntakeService(
 							confidence: extracted.confidence,
 							evidence: extracted.evidence,
 							sourceQuotes: extracted.sourceQuotes,
+							fieldCandidates: extracted.fieldCandidates,
 							categoryId: extracted.categoryId,
 							extractedAt: new Date().toISOString()
 						};
@@ -790,6 +795,7 @@ export function createDocumentIntakeService(
 		confidence?: Record<string, number>;
 		evidence?: unknown;
 		sourceQuotes?: Record<string, string>;
+		fieldCandidates?: Record<string, Array<{ value: string; confidence?: number; reason?: string }>>;
 		categoryId: string;
 	}): Promise<DocumentArtifact | null> {
 		const tenantId = input.tenantId ?? 'default';
@@ -800,6 +806,7 @@ export function createDocumentIntakeService(
 			confidence: input.confidence,
 			evidence: input.evidence,
 			sourceQuotes: input.sourceQuotes,
+			fieldCandidates: input.fieldCandidates,
 			categoryId: input.categoryId,
 			extractedAt: new Date().toISOString()
 		};

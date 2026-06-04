@@ -88,6 +88,7 @@ export const POST: RequestHandler = async (event) => {
 		confidence: result.fieldConfidence,
 		evidence: result.evidence,
 		sourceQuotes: result.sourceQuotes,
+		fieldCandidates: result.fieldCandidates,
 		categoryId: body.categoryId
 	});
 	if (!updated) return fail('Reclassify failed', 500);

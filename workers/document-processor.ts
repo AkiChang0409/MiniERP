@@ -162,6 +162,7 @@ async function processOne(
 				confidence: result.fieldConfidence,
 				evidence: result.evidence,
 				sourceQuotes: result.sourceQuotes,
+				fieldCandidates: result.fieldCandidates,
 				categoryId
 			};
 		}

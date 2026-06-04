@@ -70,15 +70,16 @@ export const POST: RequestHandler = async (event) => {
 			? clientExtractionMethodRaw
 			: undefined;
 
-	// Image OCR route picked by the user before upload (default vision_openai).
-	// Legacy 'vision_ai' and any unknown value collapse to the default.
+	// Image OCR route picked by the user before upload. Default is the free
+	// OCR.space route (minimises paid API usage); explicit vision routes are
+	// honoured. Unknown / missing values collapse to the OCR default.
 	const ocrStrategyRaw = form.get('ocrStrategy');
 	const ocrStrategy: 'vision_openai' | 'vision_workers_ai' | 'ocr_api' =
-		ocrStrategyRaw === 'ocr_api'
-			? 'ocr_api'
-			: ocrStrategyRaw === 'vision_workers_ai'
-				? 'vision_workers_ai'
-				: 'vision_openai';
+		ocrStrategyRaw === 'vision_workers_ai'
+			? 'vision_workers_ai'
+			: ocrStrategyRaw === 'vision_openai'
+				? 'vision_openai'
+				: 'ocr_api';
 
 	// Optional client-preprocessed sibling (vision-enhanced image). When the
 	// browser de-warps / normalises a phone photo it uploads the enhanced JPEG
@@ -242,6 +243,7 @@ async function processInlineFallback(
 					confidence: result.fieldConfidence,
 					evidence: result.evidence,
 					sourceQuotes: result.sourceQuotes,
+					fieldCandidates: result.fieldCandidates,
 					categoryId
 				};
 			}

@@ -376,7 +376,7 @@ export function uploadDocument(
 	const form = new FormData();
 	form.append('file', file);
 	form.append('uploadedFrom', opts.uploadedFrom ?? 'ai_panel');
-	form.append('ocrStrategy', opts.ocrStrategy ?? 'vision_openai');
+	form.append('ocrStrategy', opts.ocrStrategy ?? 'ocr_api');
 	if (opts.clientExtractedText) {
 		form.append('clientExtractedText', opts.clientExtractedText);
 		form.append('clientExtractionMethod', opts.clientExtractionMethod ?? 'manual');
