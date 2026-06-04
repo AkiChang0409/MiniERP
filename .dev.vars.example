@@ -29,3 +29,11 @@ BETTER_AUTH_SECRET=
 # Run: python scripts/paddle_ocr_dev_server.py   (see script header for pip install)
 # PADDLE_OCR_URL=http://127.0.0.1:8765
 # OCR_PADDLE_ONLY=true   # do not fall back to Workers AI after Paddle fails
+
+# --- OCR.space "OCR API" route (ocrStrategy=ocr_api) ---
+# Used when the user picks "OCR API" instead of "Vision AI" in the upload step.
+# Get a free key at https://ocr.space/ocrapi (free tier: 1 MB / file).
+# OCR_SPACE_API_KEY=
+# OCR_SPACE_ENGINE=3                                   # 3 = auto-language LSTM (default)
+# OCR_SPACE_ENDPOINT=https://api.ocr.space/parse/image # override for PRO tier
+# OCR_SPACE_LANGUAGE=eng                               # only used by engine 1/2

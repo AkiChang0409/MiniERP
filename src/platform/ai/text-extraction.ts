@@ -10,6 +10,7 @@
  * document-intake artifacts. Callers persist this directly into the artifact.
  */
 import { runImageDocumentOcr } from './ocr/image-document-ocr';
+import { runOcrSpaceOcr } from './ocr/ocrspace-ocr';
 import type { FileServiceContract } from '../files/file.types';
 import { pickMockFixtureText } from './text-extraction-fixtures';
 import {
@@ -20,8 +21,16 @@ import {
 import { parseEmlStructured } from '../files/eml/parse-eml';
 import { composeEmlText } from '../files/eml/compose-eml-extraction';
 
+/**
+ * Image text-extraction route. `vision_ai` (default) uses the vision-LLM OCR
+ * (`runImageDocumentOcr`); `ocr_api` uses the external OCR.space API
+ * (`runOcrSpaceOcr`). The user picks this in the AI Panel upload step. Only
+ * affects images — PDF/DOCX/EML paths ignore it.
+ */
+export type OcrStrategy = 'vision_ai' | 'ocr_api';
+
 export interface PlatformTextExtractionResult {
-	method: 'pdf_text' | 'vision_model' | 'manual';
+	method: 'pdf_text' | 'vision_model' | 'ocr' | 'manual';
 	status: 'success' | 'partial' | 'failed';
 	text?: string;
 	confidence?: number;
@@ -48,6 +57,11 @@ export interface ExtractTextInput {
 	 * and for the scratch verification drivers.
 	 */
 	useMock?: boolean;
+	/**
+	 * Image OCR route. Defaults to `vision_ai`. When `ocr_api`, image files are
+	 * sent to OCR.space instead of the vision LLM. Ignored for non-image inputs.
+	 */
+	ocrStrategy?: OcrStrategy;
 }
 
 const PDF_BYTE_READ_LIMIT = 50_000;
@@ -139,7 +153,8 @@ export async function extractTextFromBytesRaw(
 	bytes: Uint8Array,
 	mimeType: string,
 	fileName: string | undefined,
-	env: Env
+	env: Env,
+	ocrStrategy: OcrStrategy = 'vision_ai'
 ): Promise<PlatformTextExtractionResult> {
 	if (isPdfMime(mimeType, fileName)) {
 		// DEPRECATED Ship 1: this byte-heuristic only "works" on PDFs whose text
@@ -183,6 +198,24 @@ export async function extractTextFromBytesRaw(
 	}
 
 	if (isImageMime(mimeType, fileName)) {
+		// OCR API route (OCR.space) — alternative to the vision LLM. Downstream
+		// classification + field extraction are identical; only the transcription
+		// engine differs.
+		if (ocrStrategy === 'ocr_api') {
+			const ocr = await runOcrSpaceOcr(env, { imageBytes: bytes, mimeType, fileName: fileName ?? '' });
+			if (!ocr.ok) {
+				return buildFailure('ocr_api_failed', ocr.error, 'ocr');
+			}
+			return {
+				method: 'ocr',
+				status: 'success',
+				text: ocr.text,
+				confidence: 0.85,
+				provider: 'ocr_space',
+				providerJobId: `ocrspace_engine_${ocr.engine}`
+			};
+		}
+
 		const result = await runImageDocumentOcr(env, { imageBytes: bytes, mimeType, fileName: fileName ?? '' });
 		if (!result.ok) {
 			return buildFailure('vision_failed', result.error, 'vision_model');
@@ -290,14 +323,22 @@ export async function extractTextFromBlob(
 		);
 	}
 
-	// Image path: fall back to mock when AI binding is absent (local dev).
-	if (isImageMime(fileRef.mimeType, fileRef.fileName) && !env.AI) {
-		return buildMockResult(input);
+	const ocrStrategy = input.ocrStrategy ?? 'vision_ai';
+
+	// Image path: fall back to mock when the chosen engine is unavailable in
+	// local dev — vision route needs the AI binding, OCR API route needs the
+	// OCR.space key. Avoids stranding image uploads when neither is configured.
+	if (isImageMime(fileRef.mimeType, fileRef.fileName)) {
+		const visionUnavailable = ocrStrategy === 'vision_ai' && !env.AI;
+		const ocrApiUnavailable = ocrStrategy === 'ocr_api' && !readEnv(env, 'OCR_SPACE_API_KEY');
+		if (visionUnavailable || ocrApiUnavailable) {
+			return buildMockResult(input);
+		}
 	}
 
 	const bytes = await fileService.getBytes(fileRef.key);
 	if (!bytes) return buildFailure('blob_not_found', `No object at ${fileRef.key}`, 'pdf_text');
 
-	return extractTextFromBytesRaw(bytes, fileRef.mimeType, fileRef.fileName, env);
+	return extractTextFromBytesRaw(bytes, fileRef.mimeType, fileRef.fileName, env, ocrStrategy);
 }
 

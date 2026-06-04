@@ -32,4 +32,11 @@ export interface DocumentProcessorMessage {
 	 */
 	clientExtractedText?: string;
 	clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
+
+	/**
+	 * Image OCR route chosen by the user before upload. `vision_ai` (default)
+	 * uses the vision LLM; `ocr_api` uses OCR.space. Only affects images; the
+	 * downstream classification + field extraction are identical for both.
+	 */
+	ocrStrategy?: 'vision_ai' | 'ocr_api';
 }

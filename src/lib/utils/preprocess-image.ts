@@ -238,6 +238,149 @@ export async function buildFinancialVersions(
 	return { original, visionEnhanced, metrics };
 }
 
+// ===========================================================================
+// OCR API ("OCR.space") pipeline.
+//
+// The alternative to the vision-LLM route. OCR.space's free tier rejects any
+// single file > 1 MB, so the job here is to emit a JPEG that:
+//   - keeps the long edge in the 2200–2800px band (OCR engines want DPI, but
+//     more pixels just inflate bytes past the cap),
+//   - re-encodes at quality stepped 0.88 → 0.82 until it lands under the
+//     target (~900 KB, comfortably below the 1 MB hard cap),
+//   - converts unsupported rasters (TIFF/BMP) to JPEG so OCR.space accepts them.
+//
+// Deliberately lighter than the vision pipeline: OCR.space does its own
+// `scale` + `detectOrientation`, so we skip de-warp/deskew and only nudge
+// contrast + sharpness when the source is flat. Best-effort throughout.
+// ===========================================================================
+
+/** OCR.space free-tier hard cap is 1 MB; aim well under it to leave headroom. */
+const OCR_API_TARGET_BYTES = 900 * 1024;
+const OCR_API_LONG_SIDE_PRIMARY = 2600;
+const OCR_API_LONG_SIDE_FALLBACK = 2200;
+const OCR_API_QUALITIES = [0.88, 0.85, 0.82];
+
+export interface OcrApiPreprocessMetrics {
+	route: 'ocr_api';
+	processed: boolean;
+	contrastApplied: boolean;
+	sharpened: boolean;
+	quality: number;
+	outputWidth: number;
+	outputHeight: number;
+	sizeBytes: number;
+	/** True when even the smallest setting could not get under the 1 MB cap. */
+	overSizeLimit: boolean;
+}
+
+export interface OcrApiVersion {
+	original: File;
+	ocrOptimized: File;
+	metrics: OcrApiPreprocessMetrics;
+}
+
+/**
+ * Build the original + OCR-optimized versions of a financial image for the
+ * OCR.space route. The caller uploads the optimized one as the `ocr_optimized`
+ * derived ref; the server forwards it to OCR.space.
+ */
+export async function buildOcrApiVersion(
+	input: Blob,
+	fileName?: string
+): Promise<OcrApiVersion> {
+	const sourceName = fileName ?? (input instanceof File ? input.name : 'image.jpg');
+	const original =
+		input instanceof File
+			? input
+			: new File([input], sourceName, { type: input.type || 'image/jpeg' });
+
+	const idle: OcrApiPreprocessMetrics = {
+		route: 'ocr_api',
+		processed: false,
+		contrastApplied: false,
+		sharpened: false,
+		quality: 0,
+		outputWidth: 0,
+		outputHeight: 0,
+		sizeBytes: 0,
+		overSizeLimit: false
+	};
+
+	const mime = (input.type || '').toLowerCase();
+	const looksTiff = isTiff(mime, sourceName);
+	if (mime === 'image/svg+xml') return { original, ocrOptimized: original, metrics: idle };
+	if (!mime.startsWith('image/') && !looksTiff) {
+		return { original, ocrOptimized: original, metrics: idle };
+	}
+
+	const outName = `${sourceName.replace(/\.[^.]+$/, '') || 'document'}_ocr.jpg`;
+
+	// Try the primary long side first; fall back to a smaller one only if we
+	// can't fit the byte budget. Each pass decodes fresh so enhancement isn't
+	// applied twice.
+	for (const longSide of [OCR_API_LONG_SIDE_PRIMARY, OCR_API_LONG_SIDE_FALLBACK]) {
+		const canvas = await decodeToCanvas(input, looksTiff, longSide).catch(() => null);
+		if (!canvas) break;
+
+		const metrics: OcrApiPreprocessMetrics = {
+			route: 'ocr_api',
+			processed: true,
+			contrastApplied: false,
+			sharpened: false,
+			quality: 0,
+			outputWidth: canvas.width,
+			outputHeight: canvas.height,
+			sizeBytes: 0,
+			overSizeLimit: false
+		};
+
+		const stats = measureImageStats(canvas);
+		if (stats.stddev < HIGH_CONTRAST_STDDEV) {
+			await yieldToMain();
+			try {
+				applyContrastStretch(canvas);
+				metrics.contrastApplied = true;
+			} catch {
+				/* skip */
+			}
+		}
+		await yieldToMain();
+		try {
+			const ctx = canvas.getContext('2d');
+			if (ctx) {
+				applyUnsharpMask(ctx, FINANCIAL_SHARPEN_AMOUNT, FINANCIAL_SHARPEN_RADIUS);
+				metrics.sharpened = true;
+			}
+		} catch {
+			/* skip */
+		}
+
+		let best: { blob: Blob; quality: number } | null = null;
+		for (const quality of OCR_API_QUALITIES) {
+			const blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+			if (!blob) continue;
+			best = { blob, quality };
+			if (blob.size <= OCR_API_TARGET_BYTES) break;
+		}
+		if (!best) continue;
+
+		// Accept this long side if we're under target, or if it's the last
+		// resort (fallback long side). Otherwise loop to the smaller long side.
+		const underTarget = best.blob.size <= OCR_API_TARGET_BYTES;
+		const isLastResort = longSide === OCR_API_LONG_SIDE_FALLBACK;
+		if (underTarget || isLastResort) {
+			metrics.quality = best.quality;
+			metrics.sizeBytes = best.blob.size;
+			metrics.overSizeLimit = best.blob.size > 1024 * 1024;
+			const ocrOptimized = new File([best.blob], outName, { type: 'image/jpeg' });
+			return { original, ocrOptimized, metrics };
+		}
+	}
+
+	// Decoding failed entirely — fall back to uploading the original alone.
+	return { original, ocrOptimized: original, metrics: idle };
+}
+
 async function enhanceForVision(
 	input: HTMLCanvasElement,
 	dewarp: boolean

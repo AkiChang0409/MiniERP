@@ -107,6 +107,8 @@ async function processOne(
 		documentId: payload.documentId,
 		clientExtractedText: payload.clientExtractedText,
 		clientExtractionMethod: payload.clientExtractionMethod,
+		// Image OCR route the user chose at upload (vision LLM vs OCR.space).
+		ocrStrategy: payload.ocrStrategy,
 		// Category-first classification: classify straight into a finance
 		// category (source of truth), instead of documentType → lossy map.
 		categoryClassifier: async ({ tenantId, documentId, fileName, text }) => {

@@ -55,8 +55,11 @@
     "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
     "OCR_IMAGE_PROVIDER": "openai",
     "OCR_PROMPT_VERSION": "v1",
-    "OPENAI_VISION_MODEL": "gpt-4o"
+    "OPENAI_VISION_MODEL": "gpt-4o",
+    // OCR.space "OCR API" route (ocrStrategy=ocr_api). Engine 3 = auto-language LSTM.
+    "OCR_SPACE_ENGINE": "3"
     // OPENAI_API_KEY: set via wrangler secret / .dev.vars — do not commit here
+    // OCR_SPACE_API_KEY: set via wrangler secret / .dev.vars — do not commit here
   },
 
   "assets": {
@@ -122,7 +125,9 @@
         "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
         "OCR_IMAGE_PROVIDER": "openai",
         "OCR_PROMPT_VERSION": "v1",
-        "OPENAI_VISION_MODEL": "gpt-4o-mini"
+        "OPENAI_VISION_MODEL": "gpt-4o-mini",
+        // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
+        "OCR_SPACE_ENGINE": "3"
       },
 
       "assets": {
@@ -190,6 +195,8 @@
         "OCR_IMAGE_PROVIDER": "openai",
         "OCR_PROMPT_VERSION": "v1",
         "OPENAI_VISION_MODEL": "gpt-4o-mini",
+        // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
+        "OCR_SPACE_ENGINE": "3",
 
         // 生产环境建议强制走异步队列
         "DOCUMENT_QUEUE_FORCE_ASYNC": "true"

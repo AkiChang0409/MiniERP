@@ -6,11 +6,13 @@
 	import {
 		uploadDocument,
 		type DocumentArtifactPostResponse,
-		type DocumentProcessingStatus
+		type DocumentProcessingStatus,
+		type OcrStrategy
 	} from '$app-layer/ai-panel/workflow/finance-workflow-api';
 	import { extractEmlClientText } from '$app-layer/ai-panel/workflow/extract-eml-client';
 	import {
 		buildFinancialVersions,
+		buildOcrApiVersion,
 		cropImageToFractions,
 		toDisplayImage
 	} from '$lib/utils/preprocess-image';
@@ -29,6 +31,10 @@
 
 	let fileInput: HTMLInputElement | null = $state(null);
 	let dragOver = $state(false);
+	// Image OCR route picked before upload. Default keeps the existing vision-LLM
+	// behaviour; `ocr_api` sends images to OCR.space instead. Only affects image
+	// files — PDFs/Word/email always go through their own text path.
+	let ocrStrategy = $state<OcrStrategy>('vision_ai');
 	let stage = $state<Stage>('idle');
 	let fileName = $state('');
 	let batchTotal = $state(0);
@@ -135,8 +141,13 @@
 		method: 'pdfjs' | 'vision_first_page' | 'manual';
 		uploadFile: File;
 		/** Client-preprocessed sibling. `uploadFile` stays the untouched original;
-		 *  the vision-enhanced image (if any) is uploaded as the derived ref. */
-		derived?: { file: File; preprocessing?: Record<string, unknown> };
+		 *  the enhanced/optimized image (if any) is uploaded as the derived ref.
+		 *  `kind` tells the server which OCR route it was tuned for. */
+		derived?: {
+			file: File;
+			kind: 'vision_enhanced' | 'ocr_optimized';
+			preprocessing?: Record<string, unknown>;
+		};
 	};
 
 	function isZipFile(file: File): boolean {
@@ -267,12 +278,35 @@
 
 		if (isImage) {
 			// Financial photo: build TWO versions. `original` is uploaded as the
-			// artifact's untouched primary (audit / human review / vision
-			// fallback); `visionEnhanced` is illumination-normalised, contrast-
-			// stretched and gently sharpened (pure Canvas2D, fast — no OpenCV
-			// unless `dewarp` is requested), and is uploaded as the derived ref
-			// that server-side OCR/vision reads. Best-effort — any failure falls
-			// back to uploading the original alone.
+			// artifact's untouched primary (audit / human review / fallback); the
+			// derived sibling is uploaded as the ref that server-side text
+			// extraction reads. Which derived version we build depends on the
+			// user's chosen OCR route:
+			//   - vision_ai → vision-enhanced (illumination-normalised, contrast-
+			//     stretched, gently sharpened, long edge 2048).
+			//   - ocr_api → OCR-optimized JPEG sized under OCR.space's 1 MB cap.
+			// Best-effort — any failure falls back to uploading the original alone.
+			if (ocrStrategy === 'ocr_api') {
+				try {
+					const { original, ocrOptimized, metrics } = await buildOcrApiVersion(file);
+					if (ocrOptimized !== original) {
+						return {
+							text: '',
+							method: 'manual',
+							uploadFile: original,
+							derived: {
+								file: ocrOptimized,
+								kind: 'ocr_optimized',
+								preprocessing: metrics as unknown as Record<string, unknown>
+							}
+						};
+					}
+					return { text: '', method: 'manual', uploadFile: original };
+				} catch {
+					return { text: '', method: 'manual', uploadFile: file };
+				}
+			}
+
 			try {
 				const { original, visionEnhanced, metrics } = await buildFinancialVersions(
 					file,
@@ -284,7 +318,11 @@
 						text: '',
 						method: 'manual',
 						uploadFile: original,
-						derived: { file: visionEnhanced, preprocessing: metrics as unknown as Record<string, unknown> }
+						derived: {
+							file: visionEnhanced,
+							kind: 'vision_enhanced',
+							preprocessing: metrics as unknown as Record<string, unknown>
+						}
 					};
 				}
 				return { text: '', method: 'manual', uploadFile: original };
@@ -355,12 +393,13 @@
 		stage = 'storing';
 		return await uploadDocument(extraction.uploadFile, {
 			uploadedFrom: 'ai_panel',
+			ocrStrategy,
 			clientExtractedText: extraction.text || undefined,
 			clientExtractionMethod: extraction.method,
 			derived: extraction.derived
 				? {
 						file: extraction.derived.file,
-						kind: 'vision_enhanced',
+						kind: extraction.derived.kind,
 						preprocessing: extraction.derived.preprocessing
 					}
 				: undefined
@@ -661,6 +700,22 @@
 		const fmtBool = (v: unknown) => (v ? 'yes' : 'no');
 		const num = (v: unknown) => (typeof v === 'number' ? v : undefined);
 		const rows: { label: string; value: string }[] = [];
+
+		// OCR API route metrics (different shape from the vision pipeline).
+		if (m.route === 'ocr_api') {
+			const size = num(m.sizeBytes);
+			if (size !== undefined) rows.push({ label: 'File size', value: `${Math.round(size / 1024)} KB` });
+			const q = num(m.quality);
+			if (q) rows.push({ label: 'JPEG quality', value: q.toFixed(2) });
+			rows.push({ label: 'Contrast stretch', value: fmtBool(m.contrastApplied) });
+			rows.push({ label: 'Sharpen', value: fmtBool(m.sharpened) });
+			const w = num(m.outputWidth);
+			const h = num(m.outputHeight);
+			if (w && h) rows.push({ label: 'Output size', value: `${w}×${h}px` });
+			if (m.overSizeLimit) rows.push({ label: 'Warning', value: 'over 1 MB cap' });
+			return rows;
+		}
+
 		const brightness = num(m.brightness);
 		if (brightness !== undefined) rows.push({ label: 'Brightness', value: `${Math.round(brightness)}` });
 		const contrast = num(m.contrast);
@@ -727,9 +782,9 @@
 					{/if}
 				</figure>
 				<figure class="preview-cell">
-					<figcaption>Vision-enhanced {previewEnhancedUrl ? '' : '(none — passed through)'}</figcaption>
+					<figcaption>{ocrStrategy === 'ocr_api' ? 'OCR-optimized' : 'Vision-enhanced'} {previewEnhancedUrl ? '' : '(none — passed through)'}</figcaption>
 					{#if previewEnhancedUrl}
-						<img src={previewEnhancedUrl} alt="Vision-enhanced result" />
+						<img src={previewEnhancedUrl} alt="Preprocessed result" />
 					{:else if previewOriginalUrl}
 						<img src={previewOriginalUrl} alt="No enhancement; original used" />
 					{/if}
@@ -755,15 +810,19 @@
 					{/each}
 				</dl>
 			{/if}
-			<label class="preview-toggle">
-				<input
-					type="checkbox"
-					checked={previewDewarp}
-					disabled={previewBusy}
-					onchange={togglePreviewDewarp}
-				/>
-				<span>Perspective de-warp {previewBusy ? '(processing…)' : '(slower, loads OpenCV)'}</span>
-			</label>
+			{#if ocrStrategy === 'ocr_api'}
+				<span class="drop-sub">OCR API route · image optimized for OCR.space (≤ 1 MB), then sent for text extraction.</span>
+			{:else}
+				<label class="preview-toggle">
+					<input
+						type="checkbox"
+						checked={previewDewarp}
+						disabled={previewBusy}
+						onchange={togglePreviewDewarp}
+					/>
+					<span>Perspective de-warp {previewBusy ? '(processing…)' : '(slower, loads OpenCV)'}</span>
+				</label>
+			{/if}
 			<div class="quality-actions">
 				<button
 					type="button"
@@ -780,6 +839,36 @@
 			{/if}
 		</div>
 	{:else}
+	{#if stage === 'idle' || stage === 'error'}
+		<div class="ocr-route" role="group" aria-label="Image text-extraction method">
+			<span class="ocr-route-label">Image text extraction</span>
+			<div class="ocr-route-options">
+				<button
+					type="button"
+					class="ocr-route-btn"
+					class:is-active={ocrStrategy === 'vision_ai'}
+					aria-pressed={ocrStrategy === 'vision_ai'}
+					onclick={() => (ocrStrategy = 'vision_ai')}
+				>
+					Vision AI
+				</button>
+				<button
+					type="button"
+					class="ocr-route-btn"
+					class:is-active={ocrStrategy === 'ocr_api'}
+					aria-pressed={ocrStrategy === 'ocr_api'}
+					onclick={() => (ocrStrategy = 'ocr_api')}
+				>
+					OCR API
+				</button>
+			</div>
+			<span class="ocr-route-hint">
+				{ocrStrategy === 'ocr_api'
+					? 'OCR.space transcribes images; AI still extracts the fields.'
+					: 'Vision model reads images directly (default). Applies to images only.'}
+			</span>
+		</div>
+	{/if}
 	<button
 		type="button"
 		class="drop-area"
@@ -1023,6 +1112,54 @@
 	.preview-toggle input {
 		accent-color: var(--panel-gold);
 		cursor: pointer;
+	}
+
+	.ocr-route {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		text-align: center;
+	}
+	.ocr-route-label {
+		font-size: 11px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--panel-fg-faint);
+	}
+	.ocr-route-options {
+		display: inline-flex;
+		padding: 3px;
+		gap: 3px;
+		border-radius: 12px;
+		background: var(--panel-surface);
+		border: 1px solid rgba(234, 188, 60, 0.24);
+	}
+	.ocr-route-btn {
+		padding: 7px 18px;
+		border-radius: 9px;
+		font-family: inherit;
+		font-size: 13px;
+		cursor: pointer;
+		background: transparent;
+		border: none;
+		color: var(--panel-fg-muted);
+		transition:
+			background var(--panel-dur-fast) var(--panel-ease),
+			color var(--panel-dur-fast) var(--panel-ease);
+	}
+	.ocr-route-btn:hover {
+		color: var(--panel-fg);
+	}
+	.ocr-route-btn.is-active {
+		background: rgba(234, 188, 60, 0.14);
+		color: var(--panel-gold-bright);
+	}
+	.ocr-route-hint {
+		font-size: 12px;
+		line-height: 1.5;
+		color: var(--panel-fg-muted);
+		max-width: 44ch;
 	}
 
 	.drop-area {

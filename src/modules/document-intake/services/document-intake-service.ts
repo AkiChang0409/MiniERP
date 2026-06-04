@@ -78,7 +78,7 @@ export interface CreateDocumentFromUploadInput {
 	 * fallback.
 	 */
 	derived?: {
-		kind: 'vision_enhanced';
+		kind: 'vision_enhanced' | 'ocr_optimized';
 		body: ArrayBuffer | Uint8Array;
 		mimeType: string;
 		fileName: string;
@@ -168,6 +168,12 @@ export interface ProcessDocumentInput {
 	clientExtractedText?: string;
 	/** How the client extracted the text. Used in audit metadata for evaluation. */
 	clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
+	/**
+	 * Image OCR route. `vision_ai` (default) sends images to the vision LLM;
+	 * `ocr_api` sends them to OCR.space. Forwarded to `extractTextFromBlob`;
+	 * ignored when `clientExtractedText` short-circuits extraction (PDF/DOCX).
+	 */
+	ocrStrategy?: 'vision_ai' | 'ocr_api';
 	/**
 	 * Optional finance-side field extraction step. When present and the
 	 * artifact reaches the `classified` state, the service invokes this to
@@ -501,14 +507,16 @@ export function createDocumentIntakeService(
 					provider: `client_${input.clientExtractionMethod ?? 'manual'}`
 				};
 			} else {
-				// Prefer the client-preprocessed sibling (vision-enhanced image) for
-				// OCR / vision when present; fall back to the untouched original.
+				// Prefer the client-preprocessed sibling (vision-enhanced or
+				// ocr-optimized image) for OCR / vision when present; fall back to
+				// the untouched original.
 				const ocrRef = resolveProcessingFileRef(artifact.originalFile);
 				extraction = await extractTextFromBlob({
 					fileRef: ocrRef,
 					fileService,
 					env: ctx.env,
-					useMock
+					useMock,
+					ocrStrategy: input.ocrStrategy ?? 'vision_ai'
 				});
 			}
 			await repo.setTextExtraction(artifact.id, extraction);

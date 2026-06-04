@@ -354,17 +354,21 @@ export interface DocumentStatusResponse {
 	updatedAt: string;
 }
 
+export type OcrStrategy = 'vision_ai' | 'ocr_api';
+
 export function uploadDocument(
 	file: File,
 	opts: {
 		uploadedFrom?: 'ai_panel' | 'finance_workspace' | 'task_mode';
 		clientExtractedText?: string;
 		clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
+		/** Image OCR route chosen by the user before upload (default vision_ai). */
+		ocrStrategy?: OcrStrategy;
 		/** Client-preprocessed sibling. `file` stays the untouched original;
 		 *  this enhanced image is what OCR/vision reads server-side. */
 		derived?: {
 			file: File;
-			kind?: 'vision_enhanced';
+			kind?: 'vision_enhanced' | 'ocr_optimized';
 			preprocessing?: Record<string, unknown>;
 		};
 	} = {}
@@ -372,6 +376,7 @@ export function uploadDocument(
 	const form = new FormData();
 	form.append('file', file);
 	form.append('uploadedFrom', opts.uploadedFrom ?? 'ai_panel');
+	form.append('ocrStrategy', opts.ocrStrategy ?? 'vision_ai');
 	if (opts.clientExtractedText) {
 		form.append('clientExtractedText', opts.clientExtractedText);
 		form.append('clientExtractionMethod', opts.clientExtractionMethod ?? 'manual');

@@ -70,14 +70,20 @@ export const POST: RequestHandler = async (event) => {
 			? clientExtractionMethodRaw
 			: undefined;
 
+	// Image OCR route picked by the user before upload (default vision_ai).
+	const ocrStrategyRaw = form.get('ocrStrategy');
+	const ocrStrategy: 'vision_ai' | 'ocr_api' =
+		ocrStrategyRaw === 'ocr_api' ? 'ocr_api' : 'vision_ai';
+
 	// Optional client-preprocessed sibling (vision-enhanced image). When the
 	// browser de-warps / normalises a phone photo it uploads the enhanced JPEG
 	// here while `file` stays the untouched original. Stored alongside; OCR
 	// reads the derived ref. Best-effort — a malformed field is just ignored.
 	const derivedFileRaw = form.get('derivedFile');
+	const derivedKindRaw = form.get('derivedKind');
 	const preprocessingRaw = form.get('preprocessing');
 	let derived:
-		| { kind: 'vision_enhanced'; body: Uint8Array; mimeType: string; fileName: string; preprocessing?: Record<string, unknown> }
+		| { kind: 'vision_enhanced' | 'ocr_optimized'; body: Uint8Array; mimeType: string; fileName: string; preprocessing?: Record<string, unknown> }
 		| undefined;
 	if (derivedFileRaw instanceof File && derivedFileRaw.size > 0) {
 		let preprocessing: Record<string, unknown> | undefined;
@@ -89,11 +95,12 @@ export const POST: RequestHandler = async (event) => {
 				/* ignore malformed metrics */
 			}
 		}
+		const derivedKind = derivedKindRaw === 'ocr_optimized' ? 'ocr_optimized' : 'vision_enhanced';
 		derived = {
-			kind: 'vision_enhanced',
+			kind: derivedKind,
 			body: new Uint8Array(await derivedFileRaw.arrayBuffer()),
 			mimeType: derivedFileRaw.type || 'image/jpeg',
-			fileName: derivedFileRaw.name || 'document_vision.jpg',
+			fileName: derivedFileRaw.name || (derivedKind === 'ocr_optimized' ? 'document_ocr.jpg' : 'document_vision.jpg'),
 			preprocessing
 		};
 	}
@@ -131,7 +138,8 @@ export const POST: RequestHandler = async (event) => {
 		userId: user.id,
 		userEmail: user.email,
 		clientExtractedText,
-		clientExtractionMethod
+		clientExtractionMethod,
+		ocrStrategy
 	};
 
 	if (shouldProcessInlineForDev(event)) {
@@ -192,6 +200,7 @@ async function processInlineFallback(
 			documentId: message.documentId,
 			clientExtractedText: message.clientExtractedText,
 			clientExtractionMethod: message.clientExtractionMethod,
+			ocrStrategy: message.ocrStrategy,
 			categoryClassifier: async ({ tenantId, documentId, fileName, text }) => {
 				const r = await classifyDocumentCategoryCapability.execute(
 					{ documentId, fileName, text },

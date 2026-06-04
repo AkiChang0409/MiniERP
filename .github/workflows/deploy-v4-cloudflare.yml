@@ -84,6 +84,14 @@ jobs:
           if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
             printf '%s' "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY
           fi
+
+          # OCR.space "OCR API" route (optional). The async pipeline runs text
+          # extraction in the document-processor worker, so the key must be set
+          # on BOTH workers. Skipped silently when the secret is not configured.
+          if [ -n "${OCR_SPACE_API_KEY:-}" ]; then
+            printf '%s' "$OCR_SPACE_API_KEY" | npx wrangler secret put OCR_SPACE_API_KEY
+            printf '%s' "$OCR_SPACE_API_KEY" | npx wrangler secret put OCR_SPACE_API_KEY --config workers/wrangler.document-processor.jsonc
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -91,6 +99,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OCR_SPACE_API_KEY: ${{ secrets.OCR_SPACE_API_KEY }}
 
       # ── 7. D1 Migrations ──────────────────────────────────────────────────
       - name: Run personal v4 migrations

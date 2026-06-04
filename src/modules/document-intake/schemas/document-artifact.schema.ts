@@ -66,14 +66,19 @@ export type DocumentSecurityFlag = z.infer<typeof documentSecurityFlagSchema>;
 
 /**
  * A processed sibling of the original upload. For phone-captured financial
- * images the client produces a `vision_enhanced` version (document-cropped,
- * deskewed, illumination-normalised, gently sharpened) and uploads it
- * alongside the untouched original. Text extraction / vision OCR reads this
- * derived ref when present; the original is kept for audit, human review and
- * vision fallback. Stored inside `originalFile` JSON — no column migration.
+ * images the client produces a derived version and uploads it alongside the
+ * untouched original. Two kinds, one per image OCR route:
+ *   - `vision_enhanced`: illumination-normalised, gently sharpened, colour
+ *     preserved, long edge 2048 — tuned for the vision-LLM route.
+ *   - `ocr_optimized`: re-encoded JPEG sized to fit the OCR.space free-tier
+ *     1 MB cap (long edge ~2200–2800, quality stepped down) — tuned for the
+ *     OCR API route.
+ * Text extraction reads this derived ref when present; the original is kept
+ * for audit, human review and fallback. Stored inside `originalFile` JSON —
+ * no column migration.
  */
 export const derivedFileSchema = z.object({
-	kind: z.enum(['vision_enhanced']),
+	kind: z.enum(['vision_enhanced', 'ocr_optimized']),
 	mimeType: z.string(),
 	sizeBytes: z.number().int().nonnegative(),
 	storageRef: z.string(),

@@ -27,6 +27,14 @@ declare global {
 		OPENAI_API_KEY?: string;
 		/** OpenAI vision model for image OCR (default gpt-4o-mini). */
 		OPENAI_VISION_MODEL?: string;
+		/** OCR.space API key — required for the `ocr_api` image text-extraction route. */
+		OCR_SPACE_API_KEY?: string;
+		/** OCR.space endpoint override. Default https://api.ocr.space/parse/image (free tier, 1 MB cap). */
+		OCR_SPACE_ENDPOINT?: string;
+		/** OCR.space engine (default 3 = auto-language LSTM). */
+		OCR_SPACE_ENGINE?: string;
+		/** OCR.space language code for engines 1/2 (ignored on engine 3). Default eng. */
+		OCR_SPACE_LANGUAGE?: string;
 		/** Local PaddleOCR HTTP service base or full `/ocr` URL (e.g. http://127.0.0.1:8765). When set, tried before Workers AI. */
 		PADDLE_OCR_URL?: string;
 		/** If `true`, only use Paddle (`PADDLE_OCR_URL`); no Workers AI fallback. */
