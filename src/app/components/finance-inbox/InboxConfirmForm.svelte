@@ -118,8 +118,80 @@
 		notes: { label: 'Notes', kind: 'textarea', span: 'full' }
 	};
 
+	// --- Line items -------------------------------------------------------
+	// Any docType can carry an itemised table (see categories.ts). The values
+	// come in as an array of objects in suggestedFields.fields.line_items; we
+	// edit them in a structured table (not a textarea) and submit them back as
+	// an array on confirm. Stored as JSON in expenses/revenue metadata (or the
+	// archive `extracted` blob) — no dedicated columns.
+	const LINE_ITEM_KEY = 'line_items';
+	type LineItemRow = {
+		description: string;
+		qty: string;
+		unit: string;
+		unitPrice: string;
+		amount: string;
+		sku: string;
+		taxRate: string;
+	};
+	const emptyLineItem = (): LineItemRow => ({
+		description: '',
+		qty: '',
+		unit: '',
+		unitPrice: '',
+		amount: '',
+		sku: '',
+		taxRate: ''
+	});
+	const lineStr = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+	function toLineItemRow(raw: unknown): LineItemRow {
+		const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+		return {
+			description: lineStr(o.description ?? o.desc ?? o.name ?? o.item),
+			qty: lineStr(o.qty ?? o.quantity),
+			unit: lineStr(o.unit ?? o.uom),
+			unitPrice: lineStr(o.unitPrice ?? o.unit_price ?? o.price),
+			amount: lineStr(o.amount ?? o.total ?? o.lineTotal),
+			sku: lineStr(o.sku ?? o.code ?? o.productCode),
+			taxRate: lineStr(o.taxRate ?? o.tax_rate ?? o.tax)
+		};
+	}
+	function initialLineItemsFor(a: DocumentArtifactView): LineItemRow[] {
+		const fields = (a.suggestedFields?.fields ?? {}) as Record<string, unknown>;
+		const raw = fields.line_items ?? fields.lineItems ?? fields.invoiceLineItems;
+		return Array.isArray(raw) ? raw.map(toLineItemRow) : [];
+	}
+	/** Serialize edited rows back to typed objects, dropping fully-empty rows. */
+	function serializeLineItems(): Array<Record<string, unknown>> {
+		const num = (v: string) => {
+			const cleaned = v.replace(/[,$€£¥₹\s]/g, '').trim();
+			if (!cleaned) return null;
+			const n = Number(cleaned);
+			return Number.isFinite(n) ? n : null;
+		};
+		const str = (v: string) => (v.trim() ? v.trim() : null);
+		return lineItems
+			.map((r) => ({
+				description: str(r.description),
+				qty: num(r.qty),
+				unit: str(r.unit),
+				unitPrice: num(r.unitPrice),
+				amount: num(r.amount),
+				sku: str(r.sku),
+				taxRate: num(r.taxRate)
+			}))
+			.filter((r) => Object.values(r).some((v) => v !== null));
+	}
+
 	const getInitialArtifact = () => initialArtifact;
 	let artifact = $state<DocumentArtifactView>(getInitialArtifact());
+	let lineItems = $state<LineItemRow[]>(initialLineItemsFor(getInitialArtifact()));
+	function addLineItem() {
+		lineItems = [...lineItems, emptyLineItem()];
+	}
+	function removeLineItem(index: number) {
+		lineItems = lineItems.filter((_, i) => i !== index);
+	}
 	// Source of truth is the category the field-extraction LLM actually used
 	// (`suggestedCategoryId`). When the AI could not determine one (e.g. it
 	// classified the doc as logistics/bank/tax/unknown, which have no auto
@@ -148,7 +220,12 @@
 		categories.find((c) => c.id === selectedCategoryId) ?? null
 	);
 	const fieldKeys = $derived(uniqueFields(selectedCategory));
-	const editableFieldKeys = $derived(fieldKeys.filter((key) => key !== 'project_id' && key !== 'projectId'));
+	const editableFieldKeys = $derived(
+		fieldKeys.filter(
+			(key) => key !== 'project_id' && key !== 'projectId' && key !== LINE_ITEM_KEY
+		)
+	);
+	const showLineItems = $derived(fieldKeys.includes(LINE_ITEM_KEY) || lineItems.length > 0);
 	const persistTarget = $derived(selectedCategory?.persistTarget ?? null);
 	const isArchiveOnly = $derived(
 		Boolean(persistTarget && persistTarget !== 'expenses' && persistTarget !== 'revenue')
@@ -288,6 +365,7 @@
 	function initialDraftFor(a: DocumentArtifactView, category: CategoryChoice | null): Draft {
 		const next: Draft = {};
 		for (const key of uniqueFields(category)) {
+			if (key === LINE_ITEM_KEY) continue; // handled by the structured line-items table
 			const meta = metaFor(key);
 			const confidence = confidenceFor(a, key);
 			const value = confidence != null && confidence < 0.5 ? undefined : suggestedValue(a, key);
@@ -370,7 +448,16 @@
 
 	function payloadFields(): Record<string, unknown> {
 		const fields: Record<string, unknown> = {};
-		for (const key of fieldKeys) fields[key] = coerceValue(key, draft[key] ?? '');
+		for (const key of fieldKeys) {
+			if (key === LINE_ITEM_KEY) continue; // serialized from the structured table below
+			fields[key] = coerceValue(key, draft[key] ?? '');
+		}
+		const items = serializeLineItems();
+		// Emit line_items when the category declares it (so an emptied list submits
+		// []) or whenever the user actually has rows.
+		if (fieldKeys.includes(LINE_ITEM_KEY) || items.length > 0) {
+			fields.line_items = items;
+		}
 		fields.project_id = selectedProjectId;
 		return fields;
 	}
@@ -399,6 +486,7 @@
 				selectedCategoryId = json.data.suggestedCategoryId ?? newId;
 				const nextCategory = categories.find((c) => c.id === (json.data?.suggestedCategoryId ?? newId)) ?? null;
 				draft = initialDraftFor(json.data, nextCategory);
+				lineItems = initialLineItemsFor(json.data);
 				selectedProjectId = projectValueFromDraft(draft);
 			}
 		} catch (err) {
@@ -406,6 +494,7 @@
 			selectedCategoryId = previousId;
 			const previousCategory = categories.find((c) => c.id === previousId) ?? null;
 			draft = initialDraftFor(artifact, previousCategory);
+			lineItems = initialLineItemsFor(artifact);
 			selectedProjectId = projectValueFromDraft(draft);
 		} finally {
 			isReclassifying = false;
@@ -722,6 +811,74 @@
 						</label>
 					{/each}
 				</div>
+
+				{#if showLineItems}
+					<div class="mt-6 border-t border-slate-100 pt-4">
+						<div class="flex items-center justify-between gap-3">
+							<div>
+								<h4 class="text-sm font-semibold text-slate-900">
+									Line items{lineItems.length ? ` (${lineItems.length})` : ''}
+								</h4>
+								<p class="text-xs text-slate-500">Itemised goods / services found on the document. Edit, add, or remove rows.</p>
+							</div>
+							<button
+								type="button"
+								class="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+								onclick={addLineItem}
+								disabled={isConfirming || isAbandoning || isClosed}
+							>
+								+ Add item
+							</button>
+						</div>
+
+						{#if lineItems.length === 0}
+							<p class="mt-3 rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-center text-xs text-slate-500">
+								No line items. Click “+ Add item” if the document lists goods or services.
+							</p>
+						{:else}
+							<div class="mt-3 overflow-x-auto">
+								<table class="w-full min-w-[640px] border-collapse text-xs">
+									<thead>
+										<tr class="text-left text-[11px] uppercase tracking-wide text-slate-400">
+											<th class="py-1 pr-2 font-medium">Description</th>
+											<th class="py-1 px-1 font-medium">Qty</th>
+											<th class="py-1 px-1 font-medium">Unit</th>
+											<th class="py-1 px-1 font-medium">Unit price</th>
+											<th class="py-1 px-1 font-medium">Amount</th>
+											<th class="py-1 px-1 font-medium">SKU</th>
+											<th class="py-1 px-1 font-medium">Tax %</th>
+											<th class="py-1 pl-1"><span class="sr-only">Remove</span></th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each lineItems as item, i (i)}
+											<tr class="border-t border-slate-100">
+												<td class="py-1 pr-2"><input type="text" bind:value={item.description} class="w-full rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.qty} class="w-16 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" bind:value={item.unit} class="w-16 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.unitPrice} class="w-24 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.amount} class="w-24 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" bind:value={item.sku} class="w-24 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 px-1"><input type="text" inputmode="decimal" bind:value={item.taxRate} class="w-14 rounded border border-slate-200 px-2 py-1" disabled={isConfirming || isAbandoning || isClosed} /></td>
+												<td class="py-1 pl-1 text-right">
+													<button
+														type="button"
+														class="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+														onclick={() => removeLineItem(i)}
+														disabled={isConfirming || isAbandoning || isClosed}
+														aria-label="Remove line item"
+													>
+														✕
+													</button>
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{/if}
+					</div>
+				{/if}
 
 				<div class="mt-5 flex justify-between gap-2 border-t border-slate-100 pt-4">
 					<button type="button" class="inline-flex items-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onclick={() => goToStep('category')}>

@@ -79,7 +79,10 @@ export interface CategoryDefinition {
 // Common LLM field bundles, keyed by document type
 // ---------------------------------------------------------------------------
 
-const RECEIPT_LLM = ['receipt_number', 'date', 'amount', 'currency', 'vendor'];
+// `line_items` is appended to every bundle: the extractor attempts an itemised
+// table on any docType (invoice/receipt/PO/…) and the projection only surfaces
+// it when rows were actually found, so empty docs stay clean.
+const RECEIPT_LLM = ['receipt_number', 'date', 'amount', 'currency', 'vendor', 'line_items'];
 const INVOICE_LLM = [
 	'invoice_number',
 	'supplier_name',
@@ -87,9 +90,10 @@ const INVOICE_LLM = [
 	'due_date',
 	'amount',
 	'currency',
-	'gst_amount'
+	'gst_amount',
+	'line_items'
 ];
-const PO_LLM = ['po_number', 'supplier_name', 'date', 'amount', 'currency', 'description'];
+const PO_LLM = ['po_number', 'supplier_name', 'date', 'amount', 'currency', 'description', 'line_items'];
 
 // ---------------------------------------------------------------------------
 // Category catalog �?11 expense + 1 revenue + 3 archive
@@ -317,7 +321,8 @@ const REVENUE_CATEGORIES: CategoryDefinition[] = [
 			'invoice_gst_amount',
 			'customer_name',
 			'po_number',
-			'invoice_subtotal'
+			'invoice_subtotal',
+			'line_items'
 		],
 		userFields: ['invoice_type', 'project_id', 'notes'],
 		defaultFlags: {},
@@ -345,7 +350,8 @@ const ARCHIVE_CATEGORIES: CategoryDefinition[] = [
 			'amount',
 			'currency',
 			'payment_terms',
-			'scope'
+			'scope',
+			'line_items'
 		],
 		userFields: ['type', 'project_id', 'status', 'notes'],
 		defaultFlags: {},

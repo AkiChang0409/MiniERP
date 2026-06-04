@@ -203,7 +203,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					issueDate: v.issueDate ?? null,
 					dueDate: v.dueDate ?? null,
 					serviceName: v.serviceName ?? null,
-					period: v.period ?? null
+					period: v.period ?? null,
+					lineItems: v.lineItems ?? null
 				};
 				if (!hasAnyExtractedValue(fields)) return null;
 				const fieldConfidence = projectFieldConfidence(readLlmFieldConfidence(raw), {
@@ -215,7 +216,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					issueDate: 'issueDate',
 					dueDate: 'dueDate',
 					serviceName: 'serviceName',
-					period: 'period'
+					period: 'period',
+					lineItems: 'lineItems'
 				});
 				return { fields, fieldConfidence };
 			},
@@ -239,7 +241,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					dueDate: v.date ?? null,
 					recipientName: v.recipientName ?? null,
 					destination: v.destination ?? null,
-					trackingNumber: v.trackingNumber ?? null
+					trackingNumber: v.trackingNumber ?? null,
+					lineItems: v.lineItems ?? null
 				};
 				if (!hasAnyExtractedValue(fields)) return null;
 				const llmConf = readLlmFieldConfidence(raw);
@@ -252,7 +255,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					issueDate: 'date',
 					recipientName: 'recipientName',
 					destination: 'destination',
-					trackingNumber: 'trackingNumber'
+					trackingNumber: 'trackingNumber',
+					lineItems: 'lineItems'
 				});
 				// dueDate mirrors `date`, so reuse the date confidence when the LLM provided one.
 				if (typeof llmConf.date === 'number') fieldConfidence.dueDate = llmConf.date;
@@ -314,7 +318,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					issueDate: v.invoiceDate ?? null,
 					dueDate: v.invoiceDueDate ?? null,
 					subtotal: v.subtotal ?? null,
-					poNumber: v.poNumber ?? null
+					poNumber: v.poNumber ?? null,
+					lineItems: v.lineItems ?? null
 				};
 				if (!hasAnyExtractedValue(fields)) return null;
 				const llmConf = readLlmFieldConfidence(raw);
@@ -328,7 +333,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					issueDate: 'invoiceDate',
 					dueDate: 'invoiceDueDate',
 					subtotal: 'subtotal',
-					poNumber: 'poNumber'
+					poNumber: 'poNumber',
+					lineItems: 'lineItems'
 				});
 				return { fields, fieldConfidence };
 			},
@@ -351,7 +357,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					issueDate: v.effectiveDate ?? null,
 					dueDate: v.expiryDate ?? null,
 					description: v.scope ?? null,
-					paymentTerms: v.paymentTerms ?? null
+					paymentTerms: v.paymentTerms ?? null,
+					lineItems: v.lineItems ?? null
 				};
 				if (!hasAnyExtractedValue(fields)) return null;
 				const fieldConfidence = projectFieldConfidence(readLlmFieldConfidence(raw), {
@@ -363,7 +370,8 @@ function configForDocType(docType: CategoryDocType): LlmConfig<unknown> | null {
 					issueDate: 'effectiveDate',
 					dueDate: 'expiryDate',
 					description: 'scope',
-					paymentTerms: 'paymentTerms'
+					paymentTerms: 'paymentTerms',
+					lineItems: 'lineItems'
 				});
 				return { fields, fieldConfidence };
 			},

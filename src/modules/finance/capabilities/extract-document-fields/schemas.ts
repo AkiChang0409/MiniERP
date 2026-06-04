@@ -20,6 +20,25 @@ const lenientNumber = z.preprocess((val) => {
 }, z.number().finite().nullable());
 
 /**
+ * Generic line item — one row of an itemised goods/services table. All fields
+ * optional/nullable so it works across invoices, receipts, quotations, POs,
+ * etc. (their columns are never uniform). Persisted as JSON; no fixed columns.
+ */
+export const lineItemSchemaV1 = z.object({
+	description: z.string().nullable(),
+	qty: lenientNumber,
+	unit: z.string().nullable().optional(),
+	unitPrice: lenientNumber,
+	amount: lenientNumber,
+	sku: z.string().nullable().optional(),
+	taxRate: lenientNumber.optional()
+});
+export type LineItemV1 = z.infer<typeof lineItemSchemaV1>;
+
+/** Reusable optional line-items array attachable to any docType schema. */
+const lineItemsField = z.array(lineItemSchemaV1).nullable().optional();
+
+/**
  * Per-document-type LLM output schemas (v1).
  *
  * Each schema corresponds to one of the `categoryDocType` values declared in
@@ -44,6 +63,7 @@ export const invoiceSchemaV1 = z.object({
 	currency: z.string().nullable(),
 	serviceName: z.string().nullable().optional(),
 	period: z.string().nullable().optional(),
+	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
 	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
@@ -64,6 +84,7 @@ export const receiptSchemaV1 = z.object({
 	recipientName: z.string().nullable(),
 	destination: z.string().nullable().optional(),
 	trackingNumber: z.string().nullable().optional(),
+	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
 	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
@@ -73,13 +94,6 @@ export type ReceiptLlmV1 = z.infer<typeof receiptSchemaV1>;
 // ---------------------------------------------------------------------------
 // Purchase order (opex.purchase, document_only.purchase_order)
 // ---------------------------------------------------------------------------
-const lineItemSchemaV1 = z.object({
-	description: z.string().nullable(),
-	qty: lenientNumber,
-	unitPrice: lenientNumber,
-	amount: lenientNumber
-});
-
 export const poSchemaV1 = z.object({
 	supplierName: z.string().nullable(),
 	clientName: z.string().nullable().optional(),
@@ -108,6 +122,7 @@ export const customerInvoiceSchemaV1 = z.object({
 	subtotal: lenientNumber,
 	currency: z.string().nullable(),
 	poNumber: z.string().nullable(),
+	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
 	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
@@ -126,6 +141,7 @@ export const contractSchemaV1 = z.object({
 	currency: z.string().nullable(),
 	paymentTerms: z.string().nullable(),
 	scope: z.string().nullable(),
+	lineItems: lineItemsField,
 	confidence: z.number().min(0).max(1).optional(),
 	_quotes: z.record(z.string(), z.string().nullable()).optional(),
 	_confidence: z.record(z.string(), z.number().min(0).max(1)).optional()
@@ -146,4 +162,4 @@ export const quotationSchemaV1 = z.object({
 });
 export type QuotationLlmV1 = z.infer<typeof quotationSchemaV1>;
 
-export const EXTRACT_DOCUMENT_FIELDS_SCHEMA_VERSION = 'v3';
+export const EXTRACT_DOCUMENT_FIELDS_SCHEMA_VERSION = 'v4';

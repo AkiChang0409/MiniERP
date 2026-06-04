@@ -8,7 +8,7 @@
  * corresponding schema in `schemas.ts` expects.
  */
 
-export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v6';
+export const EXTRACT_DOCUMENT_FIELDS_PROMPT_VERSION = 'v7';
 
 const SECURITY_FOOTER = `
 SECURITY:
@@ -73,6 +73,16 @@ REFERENCE RULES:
 - poNumber must be extracted only from a clear PO label such as "PO No", "Purchase Order", "Customer PO", "Your PO", or "Buyer PO".
 - If no clearly labelled PO number exists, poNumber must be null. Do not reuse invoiceNumber, quote number, project number, customer number, or random alphanumeric strings as poNumber.`;
 
+const LINE_ITEMS_RULE = `
+LINE ITEMS:
+- lineItems: if the document contains an itemised table of goods or services (rows with descriptions, quantities, unit prices, or amounts), extract EACH row as an object with these keys: { description, qty, unit, unitPrice, amount, sku, taxRate }.
+  - description: the item / service text (string or null).
+  - qty: quantity ordered (number or null). unit: unit of measure such as pcs / ml / KG / box (string or null).
+  - unitPrice: price per unit (number or null). amount: the row line total (number or null).
+  - sku: product / item code if shown (string or null). taxRate: per-line tax % if shown (number or null).
+- Use null for any sub-field a row does not show. Numbers must be plain (no currency symbols or thousands separators).
+- If the document has NO itemised table, set lineItems to null. Never invent rows, and do not merge the grand total into a line item.`;
+
 const ARCHIVE_RULES = `
 ARCHIVE DOCUMENT RULES:
 - These documents are archived business records, not expenses or revenue records. Extract only what is printed in the document.
@@ -95,6 +105,7 @@ Required keys:
 - currency: ISO currency code if present, otherwise null.
 - serviceName: SaaS/service/product name if present, otherwise null.
 - period: billing/service period if present, otherwise null.
+- lineItems: array of itemised rows ({ description, qty, unit, unitPrice, amount, sku, taxRate }), or null if no item table.
 - confidence: number between 0 and 1, your overall confidence.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
@@ -102,6 +113,7 @@ Required keys:
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
 ${REFERENCE_RULES}
+${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
@@ -120,12 +132,14 @@ Required keys:
 - recipientName: the staff / recipient named on the receipt if any (string or null).
 - destination: travel/accommodation destination if present, otherwise null.
 - trackingNumber: logistics tracking / AWB number if present, otherwise null.
+- lineItems: array of itemised rows ({ description, qty, unit, unitPrice, amount, sku, taxRate }), or null if no item table.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
+${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
@@ -151,7 +165,7 @@ Required keys:
 - totalAmount: numeric total order amount (number or null).
 - currency: ISO currency code (string or null).
 - description: short item / line summary if available (string or null).
-- lineItems: array of { description, qty, unitPrice, amount } objects, or null.
+- lineItems: array of itemised rows ({ description, qty, unit, unitPrice, amount, sku, taxRate }), or null if no item table.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
@@ -161,6 +175,7 @@ ${PO_FIELD_HINTS}
 ${EXTRACTION_RULES}
 ${REFERENCE_RULES}
 ${ARCHIVE_RULES}
+${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
@@ -179,6 +194,7 @@ Required keys:
 - subtotal: pre-tax subtotal (number or null).
 - currency: ISO currency code (string or null).
 - poNumber: customer PO referenced on the invoice (string or null).
+- lineItems: array of itemised rows ({ description, qty, unit, unitPrice, amount, sku, taxRate }), or null if no item table.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
@@ -186,6 +202,7 @@ Required keys:
 Use null for any field you cannot confidently extract.
 ${EXTRACTION_RULES}
 ${REFERENCE_RULES}
+${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
@@ -203,12 +220,14 @@ Required keys:
 - currency: ISO currency code if present, otherwise null.
 - paymentTerms: payment terms text if present, otherwise null.
 - scope: brief contract scope / subject summary from the document, otherwise null.
+- lineItems: array of itemised rows / payment schedule ({ description, qty, unit, unitPrice, amount, sku, taxRate }), or null if none.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${ARCHIVE_RULES}
+${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;
@@ -224,13 +243,14 @@ Required keys:
 - validUntil: quotation expiry / valid-until date as ISO YYYY-MM-DD (string or null).
 - amount: numeric quotation grand total (number or null).
 - currency: ISO currency code if present, otherwise null.
-- lineItems: array of { description, qty, unitPrice, amount } objects, or null.
+- lineItems: array of itemised rows ({ description, qty, unit, unitPrice, amount, sku, taxRate }), or null if no item table.
 - confidence: number between 0 and 1.
 - _quotes: object mapping each non-null field name to its verbatim source snippet (≤ 100 chars each).
 - _confidence: object mapping each non-null field name to a per-field confidence between 0 and 1.
 
 Use null for any field you cannot confidently extract.
 ${ARCHIVE_RULES}
+${LINE_ITEMS_RULE}
 ${QUOTES_RULE}
 ${CONFIDENCE_RULE}
 ${SECURITY_FOOTER}`;

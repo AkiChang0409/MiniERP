@@ -91,6 +91,31 @@ function readBoolean(fields: Record<string, unknown>, keys: string[], fallback =
 	return fallback;
 }
 
+/**
+ * Coerce `line_items` to an array of plain objects (defensive: the inbox form
+ * already submits an array, but tolerate a JSON string from other callers).
+ * Mutates in place — call only AFTER the payload-hash check so the hash stays
+ * valid. Drops the key when empty so metadata stays clean.
+ */
+function normalizeLineItemsInPlace(fields: Record<string, unknown>) {
+	const raw = fields.line_items ?? fields.lineItems;
+	if ('lineItems' in fields) delete fields.lineItems;
+	if (raw === undefined || raw === null) {
+		delete fields.line_items;
+		return;
+	}
+	let arr: unknown = raw;
+	if (typeof raw === 'string') {
+		try {
+			arr = JSON.parse(raw);
+		} catch {
+			arr = [];
+		}
+	}
+	if (Array.isArray(arr) && arr.length > 0) fields.line_items = arr;
+	else delete fields.line_items;
+}
+
 function metadataFromFields(
 	fields: Record<string, unknown>,
 	exclude: string[]
@@ -301,6 +326,11 @@ export const POST: RequestHandler = async (event) => {
 		});
 		return fail('Payload hash mismatch — UI state and submission do not agree.', 400);
 	}
+
+	// Hash validated — safe to normalize line_items (mutating fields now won't
+	// break the tamper guard). Lands in expenses/revenue metadata or the archive
+	// `extracted` blob downstream.
+	normalizeLineItemsInPlace(body.payload.fields);
 
 	// 2. Verify artifact exists and is in a confirmable state.
 	const intake = createDocumentIntakeService({ db, env, user });

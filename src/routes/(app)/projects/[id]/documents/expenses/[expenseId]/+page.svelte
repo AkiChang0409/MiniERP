@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import StorageTextPreview from '$app-layer/components/StorageTextPreview.svelte';
+	import LineItemsView from '$app-layer/components/finance/LineItemsView.svelte';
 	import { CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS } from '$modules/finance/schemas/expense-upload';
 
 	let { data, form } = $props();
@@ -152,6 +153,11 @@
 			</div>
 		</section>
 	{/if}
+
+	<LineItemsView
+		items={(data.docMeta as Record<string, unknown>).line_items}
+		currency={data.expense.currency}
+	/>
 
 	<section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
 		<div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">

@@ -195,7 +195,7 @@ export function createFinanceRevenueApi(ctx: ModuleContext) {
 
 		if (!revenueRecord) return null;
 
-		const docMeta = parseDocumentMetadata(null);
+		const docMeta = parseDocumentMetadata(revenueRecord.metadata ?? null);
 		const { fileViewUrl, fileDownloadUrl, previewDisplay } = await resolveExpenseFilePreview(
 			ctx.db,
 			revenueRecord.documentRef,
