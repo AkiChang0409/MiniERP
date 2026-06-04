@@ -2,7 +2,7 @@ import { runOpenAiVisionOcr } from './openai-vision-ocr';
 import { runWorkersVisionOcr } from './workers-vision-ocr';
 
 export type ImageOcrProvider = 'openai' | 'workers_ai';
-type ImageOcrPreference = 'auto' | ImageOcrProvider;
+export type ImageOcrPreference = 'auto' | ImageOcrProvider;
 
 export type ImageDocumentOcrResult =
 	| { ok: true; text: string; provider: ImageOcrProvider }
@@ -26,12 +26,17 @@ function readProviderPreference(env: Env): ImageOcrPreference {
  * OCR an image document.
  * Uses OpenAI vision (gpt-4o-mini) when OPENAI_API_KEY (or LLM_API_KEY) is
  * set; falls back to Workers AI vision only in `auto` mode.
+ *
+ * `opts.provider` overrides the env-level `OCR_IMAGE_PROVIDER` preference for a
+ * single call — used by the per-upload Vision route choice (External API vs
+ * Workers AI). When omitted, the env preference is used (backwards compatible).
  */
 export async function runImageDocumentOcr(
 	env: Env,
-	input: { imageBytes: Uint8Array; mimeType: string; fileName: string }
+	input: { imageBytes: Uint8Array; mimeType: string; fileName: string },
+	opts: { provider?: ImageOcrPreference } = {}
 ): Promise<ImageDocumentOcrResult> {
-	const preference = readProviderPreference(env);
+	const preference = opts.provider ?? readProviderPreference(env);
 	const openaiKey = readEnv(env, 'OPENAI_API_KEY') || readEnv(env, 'LLM_API_KEY');
 
 	if (preference !== 'workers_ai') {

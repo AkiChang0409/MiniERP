@@ -31,10 +31,11 @@
 
 	let fileInput: HTMLInputElement | null = $state(null);
 	let dragOver = $state(false);
-	// Image OCR route picked before upload. Default keeps the existing vision-LLM
-	// behaviour; `ocr_api` sends images to OCR.space instead. Only affects image
-	// files — PDFs/Word/email always go through their own text path.
-	let ocrStrategy = $state<OcrStrategy>('vision_ai');
+	// Image OCR route picked before upload. Two vision variants (External API =
+	// OpenAI, Workers AI = Cloudflare) + OCR.space. Default keeps the existing
+	// external-API vision behaviour. Only affects image files — PDFs/Word/email
+	// always go through their own text path.
+	let ocrStrategy = $state<OcrStrategy>('vision_openai');
 	let stage = $state<Stage>('idle');
 	let fileName = $state('');
 	let batchTotal = $state(0);
@@ -846,11 +847,20 @@
 				<button
 					type="button"
 					class="ocr-route-btn"
-					class:is-active={ocrStrategy === 'vision_ai'}
-					aria-pressed={ocrStrategy === 'vision_ai'}
-					onclick={() => (ocrStrategy = 'vision_ai')}
+					class:is-active={ocrStrategy === 'vision_openai'}
+					aria-pressed={ocrStrategy === 'vision_openai'}
+					onclick={() => (ocrStrategy = 'vision_openai')}
 				>
-					Vision AI
+					Vision · External API
+				</button>
+				<button
+					type="button"
+					class="ocr-route-btn"
+					class:is-active={ocrStrategy === 'vision_workers_ai'}
+					aria-pressed={ocrStrategy === 'vision_workers_ai'}
+					onclick={() => (ocrStrategy = 'vision_workers_ai')}
+				>
+					Vision · Workers AI
 				</button>
 				<button
 					type="button"
@@ -863,9 +873,13 @@
 				</button>
 			</div>
 			<span class="ocr-route-hint">
-				{ocrStrategy === 'ocr_api'
-					? 'OCR.space transcribes images; AI still extracts the fields.'
-					: 'Vision model reads images directly (default). Applies to images only.'}
+				{#if ocrStrategy === 'ocr_api'}
+					OCR.space transcribes images; AI still extracts the fields.
+				{:else if ocrStrategy === 'vision_workers_ai'}
+					Cloudflare Workers AI vision model reads the image directly.
+				{:else}
+					External AI API (OpenAI) vision model reads the image directly (default).
+				{/if}
 			</span>
 		</div>
 	{/if}

@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import PageShell from '$app-layer/components/PageShell.svelte';
 	import type { DocumentArtifactView } from '$modules/document-intake';
+	import { ocrEngineBadge } from '$lib/utils/ocr-engine-label';
 
 	let { data } = $props();
 
@@ -309,6 +310,7 @@
 		<ul class="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
 			{#each items as item (item.id)}
 				{@const badge = statusBadge(item.processingStatus)}
+				{@const engine = ocrEngineBadge(item.textExtraction)}
 				{@const preview = fieldsPreview(item)}
 				{@const lowN = lowConfidenceCount(item)}
 				{@const href = rowHref(item)}
@@ -339,6 +341,14 @@
 								>
 									{badge.label}
 								</span>
+								{#if engine}
+									<span
+										class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset {engine.tone}"
+										title="Text extracted by {engine.label}"
+									>
+										{engine.label}
+									</span>
+								{/if}
 								{#if lowN > 0 && currentTab === 'review'}
 									<span
 										class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-inset ring-amber-200"

@@ -22,12 +22,14 @@ import { parseEmlStructured } from '../files/eml/parse-eml';
 import { composeEmlText } from '../files/eml/compose-eml-extraction';
 
 /**
- * Image text-extraction route. `vision_ai` (default) uses the vision-LLM OCR
- * (`runImageDocumentOcr`); `ocr_api` uses the external OCR.space API
- * (`runOcrSpaceOcr`). The user picks this in the AI Panel upload step. Only
- * affects images — PDF/DOCX/EML paths ignore it.
+ * Image text-extraction route, picked per-upload in the AI Panel:
+ *   - `vision_openai`      — vision LLM via the external AI API (OpenAI). Default.
+ *   - `vision_workers_ai`  — vision LLM via Cloudflare Workers AI binding.
+ *   - `ocr_api`            — external OCR.space API (`runOcrSpaceOcr`).
+ * Only affects images — PDF/DOCX/EML paths ignore it. Legacy `'vision_ai'`
+ * messages are treated as `vision_openai`.
  */
-export type OcrStrategy = 'vision_ai' | 'ocr_api';
+export type OcrStrategy = 'vision_openai' | 'vision_workers_ai' | 'ocr_api';
 
 export interface PlatformTextExtractionResult {
 	method: 'pdf_text' | 'vision_model' | 'ocr' | 'manual';
@@ -154,7 +156,7 @@ export async function extractTextFromBytesRaw(
 	mimeType: string,
 	fileName: string | undefined,
 	env: Env,
-	ocrStrategy: OcrStrategy = 'vision_ai'
+	ocrStrategy: OcrStrategy = 'vision_openai'
 ): Promise<PlatformTextExtractionResult> {
 	if (isPdfMime(mimeType, fileName)) {
 		// DEPRECATED Ship 1: this byte-heuristic only "works" on PDFs whose text
@@ -216,7 +218,15 @@ export async function extractTextFromBytesRaw(
 			};
 		}
 
-		const result = await runImageDocumentOcr(env, { imageBytes: bytes, mimeType, fileName: fileName ?? '' });
+		// Vision route: force the provider the user picked (External API vs
+		// Workers AI) so the comparison is honest. `vision_workers_ai` → Workers
+		// AI binding; anything else (vision_openai / legacy vision_ai) → OpenAI.
+		const visionProvider = ocrStrategy === 'vision_workers_ai' ? 'workers_ai' : 'openai';
+		const result = await runImageDocumentOcr(
+			env,
+			{ imageBytes: bytes, mimeType, fileName: fileName ?? '' },
+			{ provider: visionProvider }
+		);
 		if (!result.ok) {
 			return buildFailure('vision_failed', result.error, 'vision_model');
 		}
@@ -323,15 +333,18 @@ export async function extractTextFromBlob(
 		);
 	}
 
-	const ocrStrategy = input.ocrStrategy ?? 'vision_ai';
+	const ocrStrategy = input.ocrStrategy ?? 'vision_openai';
 
 	// Image path: fall back to mock when the chosen engine is unavailable in
-	// local dev — vision route needs the AI binding, OCR API route needs the
-	// OCR.space key. Avoids stranding image uploads when neither is configured.
+	// local dev — Workers AI vision needs the AI binding, External API vision
+	// needs the OpenAI key, OCR API needs the OCR.space key. Avoids stranding
+	// image uploads when the picked engine is not configured.
 	if (isImageMime(fileRef.mimeType, fileRef.fileName)) {
-		const visionUnavailable = ocrStrategy === 'vision_ai' && !env.AI;
+		const openaiKey = readEnv(env, 'OPENAI_API_KEY') || readEnv(env, 'LLM_API_KEY');
+		const visionWorkersUnavailable = ocrStrategy === 'vision_workers_ai' && !env.AI;
+		const visionOpenaiUnavailable = ocrStrategy === 'vision_openai' && !openaiKey;
 		const ocrApiUnavailable = ocrStrategy === 'ocr_api' && !readEnv(env, 'OCR_SPACE_API_KEY');
-		if (visionUnavailable || ocrApiUnavailable) {
+		if (visionWorkersUnavailable || visionOpenaiUnavailable || ocrApiUnavailable) {
 			return buildMockResult(input);
 		}
 	}

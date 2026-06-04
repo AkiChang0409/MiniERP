@@ -354,7 +354,7 @@ export interface DocumentStatusResponse {
 	updatedAt: string;
 }
 
-export type OcrStrategy = 'vision_ai' | 'ocr_api';
+export type OcrStrategy = 'vision_openai' | 'vision_workers_ai' | 'ocr_api';
 
 export function uploadDocument(
 	file: File,
@@ -376,7 +376,7 @@ export function uploadDocument(
 	const form = new FormData();
 	form.append('file', file);
 	form.append('uploadedFrom', opts.uploadedFrom ?? 'ai_panel');
-	form.append('ocrStrategy', opts.ocrStrategy ?? 'vision_ai');
+	form.append('ocrStrategy', opts.ocrStrategy ?? 'vision_openai');
 	if (opts.clientExtractedText) {
 		form.append('clientExtractedText', opts.clientExtractedText);
 		form.append('clientExtractionMethod', opts.clientExtractionMethod ?? 'manual');

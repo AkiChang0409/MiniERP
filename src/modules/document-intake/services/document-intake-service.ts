@@ -169,11 +169,12 @@ export interface ProcessDocumentInput {
 	/** How the client extracted the text. Used in audit metadata for evaluation. */
 	clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
 	/**
-	 * Image OCR route. `vision_ai` (default) sends images to the vision LLM;
-	 * `ocr_api` sends them to OCR.space. Forwarded to `extractTextFromBlob`;
-	 * ignored when `clientExtractedText` short-circuits extraction (PDF/DOCX).
+	 * Image OCR route: `vision_openai` (default, external AI API) /
+	 * `vision_workers_ai` (Cloudflare Workers AI) / `ocr_api` (OCR.space).
+	 * Forwarded to `extractTextFromBlob`; ignored when `clientExtractedText`
+	 * short-circuits extraction (PDF/DOCX).
 	 */
-	ocrStrategy?: 'vision_ai' | 'ocr_api';
+	ocrStrategy?: 'vision_openai' | 'vision_workers_ai' | 'ocr_api';
 	/**
 	 * Optional finance-side field extraction step. When present and the
 	 * artifact reaches the `classified` state, the service invokes this to
@@ -516,7 +517,7 @@ export function createDocumentIntakeService(
 					fileService,
 					env: ctx.env,
 					useMock,
-					ocrStrategy: input.ocrStrategy ?? 'vision_ai'
+					ocrStrategy: input.ocrStrategy ?? 'vision_openai'
 				});
 			}
 			await repo.setTextExtraction(artifact.id, extraction);

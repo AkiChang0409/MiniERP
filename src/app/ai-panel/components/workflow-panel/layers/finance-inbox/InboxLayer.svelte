@@ -4,6 +4,7 @@
 	import InboxConfirmForm from '$app-layer/components/finance-inbox/InboxConfirmForm.svelte';
 	import { panel } from '$app-layer/ai-panel/workflow/panel.svelte';
 	import type { DocumentArtifactView, DocumentProcessingStatus } from '$modules/document-intake';
+	import { ocrEngineBadge } from '$lib/utils/ocr-engine-label';
 
 	type Tab = 'review' | 'processing' | 'confirmed' | 'failed';
 
@@ -382,6 +383,10 @@
 										<dd>{diagnostics.textExtraction?.method ?? 'n/a'} · {pct(diagnostics.textExtraction?.confidence)}</dd>
 									</div>
 									<div>
+										<dt>Engine</dt>
+										<dd>{ocrEngineBadge(diagnostics.textExtraction)?.label ?? 'n/a'}</dd>
+									</div>
+									<div>
 										<dt>File</dt>
 										<dd>{formatBytes(diagnostics.originalFile.sizeBytes)}</dd>
 									</div>
@@ -496,6 +501,9 @@
 								<span class="doc-title">{item.originalFile.fileName}</span>
 								<span class="doc-meta">
 									{item.documentType ?? 'unknown'}
+									{#if ocrEngineBadge(item.textExtraction)}
+										· <span class="engine-tag">{ocrEngineBadge(item.textExtraction)?.label}</span>
+									{/if}
 									{#if fieldsPreview(item)}
 										· {fieldsPreview(item)}
 									{/if}
@@ -660,6 +668,10 @@
 		white-space: nowrap;
 		color: var(--panel-fg-muted);
 		font-size: 11.5px;
+	}
+	.engine-tag {
+		font-weight: 600;
+		color: var(--panel-gold-bright);
 	}
 	.status-pill {
 		padding: 4px 7px;

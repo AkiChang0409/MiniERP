@@ -34,9 +34,12 @@ export interface DocumentProcessorMessage {
 	clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
 
 	/**
-	 * Image OCR route chosen by the user before upload. `vision_ai` (default)
-	 * uses the vision LLM; `ocr_api` uses OCR.space. Only affects images; the
-	 * downstream classification + field extraction are identical for both.
+	 * Image OCR route chosen by the user before upload:
+	 *   - `vision_openai` (default) — vision LLM via external AI API (OpenAI)
+	 *   - `vision_workers_ai` — vision LLM via Cloudflare Workers AI
+	 *   - `ocr_api` — OCR.space
+	 * Only affects images; downstream classification + field extraction are
+	 * identical for all. Legacy `'vision_ai'` is treated as `vision_openai`.
 	 */
-	ocrStrategy?: 'vision_ai' | 'ocr_api';
+	ocrStrategy?: 'vision_openai' | 'vision_workers_ai' | 'ocr_api';
 }
