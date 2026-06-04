@@ -881,6 +881,13 @@
 					External AI API (OpenAI) vision model reads the image directly (default).
 				{/if}
 			</span>
+			{#if ocrStrategy === 'ocr_api'}
+				<span class="ocr-route-tip">
+					<AlertTriangle size={13} strokeWidth={1.8} />
+					Tip: the free OCR.space tier rate-limits bursts — for image files,
+					uploading one at a time is more reliable. (Not enforced.)
+				</span>
+			{/if}
 		</div>
 	{/if}
 	<button
@@ -1174,6 +1181,26 @@
 		line-height: 1.5;
 		color: var(--panel-fg-muted);
 		max-width: 44ch;
+	}
+	.ocr-route-tip {
+		display: inline-flex;
+		align-items: flex-start;
+		gap: 6px;
+		max-width: 46ch;
+		margin-top: 2px;
+		padding: 7px 11px;
+		border-radius: 10px;
+		font-size: 11.5px;
+		line-height: 1.5;
+		text-align: left;
+		color: var(--panel-fg-muted);
+		background: rgba(234, 188, 60, 0.08);
+		border: 1px solid rgba(234, 188, 60, 0.24);
+	}
+	.ocr-route-tip :global(svg) {
+		flex: none;
+		margin-top: 1px;
+		color: var(--panel-gold-bright);
 	}
 
 	.drop-area {

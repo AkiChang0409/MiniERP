@@ -22,6 +22,22 @@ const DEFAULT_ENGINE = '3';
 /** OCR.space free tier rejects files larger than 1 MB. */
 const FREE_TIER_MAX_BYTES = 1024 * 1024;
 
+/** Transient HTTP statuses worth retrying (rate limit + gateway/proxy errors). */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 700;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Strip HTML tags / collapse whitespace from an error body for a short, useful message. */
+function summarizeBody(raw: string): string {
+	return raw
+		.replace(/<[^>]*>/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.slice(0, 120);
+}
+
 export type OcrSpaceResult =
 	| { ok: true; text: string; engine: string; exitCode: number }
 	| { ok: false; error: string };
@@ -102,44 +118,72 @@ export async function runOcrSpaceOcr(
 	const ab = input.imageBytes.slice().buffer;
 	form.append('file', new Blob([ab], { type: mime }), input.fileName || 'document.jpg');
 
-	let response: Response;
-	try {
-		response = await fetch(endpoint, {
-			method: 'POST',
-			headers: { apikey: apiKey },
-			body: form
-		});
-	} catch (e) {
-		return { ok: false, error: `OCR.space unreachable: ${e instanceof Error ? e.message : String(e)}` };
+	// OCR.space free tier is rate-limited (HTTP 429) and its gateway intermittently
+	// times out (HTTP 504 with a non-JSON HTML body). Both are transient — retry a
+	// few times with exponential backoff + jitter before giving up.
+	let lastError = 'OCR.space request failed.';
+	for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+		if (attempt > 1) {
+			await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 2) + Math.floor(Math.random() * 250));
+		}
+
+		let response: Response;
+		try {
+			response = await fetch(endpoint, {
+				method: 'POST',
+				headers: { apikey: apiKey },
+				body: form
+			});
+		} catch (e) {
+			lastError = `OCR.space unreachable: ${e instanceof Error ? e.message : String(e)}`;
+			continue; // network blip — retry
+		}
+
+		// Read the raw body first: on 429/5xx OCR.space replies with an HTML error
+		// page, so `response.json()` would throw and mask the real status.
+		const rawBody = await response.text().catch(() => '');
+
+		if (!response.ok) {
+			const hint =
+				response.status === 429
+					? 'rate limited (free tier allows limited concurrency / daily quota)'
+					: summarizeBody(rawBody) || 'unknown';
+			lastError = `OCR.space HTTP ${response.status}: ${hint}`;
+			if (RETRYABLE_STATUS.has(response.status) && attempt < MAX_ATTEMPTS) continue;
+			return { ok: false, error: lastError };
+		}
+
+		let data: OcrSpaceResponse;
+		try {
+			data = JSON.parse(rawBody) as OcrSpaceResponse;
+		} catch {
+			lastError = `OCR.space returned non-JSON (status ${response.status}).`;
+			if (attempt < MAX_ATTEMPTS) continue; // likely a transient 200-with-HTML proxy hiccup
+			return { ok: false, error: lastError };
+		}
+
+		// OCRExitCode: 1 = success, 2 = partial success, 3 = error, 4 = fatal.
+		const exitCode = data.OCRExitCode ?? 0;
+		if (data.IsErroredOnProcessing || exitCode >= 3) {
+			const detail = joinErrorMessage(data.ErrorMessage) || data.ErrorDetails || 'processing error';
+			lastError = `OCR.space failed (exit ${exitCode}): ${detail}`;
+			// "Timed out waiting for results" is transient; other errors are not.
+			if (/tim(e|ed)\s?out|timeout/i.test(detail) && attempt < MAX_ATTEMPTS) continue;
+			return { ok: false, error: lastError };
+		}
+
+		const text = (data.ParsedResults ?? [])
+			.map((r) => (typeof r.ParsedText === 'string' ? r.ParsedText : ''))
+			.join('\n')
+			.replace(/\r\n/g, '\n')
+			.trim();
+
+		if (!text || text.length < 4) {
+			return { ok: false, error: 'OCR.space returned no usable text.' };
+		}
+
+		return { ok: true, text, engine, exitCode };
 	}
 
-	let data: OcrSpaceResponse;
-	try {
-		data = (await response.json()) as OcrSpaceResponse;
-	} catch {
-		return { ok: false, error: `OCR.space returned non-JSON (status ${response.status}).` };
-	}
-
-	if (!response.ok) {
-		return { ok: false, error: `OCR.space HTTP ${response.status}: ${joinErrorMessage(data.ErrorMessage) || 'unknown'}` };
-	}
-
-	// OCRExitCode: 1 = success, 2 = partial success, 3 = error, 4 = fatal.
-	const exitCode = data.OCRExitCode ?? 0;
-	if (data.IsErroredOnProcessing || exitCode >= 3) {
-		const detail = joinErrorMessage(data.ErrorMessage) || data.ErrorDetails || 'processing error';
-		return { ok: false, error: `OCR.space failed (exit ${exitCode}): ${detail}` };
-	}
-
-	const text = (data.ParsedResults ?? [])
-		.map((r) => (typeof r.ParsedText === 'string' ? r.ParsedText : ''))
-		.join('\n')
-		.replace(/\r\n/g, '\n')
-		.trim();
-
-	if (!text || text.length < 4) {
-		return { ok: false, error: 'OCR.space returned no usable text.' };
-	}
-
-	return { ok: true, text, engine, exitCode };
+	return { ok: false, error: lastError };
 }
