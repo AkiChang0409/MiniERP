@@ -125,7 +125,7 @@
         "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
         "OCR_IMAGE_PROVIDER": "openai",
         "OCR_PROMPT_VERSION": "v1",
-        "OPENAI_VISION_MODEL": "gpt-4o-mini",
+        "OPENAI_VISION_MODEL": "gpt-4o",
         // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
         "OCR_SPACE_ENGINE": "3"
       },
@@ -194,7 +194,7 @@
         "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
         "OCR_IMAGE_PROVIDER": "openai",
         "OCR_PROMPT_VERSION": "v1",
-        "OPENAI_VISION_MODEL": "gpt-4o-mini",
+        "OPENAI_VISION_MODEL": "gpt-4o",
         // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
         "OCR_SPACE_ENGINE": "3",
 

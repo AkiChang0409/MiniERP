@@ -50,7 +50,12 @@
       "Bash(mkdir -p \"src/routes/api/procurement/supplier-invoices/[id]/decision\" \"src/routes/api/procurement/supplier-invoices/[id]/rematch\" \"src/routes/\\(app\\)/procurement/supplier-invoices\")",
       "Bash(git check-ignore *)",
       "Bash(ls -la .dev.vars*)",
-      "Bash(ls -la .dev.vars .dev.vars.example)"
+      "Bash(ls -la .dev.vars .dev.vars.example)",
+      "Bash(grep -iE \"^sharp$|^jimp$|^canvas$|^pngjs$|^utif2?$\")",
+      "Bash(python -c \"import PIL; print\\('PIL', PIL.__version__\\)\")",
+      "Bash(python3 -c \"import PIL; print\\('PIL3', PIL.__version__\\)\")",
+      "Bash(node _tmp_convert.cjs)",
+      "Bash(node _tmp_crop.cjs)"
     ]
   }
 }

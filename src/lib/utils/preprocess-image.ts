@@ -188,6 +188,13 @@ export interface BuildFinancialVersionsOptions {
 	/** Run OpenCV document detection + perspective de-warp first. Lazy-loads the
 	 *  ~10 MB OpenCV WASM bundle only when true. Default false. */
 	dewarp?: boolean;
+	/**
+	 * Longest-edge cap for the vision-enhanced output. Defaults to 2048 (aligned
+	 * to OpenAI vision `detail:'high'`, which downscales larger images to a
+	 * 2048 box anyway). The Workers AI route passes a larger value so its model
+	 * gets more pixels on small print / handwriting.
+	 */
+	maxLongSide?: number;
 }
 
 /**
@@ -226,10 +233,11 @@ export async function buildFinancialVersions(
 		return { original, visionEnhanced: original, metrics: idle };
 	}
 
-	const canvas = await decodeToCanvas(input, looksTiff, FINANCIAL_MAX_LONG_SIDE).catch(() => null);
+	const maxLongSide = options.maxLongSide ?? FINANCIAL_MAX_LONG_SIDE;
+	const canvas = await decodeToCanvas(input, looksTiff, maxLongSide).catch(() => null);
 	if (!canvas) return { original, visionEnhanced: original, metrics: idle };
 
-	const { canvas: enhanced, metrics } = await enhanceForVision(canvas, options.dewarp ?? false);
+	const { canvas: enhanced, metrics } = await enhanceForVision(canvas, options.dewarp ?? false, maxLongSide);
 	const blob = await canvasToBlob(enhanced, 'image/jpeg', FINANCIAL_JPEG_QUALITY);
 	if (!blob) return { original, visionEnhanced: original, metrics: idle };
 
@@ -383,7 +391,8 @@ export async function buildOcrApiVersion(
 
 async function enhanceForVision(
 	input: HTMLCanvasElement,
-	dewarp: boolean
+	dewarp: boolean,
+	maxLongSide: number = FINANCIAL_MAX_LONG_SIDE
 ): Promise<{ canvas: HTMLCanvasElement; metrics: FinancialPreprocessMetrics }> {
 	let canvas = input;
 	const metrics: FinancialPreprocessMetrics = {
@@ -410,7 +419,7 @@ async function enhanceForVision(
 				metrics.areaRatio = detection.areaRatio;
 				const warped = await warpToQuad(canvas, detection.quad);
 				if (warped) {
-					const refit = fitToLongSide(warped.width, warped.height, FINANCIAL_MAX_LONG_SIDE);
+					const refit = fitToLongSide(warped.width, warped.height, maxLongSide);
 					canvas = drawCanvasTo(warped, refit.width, refit.height) ?? warped;
 					metrics.warped = true;
 				} else {

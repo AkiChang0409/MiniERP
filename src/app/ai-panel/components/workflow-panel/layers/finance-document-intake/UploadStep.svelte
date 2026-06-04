@@ -309,10 +309,14 @@
 			}
 
 			try {
+				// Workers AI vision gets a larger image (more pixels on small print /
+				// handwriting); OpenAI stays at 2048 since detail:'high' downscales
+				// anything larger to a 2048 box anyway.
+				const visionMaxLongSide = ocrStrategy === 'vision_workers_ai' ? 2560 : 2048;
 				const { original, visionEnhanced, metrics } = await buildFinancialVersions(
 					file,
 					undefined,
-					{ dewarp: opts.dewarp }
+					{ dewarp: opts.dewarp, maxLongSide: visionMaxLongSide }
 				);
 				if (visionEnhanced !== original) {
 					return {

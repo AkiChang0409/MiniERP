@@ -65,9 +65,15 @@ function extractVisionText(raw: unknown): string {
 const SYSTEM_PROMPT = `You are an OCR engine for business and finance documents (invoices, contracts, POs, quotations).
 Transcribe ALL visible text in natural reading order. Output each piece of information EXACTLY ONCE.
 Rules:
-- Output plain text only. No markdown, no bold, no preamble, no "Here is the text".
+- Output PLAIN TEXT ONLY. No markdown, no asterisks, no **bold**, no bullets, no preamble, no "Here is the text".
+- Process the page box by box / region by region. Many forms have multiple bordered
+  boxes and TWO columns (e.g. Shipper left, Consignee right). Transcribe EVERY box and
+  BOTH columns — never skip or summarise a box, address block, or reference number.
+- Transcribe EVERY table cell, including handwritten numbers and quantities (e.g. "3",
+  "10 ml") and column headers. Do not drop the numeric cells.
+- Reproduce handwritten values exactly; do not reformat dates (keep "01SEP2025" as-is).
+  Leave blank fields blank — never invent a value.
 - Preserve line breaks where they separate distinct lines or table rows.
-- Include numbers, dates, amounts, tax IDs, addresses, and table cells as they appear.
 - NEVER repeat lines or sections. Each header, address, and line item appears only once.
 - If the image is unreadable or not a document, output a single line: [UNREADABLE]
 - Stop immediately after transcribing the last visible text on the page.`;
