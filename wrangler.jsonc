@@ -48,7 +48,7 @@
 
   "vars": {
     "APP_ENV": "personal-v4",
-    "BETTER_AUTH_URL": "https://smartfin.aki-wang.workers.dev",
+    "BETTER_AUTH_URL": "https://smartfin-v4.aki-wang.workers.dev",
     "EMAIL_FROM": "SmartFin <onboarding@resend.dev>",
     "LLM_PROVIDER": "heuristic",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",

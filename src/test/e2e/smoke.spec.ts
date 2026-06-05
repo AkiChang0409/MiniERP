@@ -9,7 +9,11 @@ test.describe("SmartFin v4 smoke", () => {
   test("landing page loads", async ({ page }) => {
     const res = await page.goto("/");
     expect(res?.status()).toBeLessThan(400);
-    await expect(page).toHaveTitle(/SmartFin|MiniERP|.+/);
+    // The root route IS the SmartFin sign-in screen. The app does not set a
+    // <title>, so we assert on visible rendered content instead.
+    await expect(
+      page.getByRole("heading", { name: /sign in to smartfin/i }),
+    ).toBeVisible();
   });
 
   test("login page is reachable", async ({ page }) => {

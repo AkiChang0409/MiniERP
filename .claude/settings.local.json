@@ -59,7 +59,10 @@
       "Bash(ls -laR docker/)",
       "Bash(ls -la load/)",
       "Bash(ls -la reports/)",
-      "Bash(find . -name \"Dockerfile*\" -not -path \"*/node_modules/*\")"
+      "Bash(find . -name \"Dockerfile*\" -not -path \"*/node_modules/*\")",
+      "Bash(E2E_BASE_URL=\"https://smartfin-v4.aki-wang.workers.dev\" npx playwright test)",
+      "Bash(gh api *)",
+      "Bash(curl -s \"https://api.github.com/repos/aquasecurity/trivy-action/releases?per_page=10\")"
     ]
   }
 }

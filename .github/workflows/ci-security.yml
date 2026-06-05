@@ -95,7 +95,7 @@ jobs:
       # SmartFin ships as Cloudflare Workers (no Docker image), so we scan the
       # filesystem (lockfile dependencies) and IaC/config instead of an image.
       - name: Trivy filesystem scan (dependencies)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
@@ -105,7 +105,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Trivy config scan (wrangler / IaC)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: config
           scan-ref: .
@@ -115,7 +115,7 @@ jobs:
 
       # Human-readable table for the screenshot / report.
       - name: Trivy filesystem scan (table output)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
