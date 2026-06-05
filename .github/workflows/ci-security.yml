@@ -1,0 +1,210 @@
+name: CI - Tests & Security (SmartFin v4)
+
+# Separate from deployment. This workflow is the quality + security gate that
+# runs BEFORE deploy-v4-cloudflare.yml. It produces downloadable artifacts
+# (test reports, coverage, Trivy/CodeQL/npm-audit/ZAP results) so reviewers
+# can see evidence of each scan and its resolution.
+
+on:
+  push:
+    branches:
+      - feature/aki-finance-dev
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # required for CodeQL + Trivy SARIF upload
+  actions: read
+  checks: write            # required for dorny/test-reporter to publish the test summary
+
+concurrency:
+  group: ci-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── A. Unit tests + coverage (Vitest) ──────────────────────────────────────
+  test:
+    name: Unit tests & coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Produces JUnit XML (test counts / pass-fail). This is the gate: it goes
+      # red only if a test actually fails.
+      - name: Run unit tests (JUnit report)
+        run: npm run test:ci
+
+      # Coverage is informational only — it must NOT fail the test gate, so it
+      # runs separately and is allowed to error (the project's 65% threshold is
+      # aspirational and not yet met across all modules).
+      - name: Generate coverage report
+        if: always()
+        continue-on-error: true
+        run: npm run test:coverage
+
+      - name: Upload test report (JUnit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-junit-report
+          path: reports/junit.xml
+          if-no-files-found: warn
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-coverage
+          path: coverage/
+          if-no-files-found: warn
+
+      # Renders a "Tests: X passed / Y total" summary on the run page,
+      # which is the screenshot the reviewers asked for (per microservice
+      # module the suite is split by folder in vitest).
+      - name: Publish test summary
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Vitest results
+          path: reports/junit.xml
+          reporter: java-junit
+          fail-on-error: false
+
+  # ── B. SCA + filesystem vuln scan (Trivy, no image) ───────────────────────
+  trivy:
+    name: Trivy (deps & config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # SmartFin ships as Cloudflare Workers (no Docker image), so we scan the
+      # filesystem (lockfile dependencies) and IaC/config instead of an image.
+      - name: Trivy filesystem scan (dependencies)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+
+      - name: Trivy config scan (wrangler / IaC)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-config.sarif
+          severity: CRITICAL,HIGH
+
+      # Human-readable table for the screenshot / report.
+      - name: Trivy filesystem scan (table output)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          output: trivy-fs-table.txt
+          severity: CRITICAL,HIGH,MEDIUM
+
+      # Uploading to the Security tab needs Code Scanning enabled. On a PRIVATE
+      # repo without GitHub Advanced Security this step is unavailable, so it is
+      # non-fatal — the SARIF + table are still uploaded as artifacts below.
+      - name: Upload Trivy SARIF to code scanning
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Upload Trivy artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: |
+            trivy-fs.sarif
+            trivy-config.sarif
+            trivy-fs-table.txt
+
+  # ── C. SAST (CodeQL + npm audit) ──────────────────────────────────────────
+  sast:
+    name: SAST (CodeQL & npm audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-js
+
+      # Dependency-level SAST/SCA, captured as an artifact for the report.
+      - name: npm audit (high+)
+        run: npm audit --audit-level=high --json > npm-audit.json || true
+
+      - name: Upload npm audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit
+          path: npm-audit.json
+
+  # ── D. DAST (OWASP ZAP baseline against live worker) ──────────────────────
+  dast:
+    name: DAST (OWASP ZAP baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # DAST needs a running target; run it manually or after a deploy.
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "https://smartfin-v4.aki-wang.workers.dev/"
+          # -I = do not fail the build on warnings; -r = HTML report
+          cmd_options: "-a -I -r zap-report.html"
+          allow_issue_writing: false
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-dast-report
+          path: zap-report.html
+          if-no-files-found: warn

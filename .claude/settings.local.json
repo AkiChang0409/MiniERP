@@ -55,7 +55,11 @@
       "Bash(python -c \"import PIL; print\\('PIL', PIL.__version__\\)\")",
       "Bash(python3 -c \"import PIL; print\\('PIL3', PIL.__version__\\)\")",
       "Bash(node _tmp_convert.cjs)",
-      "Bash(node _tmp_crop.cjs)"
+      "Bash(node _tmp_crop.cjs)",
+      "Bash(ls -laR docker/)",
+      "Bash(ls -la load/)",
+      "Bash(ls -la reports/)",
+      "Bash(find . -name \"Dockerfile*\" -not -path \"*/node_modules/*\")"
     ]
   }
 }

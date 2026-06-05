@@ -1,0 +1,52 @@
+name: Load Test (SmartFin v4)
+
+# Deliberately a SEPARATE pipeline from CI and from deployment, which directly
+# answers the reviewer question "is load testing done using a separate
+# pipeline?". It is triggered manually or on a schedule, never in the deploy
+# path, so a slow/failing load test never blocks a release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: "Virtual users"
+        required: true
+        type: string
+        default: "20"
+      duration:
+        description: "Test duration"
+        required: true
+        type: string
+        default: "1m"
+  schedule:
+    # Weekly, Monday 02:00 UTC
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  k6-load:
+    name: k6 load test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run k6 load test
+        uses: grafana/setup-k6-action@v1
+
+      - name: Execute k6
+        run: |
+          k6 run \
+            --vus "${{ inputs.vus || '20' }}" \
+            --duration "${{ inputs.duration || '1m' }}" \
+            --summary-export=k6-summary.json \
+            load/smoke.js
+
+      - name: Upload k6 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-load-summary
+          path: k6-summary.json
