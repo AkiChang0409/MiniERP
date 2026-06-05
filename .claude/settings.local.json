@@ -62,7 +62,14 @@
       "Bash(find . -name \"Dockerfile*\" -not -path \"*/node_modules/*\")",
       "Bash(E2E_BASE_URL=\"https://smartfin-v4.aki-wang.workers.dev\" npx playwright test)",
       "Bash(gh api *)",
-      "Bash(curl -s \"https://api.github.com/repos/aquasecurity/trivy-action/releases?per_page=10\")"
+      "Bash(curl -s \"https://api.github.com/repos/aquasecurity/trivy-action/releases?per_page=10\")",
+      "Bash(git symbolic-ref *)",
+      "Bash(sed 's@^refs/remotes/origin/@@')",
+      "Bash(git ls-tree *)",
+      "Bash(npx -y @mermaid-js/mermaid-cli -i aggregates.mmd -o aggregates.png -p puppeteer.json -b white -s 2)",
+      "Bash(node docs/.docxbuild/build-docx.mjs)",
+      "Bash(python \"C:/Users/akiwc/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/dbdc43c1-8995-4c66-a8f4-cbeccc01c41e/96dbf42a-ed72-4ce1-842e-eb888629b3e7/skills/docx/scripts/office/validate.py\" docs/Lecturer-Feedback-Response.docx)",
+      "Bash(npm uninstall *)"
     ]
   }
 }
