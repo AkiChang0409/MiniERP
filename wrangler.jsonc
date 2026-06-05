@@ -45,7 +45,6 @@
       }
     ]
   },
-
   "vars": {
     "APP_ENV": "personal-v4",
     "BETTER_AUTH_URL": "https://smartfin-v4.aki-wang.workers.dev",
