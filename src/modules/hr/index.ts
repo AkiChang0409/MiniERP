@@ -25,6 +25,7 @@ export const hrModule: ModuleDefinition = {
 export { createHrApi, type HrApi } from './api';
 export { createEmployeeApi, type EmployeeApi } from './employee-api';
 export { createLeaveApi, type LeaveApi } from './leave-api';
+export { createEmployeeLeaveApi, type EmployeeLeaveApi } from './employee-leave-api';
 export { LeaveValidationError } from './services/leave-service';
 export { createAttendanceApi, type AttendanceApi } from './attendance-api';
 export { AttendanceValidationError } from './services/attendance-service';

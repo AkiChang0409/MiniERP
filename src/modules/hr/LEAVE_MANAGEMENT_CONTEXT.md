@@ -14,12 +14,19 @@
 - Audit trail: every approve/reject writes a `leave_approval_records` row.
 - Payroll effect placeholder on `leave_requests` (unpaid leave only).
 
+**In scope — employee self-service (Sprint 2 MVP, added 2026-06-08)**
+
+- Logged-in employee views own balances + request history and submits a new
+  request at `/employee/leave`. personId is resolved server-side via
+  `resolveCurrentPersonId(db, userId)` — never from the form.
+- Submit creates a `pending` request with `source = 'employee_portal'` and bumps
+  `leave_balances.pendingDays`; approval still happens admin-side on `/hr/leave`.
+
 **Explicitly out of scope in this implementation**
 
-- Employee self-service portal (submit / cancel own requests).
+- Employee cancel / withdraw of own requests.
+- Attachment upload, notifications, payroll calculation or payslip generation.
 - Attendance or overtime tracking.
-- Payroll calculation or payslip generation.
-- Any UI beyond `/hr/leave` (Requests tab + Balances tab).
 
 ---
 
@@ -30,13 +37,18 @@
 | Schema | `src/modules/hr/repositories/leave.schema.ts` |
 | Repositories | `src/modules/hr/repositories/leave-repository.ts` |
 | Service | `src/modules/hr/services/leave-service.ts` |
-| Public API factory | `src/modules/hr/leave-api.ts` |
-| Route (load + actions) | `src/routes/(app)/hr/leave/+page.server.ts` |
-| UI | `src/routes/(app)/hr/leave/+page.svelte` |
+| Public API factory (admin) | `src/modules/hr/leave-api.ts` |
+| Public API factory (employee) | `src/modules/hr/employee-leave-api.ts` |
+| Route — admin (load + actions) | `src/routes/(app)/hr/leave/+page.server.ts` |
+| UI — admin | `src/routes/(app)/hr/leave/+page.svelte` |
+| Route — employee (load + submit) | `src/routes/(app)/employee/leave/+page.server.ts` |
+| UI — employee | `src/routes/(app)/employee/leave/+page.svelte` |
+| Person resolver | `src/platform/auth/resolve-current-person.ts` |
 | Migration | `drizzle/migrations/0015_hr_leave_management.sql` |
 | Seed | `drizzle/seeds/leave-seed.sql` |
 | Unit tests | `src/test/unit/leave-service.test.ts` |
-| Integration tests | `src/test/integration/leave-service.integration.test.ts` |
+| Integration tests (admin) | `src/test/integration/leave-service.integration.test.ts` |
+| Integration tests (employee) | `src/test/integration/employee-leave.integration.test.ts` |
 
 The public boundary is `src/modules/hr/index.ts`. Routes must import
 `createLeaveApi` and `LeaveValidationError` from `$modules/hr`, never from
@@ -122,6 +134,49 @@ single `db.batch([...])` call so all three writes are atomic.
    - `UPDATE leave_requests SET status='rejected', rejected_by_user_id, rejected_at, rejection_reason, updated_at`
    - `UPDATE leave_balances SET pending_days -= totalDays, updated_at` — releases pending, **does not touch `used_days`**
    - `INSERT leave_approval_records (action='rejected', ...)`
+
+---
+
+## Employee Self-Service Flow (`/employee/leave`)
+
+The employee portal is served by `createEmployeeLeaveApi(ctx, personId)`
+(`employee-leave-api.ts`). The facade **binds `personId` at construction** and
+exposes no method that accepts a personId argument, so a forged form field can
+never redirect reads/writes to another employee. Approve/reject are deliberately
+absent from this facade — they remain admin-only on `createLeaveApi`.
+
+**Route guard.** `/employee/*` is not mapped to any module in
+`module-access.ts`, so `isPathAllowedForRole` returns `true` for any
+authenticated user (identity ≠ role). The portal gates on the *link*, not a
+role.
+
+**Load (`+page.server.ts`):**
+1. `resolveCurrentPersonId(ctx.db, locals.user?.id)` → `null` ⇒ render
+   "账号尚未关联员工档案" (`linkState: 'unlinked'`), never a 500.
+2. `getProfileStatus()` ≠ `'active'` ⇒ render "账号未启用"
+   (`linkState: 'inactive'`).
+3. Otherwise load `listLeaveTypes()` + `listMyBalances(year)` +
+   `listMyRequests()`.
+
+**`listMyLeaveBalances`** calls `ensureLeaveBalancesForPerson` first, which
+seeds one `leave_balances` row per active leave type when none exist (mock
+entitlements: `LeaveService.DEFAULT_ENTITLEMENT` — ANNUAL/SICK 14, HOSP 60,
+UNPAID 5, else 14). Idempotent against the `(person, type, year)` unique index.
+
+**`submitLeaveRequest({ personId, leaveTypeId, startDate, endDate, reason })`:**
+1. leave type must exist and be `active`.
+2. dates must be `YYYY-MM-DD`; `endDate >= startDate`.
+3. `totalDays = expandDateRange(start, end).length` (inclusive calendar days).
+4. ensure balance row exists, then enforce
+   `remaining (entitled − used − pending) >= totalDays`, else
+   `LeaveValidationError`.
+5. `db.batch([` INSERT `leave_requests` (status `pending`, source
+   `employee_portal`, payrollEffect `not_applicable`) + UPDATE
+   `leave_balances.pendingDays += totalDays` `])` — atomic.
+
+Handoff to admin: the new `pending` row appears in `/hr/leave` Requests tab; HR
+approve/reject runs the existing batch, which moves pending → used (approve) or
+releases pending (reject). No employee-side approval path exists.
 
 ---
 
@@ -250,7 +305,7 @@ Use this after importing historical leave data or after retroactively approving 
 
 | When | What to add |
 |------|-------------|
-| Employee self-service | New route `/hr/leave/submit`; set `source = 'employee_portal'`; add `pendingDays += totalDays` upsert on submit |
+| Employee self-service | **DONE (2026-06-08)** — see "Employee Self-Service Flow" below |
 | Cancel leave | Add `cancelLeaveRequest` to `LeaveService`; batch: UPDATE status='cancelled', UPDATE pendingDays -= totalDays, INSERT approval_record action='cancelled' |
 | Leave policy enforcement | Add quota check in `approveLeaveRequest` (compare `remainingDays` before approval) |
 | AI Panel actions | Add `leaveActions` array to `src/modules/hr/index.ts` following the `employeeActions` pattern |

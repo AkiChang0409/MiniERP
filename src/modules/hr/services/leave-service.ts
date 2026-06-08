@@ -6,7 +6,7 @@ import {
 	leaveRequests,
 	leaveTypes
 } from '../repositories/leave.schema';
-import { persons } from '../repositories/person.schema';
+import { employeeProfiles, persons } from '../repositories/person.schema';
 import {
 	LeaveApprovalRecordRepository,
 	LeaveBalanceRepository,
@@ -350,5 +350,230 @@ export class LeaveService {
 			...row,
 			remainingDays: row.entitledDays - row.usedDays - row.pendingDays
 		}));
+	}
+
+	// =========================================================================
+	// Employee self-service (Sprint 2 — /employee/leave)
+	//
+	// Every method below is scoped to a single personId that the caller MUST
+	// resolve via resolveCurrentPersonId(db, userId). The personId is never
+	// accepted from client form input — the employee-facing API facade injects
+	// the resolved id, and these methods only ever read/write that person's rows.
+	// =========================================================================
+
+	/** Default annual entitlement (days) used when auto-generating a balance row. */
+	private static readonly DEFAULT_ENTITLEMENT: Record<string, number> = {
+		ANNUAL: 14,
+		SICK: 14,
+		HOSP: 60,
+		UNPAID: 5
+	};
+
+	/**
+	 * Returns the employee_profile status for a person, or null when the person
+	 * has no profile. Routes use this to render "account not enabled" instead of
+	 * leaking leave data for a deactivated employee.
+	 */
+	async getEmployeeProfileStatus(personId: string): Promise<string | null> {
+		const rows = await this.db
+			.select({ status: employeeProfiles.status })
+			.from(employeeProfiles)
+			.where(and(eq(employeeProfiles.personId, personId), isNull(employeeProfiles.deletedAt)))
+			.limit(1);
+		return rows[0]?.status ?? null;
+	}
+
+	/**
+	 * Ensures one leave_balances row exists per active leave type for this
+	 * person/year, seeding mock entitlements when none exist. Idempotent — only
+	 * missing rows are inserted, respecting the (person, type, year) unique index.
+	 */
+	private async ensureLeaveBalancesForPerson(personId: string, year: number): Promise<void> {
+		const types = await this.leaveTypeRepo.findAllActive();
+		if (types.length === 0) return;
+
+		const existing = await this.db
+			.select({ leaveTypeId: leaveBalances.leaveTypeId })
+			.from(leaveBalances)
+			.where(
+				and(
+					isNull(leaveBalances.deletedAt),
+					eq(leaveBalances.personId, personId),
+					eq(leaveBalances.year, year)
+				)
+			);
+		const have = new Set(existing.map((r) => r.leaveTypeId));
+
+		const now = new Date().toISOString();
+		const missing = types.filter((t) => !have.has(t.id));
+		for (const t of missing) {
+			const entitledDays = LeaveService.DEFAULT_ENTITLEMENT[t.code] ?? 14;
+			await this.db.insert(leaveBalances).values({
+				id: crypto.randomUUID(),
+				personId,
+				leaveTypeId: t.id,
+				year,
+				entitledDays,
+				usedDays: 0,
+				pendingDays: 0,
+				createdAt: now,
+				updatedAt: now
+			});
+		}
+	}
+
+	/**
+	 * My Leave Balances — current employee only. Generates mock entitlements on
+	 * first access so the page is never empty. remainingDays is computed.
+	 */
+	async listMyLeaveBalances(personId: string, year?: number) {
+		const targetYear = year ?? new Date().getFullYear();
+		await this.ensureLeaveBalancesForPerson(personId, targetYear);
+
+		const rows = await this.db
+			.select({
+				id: leaveBalances.id,
+				personId: leaveBalances.personId,
+				leaveTypeId: leaveBalances.leaveTypeId,
+				leaveTypeName: leaveTypes.name,
+				leaveTypeCode: leaveTypes.code,
+				year: leaveBalances.year,
+				entitledDays: leaveBalances.entitledDays,
+				usedDays: leaveBalances.usedDays,
+				pendingDays: leaveBalances.pendingDays
+			})
+			.from(leaveBalances)
+			.innerJoin(leaveTypes, eq(leaveBalances.leaveTypeId, leaveTypes.id))
+			.where(
+				and(
+					isNull(leaveBalances.deletedAt),
+					eq(leaveBalances.personId, personId),
+					eq(leaveBalances.year, targetYear)
+				)
+			)
+			.orderBy(asc(leaveTypes.code));
+
+		return rows.map((row) => ({
+			...row,
+			remainingDays: row.entitledDays - row.usedDays - row.pendingDays
+		}));
+	}
+
+	/** My Leave Requests — current employee only, newest first. */
+	async listMyLeaveRequests(personId: string) {
+		return this.db
+			.select({
+				id: leaveRequests.id,
+				personId: leaveRequests.personId,
+				leaveTypeId: leaveRequests.leaveTypeId,
+				leaveTypeName: leaveTypes.name,
+				leaveTypeCode: leaveTypes.code,
+				startDate: leaveRequests.startDate,
+				endDate: leaveRequests.endDate,
+				totalDays: leaveRequests.totalDays,
+				status: leaveRequests.status,
+				reason: leaveRequests.reason,
+				source: leaveRequests.source,
+				submittedAt: leaveRequests.submittedAt,
+				rejectionReason: leaveRequests.rejectionReason,
+				payrollEffect: leaveRequests.payrollEffect
+			})
+			.from(leaveRequests)
+			.innerJoin(leaveTypes, eq(leaveRequests.leaveTypeId, leaveTypes.id))
+			.where(and(isNull(leaveRequests.deletedAt), eq(leaveRequests.personId, personId)))
+			.orderBy(desc(leaveRequests.submittedAt));
+	}
+
+	/**
+	 * Submit a leave request from the employee portal.
+	 *
+	 * personId is supplied by the caller from resolveCurrentPersonId — NEVER from
+	 * the form. Creates a pending request (source = 'employee_portal') and bumps
+	 * leave_balances.pendingDays atomically. Throws LeaveValidationError on any
+	 * business-rule violation; the request is never auto-approved.
+	 */
+	async submitLeaveRequest(input: {
+		personId: string;
+		leaveTypeId: string;
+		startDate: string;
+		endDate: string;
+		reason?: string;
+	}) {
+		const { personId, leaveTypeId, startDate, endDate, reason } = input;
+
+		const leaveType = await this.leaveTypeRepo.findById(leaveTypeId);
+		if (!leaveType || leaveType.status !== 'active') {
+			throw new LeaveValidationError('Leave type not found');
+		}
+
+		const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+		if (!isoDate.test(startDate) || !isoDate.test(endDate)) {
+			throw new LeaveValidationError('Invalid date format (expected YYYY-MM-DD)');
+		}
+		if (endDate < startDate) {
+			throw new LeaveValidationError('End date must be on or after start date');
+		}
+
+		const totalDays = expandDateRange(startDate, endDate).length;
+		if (totalDays <= 0) {
+			throw new LeaveValidationError('Invalid leave date range');
+		}
+
+		const year = new Date(startDate + 'T00:00:00Z').getUTCFullYear();
+
+		// Ensure a balance row exists, then enforce the quota.
+		await this.ensureLeaveBalancesForPerson(personId, year);
+		const balance = await this.leaveBalanceRepo.findByPersonTypeYear(personId, leaveTypeId, year);
+		if (!balance) {
+			throw new LeaveValidationError('No leave balance found for this leave type');
+		}
+		const remaining = balance.entitledDays - balance.usedDays - balance.pendingDays;
+		if (remaining < totalDays) {
+			throw new LeaveValidationError(
+				`Insufficient leave balance: ${remaining} day(s) remaining, ${totalDays} requested`
+			);
+		}
+
+		const now = new Date().toISOString();
+		const requestId = crypto.randomUUID();
+
+		// Atomic batch: create the pending request + increment pendingDays.
+		await (
+			this.db.batch as (
+				stmts: Parameters<typeof this.db.batch>[0]
+			) => ReturnType<typeof this.db.batch>
+		)([
+			this.db.insert(leaveRequests).values({
+				id: requestId,
+				personId,
+				leaveTypeId,
+				startDate,
+				endDate,
+				totalDays,
+				status: 'pending',
+				reason: reason ?? null,
+				source: 'employee_portal',
+				submittedAt: now,
+				payrollEffect: 'not_applicable',
+				createdAt: now,
+				updatedAt: now
+			}),
+			this.db
+				.update(leaveBalances)
+				.set({
+					pendingDays: sql`${leaveBalances.pendingDays} + ${totalDays}`,
+					updatedAt: now
+				})
+				.where(
+					and(
+						isNull(leaveBalances.deletedAt),
+						eq(leaveBalances.personId, personId),
+						eq(leaveBalances.leaveTypeId, leaveTypeId),
+						eq(leaveBalances.year, year)
+					)
+				)
+		]);
+
+		return { id: requestId, totalDays, status: 'pending' as const };
 	}
 }
