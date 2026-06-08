@@ -42,4 +42,24 @@ export interface DocumentProcessorMessage {
 	 * identical for all. Legacy `'vision_ai'` is treated as `vision_openai`.
 	 */
 	ocrStrategy?: 'vision_openai' | 'vision_workers_ai' | 'ocr_api';
+
+	/**
+	 * Vision text-extraction sub-mode (only meaningful on a vision `ocrStrategy`):
+	 *   - `raw_text` (default) — generic verbatim transcription, THEN the text
+	 *     LLM classifies + extracts fields (the original two-LLM flow).
+	 *   - `field` — the user pre-selects `presetCategoryId`, so the vision model
+	 *     is steered with that category's field list and emits a focused Markdown
+	 *     transcription. Classification is skipped (category is known); the text
+	 *     LLM still maps the Markdown into the confirmable JSON.
+	 * Ignored for the `ocr_api` route.
+	 */
+	extractionMode?: 'raw_text' | 'field';
+
+	/**
+	 * Category id the user picked up-front in `field` mode (e.g.
+	 * `expense.sales_cost.invoice`). Drives the vision field prompt AND becomes
+	 * the artifact's `suggestedCategoryId` (classification is bypassed). Unset in
+	 * `raw_text` mode.
+	 */
+	presetCategoryId?: string;
 }

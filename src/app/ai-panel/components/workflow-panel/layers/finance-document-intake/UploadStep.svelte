@@ -5,9 +5,12 @@
 	import { panel } from '$app-layer/ai-panel/workflow/panel.svelte';
 	import {
 		uploadDocument,
+		fetchDocumentCategories,
 		type DocumentArtifactPostResponse,
 		type DocumentProcessingStatus,
-		type OcrStrategy
+		type OcrStrategy,
+		type ExtractionMode,
+		type DocumentCategoryOption
 	} from '$app-layer/ai-panel/workflow/finance-workflow-api';
 	import { extractEmlClientText } from '$app-layer/ai-panel/workflow/extract-eml-client';
 	import {
@@ -27,6 +30,7 @@
 		| 'queued'
 		| 'quality_gate'
 		| 'preprocess_preview'
+		| 'category_gate'
 		| 'error';
 
 	let fileInput: HTMLInputElement | null = $state(null);
@@ -36,6 +40,23 @@
 	// Default to the free OCR route to minimise paid API usage. Only affects
 	// image files — PDFs/Word/email always go through their own text path.
 	let ocrStrategy = $state<OcrStrategy>('ocr_api');
+	// VisionAI sub-mode: `raw_text` (transcribe-then-extract, default) vs `field`
+	// (pick the category up-front so the vision model is told exactly which
+	// fields to find). Only available on a vision route — OCR.space always
+	// transcribes generically. Resets to raw_text when leaving a vision route.
+	let extractionMode = $state<ExtractionMode>('raw_text');
+	const isVisionRoute = $derived(
+		ocrStrategy === 'vision_openai' || ocrStrategy === 'vision_workers_ai'
+	);
+	const fieldMode = $derived(isVisionRoute && extractionMode === 'field');
+	// Category picker state for field mode (loaded lazily from the catalog API).
+	let categories = $state<DocumentCategoryOption[]>([]);
+	let categoriesLoading = $state(false);
+	let categoriesError = $state('');
+	let selectedCategoryId = $state('');
+	// Files awaiting the category gate (held between "send to AI" and category pick).
+	let pendingUploadFiles = $state<File[]>([]);
+	let pendingUploadPrebuilt = $state<ClientExtraction | undefined>(undefined);
 	let stage = $state<Stage>('idle');
 	let fileName = $state('');
 	let batchTotal = $state(0);
@@ -396,9 +417,12 @@
 		const extraction = prebuilt ?? (await buildClientExtraction(file));
 
 		stage = 'storing';
+		const useField = fieldMode && !!selectedCategoryId;
 		return await uploadDocument(extraction.uploadFile, {
 			uploadedFrom: 'ai_panel',
 			ocrStrategy,
+			extractionMode: useField ? 'field' : 'raw_text',
+			categoryId: useField ? selectedCategoryId : undefined,
 			clientExtractedText: extraction.text || undefined,
 			clientExtractionMethod: extraction.method,
 			derived: extraction.derived
@@ -457,7 +481,7 @@
 			return;
 		}
 
-		await runUpload(files);
+		await requestUpload(files);
 	}
 
 	async function proceedAfterQuality() {
@@ -468,7 +492,7 @@
 		if (files.length === 1 && isImageFile(files[0])) {
 			await buildPreview(files);
 		} else if (files.length > 0) {
-			await runUpload(files);
+			await requestUpload(files);
 		}
 	}
 
@@ -597,7 +621,7 @@
 		previewMetrics = null;
 		previewSourceFile = null;
 		previewCropOpen = false;
-		if (files.length > 0) await runUpload(files, extraction ?? undefined);
+		if (files.length > 0) await requestUpload(files, extraction ?? undefined);
 	}
 
 	function cancelPreview() {
@@ -608,6 +632,52 @@
 		previewSourceFile = null;
 		previewCropOpen = false;
 		previewCropped = false;
+		onRetry();
+	}
+
+	async function ensureCategoriesLoaded() {
+		if (categories.length > 0 || categoriesLoading) return;
+		categoriesLoading = true;
+		categoriesError = '';
+		try {
+			const { categories: list } = await fetchDocumentCategories();
+			// Allowance has no extractable fields — field mode can't steer it, so
+			// hide it from the picker.
+			categories = list.filter((c) => c.llmFields.some((f) => f !== 'line_items'));
+		} catch (e) {
+			categoriesError = e instanceof Error ? e.message : 'Could not load categories.';
+		} finally {
+			categoriesLoading = false;
+		}
+	}
+
+	// Gate before upload. In field mode the user must pick the document category
+	// first (so the vision model knows which fields to hunt for); otherwise we
+	// upload straight away.
+	async function requestUpload(files: File[], prebuilt?: ClientExtraction) {
+		if (fieldMode) {
+			pendingUploadFiles = files;
+			pendingUploadPrebuilt = prebuilt;
+			fileName = displayNameForBatch(files);
+			stage = 'category_gate';
+			await ensureCategoriesLoaded();
+			return;
+		}
+		await runUpload(files, prebuilt);
+	}
+
+	async function confirmCategoryGate() {
+		if (!selectedCategoryId) return;
+		const files = pendingUploadFiles;
+		const prebuilt = pendingUploadPrebuilt;
+		pendingUploadFiles = [];
+		pendingUploadPrebuilt = undefined;
+		await runUpload(files, prebuilt);
+	}
+
+	function cancelCategoryGate() {
+		pendingUploadFiles = [];
+		pendingUploadPrebuilt = undefined;
 		onRetry();
 	}
 
@@ -843,6 +913,47 @@
 			</div>
 			{/if}
 		</div>
+	{:else if stage === 'category_gate'}
+		<div class="category-gate">
+			<span class="drop-heading">Which document is this?</span>
+			<span class="drop-sub">
+				Field mode needs the category up-front so the vision model knows
+				which fields to extract · {fileName}
+			</span>
+			{#if categoriesLoading}
+				<span class="drop-sub"><Loader2 size={16} strokeWidth={1.8} /> Loading categories…</span>
+			{:else if categoriesError}
+				<span class="drop-sub category-error">{categoriesError}</span>
+				<button type="button" class="quality-btn" onclick={ensureCategoriesLoaded}>Retry</button>
+			{:else}
+				<div class="category-list" role="radiogroup" aria-label="Document category">
+					{#each categories as cat (cat.id)}
+						<button
+							type="button"
+							class="category-item"
+							class:is-active={selectedCategoryId === cat.id}
+							role="radio"
+							aria-checked={selectedCategoryId === cat.id}
+							onclick={() => (selectedCategoryId = cat.id)}
+						>
+							<span class="category-item-label">{cat.label}</span>
+							{#if cat.sublabel}<span class="category-item-sub">{cat.sublabel}</span>{/if}
+						</button>
+					{/each}
+				</div>
+			{/if}
+			<div class="quality-actions">
+				<button
+					type="button"
+					class="quality-btn is-primary"
+					disabled={!selectedCategoryId || categoriesLoading}
+					onclick={confirmCategoryGate}
+				>
+					Extract these fields
+				</button>
+				<button type="button" class="quality-btn" onclick={cancelCategoryGate}>Cancel</button>
+			</div>
+		</div>
 	{:else}
 	{#if stage === 'idle' || stage === 'error'}
 		<div class="ocr-route" role="group" aria-label="Image text-extraction method">
@@ -893,6 +1004,39 @@
 				</span>
 			{/if}
 		</div>
+		{#if isVisionRoute}
+			<div class="ocr-route" role="group" aria-label="Vision extraction mode">
+				<span class="ocr-route-label">Vision extraction</span>
+				<div class="ocr-route-options">
+					<button
+						type="button"
+						class="ocr-route-btn"
+						class:is-active={extractionMode === 'raw_text'}
+						aria-pressed={extractionMode === 'raw_text'}
+						onclick={() => (extractionMode = 'raw_text')}
+					>
+						Raw text
+					</button>
+					<button
+						type="button"
+						class="ocr-route-btn"
+						class:is-active={extractionMode === 'field'}
+						aria-pressed={extractionMode === 'field'}
+						onclick={() => (extractionMode = 'field')}
+					>
+						Field
+					</button>
+				</div>
+				<span class="ocr-route-hint">
+					{#if extractionMode === 'field'}
+						Pick the document category first; the vision model hunts that
+						category's fields and returns a focused Markdown summary.
+					{:else}
+						Transcribe everything, then let the AI classify and extract.
+					{/if}
+				</span>
+			</div>
+		{/if}
 	{/if}
 	<button
 		type="button"
@@ -1137,6 +1281,59 @@
 	.preview-toggle input {
 		accent-color: var(--panel-gold);
 		cursor: pointer;
+	}
+
+	.category-gate {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 12px;
+		padding: 24px 20px;
+		background: var(--panel-surface);
+		border: 1.5px solid rgba(234, 188, 60, 0.3);
+		border-radius: 20px;
+		text-align: center;
+	}
+	.category-error {
+		color: var(--panel-danger);
+	}
+	.category-list {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 8px;
+		width: 100%;
+		margin-top: 4px;
+		max-height: 300px;
+		overflow-y: auto;
+	}
+	.category-item {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		text-align: left;
+		font-family: inherit;
+		cursor: pointer;
+		background: var(--panel-surface-raised);
+		border: 1px solid rgba(234, 188, 60, 0.2);
+		color: var(--panel-fg);
+		transition: border-color var(--panel-dur-fast) var(--panel-ease);
+	}
+	.category-item:hover {
+		border-color: var(--panel-gold);
+	}
+	.category-item.is-active {
+		background: rgba(234, 188, 60, 0.14);
+		border-color: var(--panel-gold);
+	}
+	.category-item-label {
+		font-size: 13px;
+		font-weight: 500;
+	}
+	.category-item-sub {
+		font-size: 11px;
+		color: var(--panel-fg-muted);
 	}
 
 	.ocr-route {

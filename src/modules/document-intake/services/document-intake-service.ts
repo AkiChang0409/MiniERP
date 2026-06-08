@@ -194,6 +194,26 @@ export interface ProcessDocumentInput {
 	 * omit it and get the documentType classifier.
 	 */
 	categoryClassifier?: CategoryClassifier;
+	/**
+	 * VisionAI "field" extraction mode (set by the upload caller). When the user
+	 * pre-selects a category before upload, the composition root passes that
+	 * category here so the pipeline can:
+	 *   1. steer the vision OCR with {@link visionFieldPrompt}, and
+	 *   2. SKIP classification entirely — `presetCategoryId` is the source of
+	 *      truth and is written straight to `suggestedCategoryId`.
+	 * `presetDocumentType` is the coarse display label derived (finance-side, via
+	 * `documentTypeForCategory`) from the category. All three are unset in the
+	 * default `raw_text` flow.
+	 */
+	presetCategoryId?: string;
+	presetDocumentType?: NonNullable<DocumentArtifact['documentType']>;
+	/**
+	 * Category-guided vision prompt (built finance-side via
+	 * `buildVisionFieldExtractionPrompt`). Forwarded to `extractTextFromBlob`;
+	 * only used for images on a vision route. Null/undefined → generic
+	 * transcription prompt.
+	 */
+	visionFieldPrompt?: { system: string; user: string };
 }
 
 export interface DocumentArtifactView {
@@ -521,7 +541,10 @@ export function createDocumentIntakeService(
 					fileService,
 					env: ctx.env,
 					useMock,
-					ocrStrategy: input.ocrStrategy ?? 'vision_openai'
+					ocrStrategy: input.ocrStrategy ?? 'vision_openai',
+					// Field mode: steer the vision model with the pre-selected
+					// category's field list (ignored for non-image / ocr_api).
+					visionPrompt: input.visionFieldPrompt
 				});
 			}
 			await repo.setTextExtraction(artifact.id, extraction);
@@ -564,7 +587,18 @@ export function createDocumentIntakeService(
 			// classifier when no classifier is injected or it can't decide.
 			let classification: DocumentClassificationResult;
 			let classifiedCategoryId: string | null = null;
-			if (input.categoryClassifier) {
+			// Field mode: the user already chose the category before upload, so
+			// classification is bypassed — the preset is the source of truth.
+			if (input.presetCategoryId) {
+				classifiedCategoryId = input.presetCategoryId;
+				classification = {
+					documentType: input.presetDocumentType ?? 'unknown',
+					confidence: 1,
+					possibleTypes: [],
+					reason: 'User pre-selected category (VisionAI field extraction mode).'
+				};
+				await repo.update(artifact.id, { suggestedCategoryId: input.presetCategoryId });
+			} else if (input.categoryClassifier) {
 				const cat = await input
 					.categoryClassifier({
 						tenantId,

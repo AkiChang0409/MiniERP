@@ -356,6 +356,9 @@ export interface DocumentStatusResponse {
 
 export type OcrStrategy = 'vision_openai' | 'vision_workers_ai' | 'ocr_api';
 
+/** Vision text-extraction sub-mode (only meaningful on a vision `ocrStrategy`). */
+export type ExtractionMode = 'raw_text' | 'field';
+
 export function uploadDocument(
 	file: File,
 	opts: {
@@ -364,6 +367,14 @@ export function uploadDocument(
 		clientExtractionMethod?: 'pdfjs' | 'vision_first_page' | 'manual';
 		/** Image OCR route chosen by the user before upload (default vision_ai). */
 		ocrStrategy?: OcrStrategy;
+		/** Vision sub-mode: `field` steers the vision model with the chosen
+		 *  category's field list (needs `categoryId`); `raw_text` (default)
+		 *  transcribes generically. Ignored on the `ocr_api` route. */
+		extractionMode?: ExtractionMode;
+		/** Pre-selected finance category id for `field` mode (e.g.
+		 *  `expense.sales_cost.invoice`). Drives the vision field prompt and
+		 *  becomes the artifact's category (classification is skipped). */
+		categoryId?: string;
 		/** Client-preprocessed sibling. `file` stays the untouched original;
 		 *  this enhanced image is what OCR/vision reads server-side. */
 		derived?: {
@@ -377,6 +388,10 @@ export function uploadDocument(
 	form.append('file', file);
 	form.append('uploadedFrom', opts.uploadedFrom ?? 'ai_panel');
 	form.append('ocrStrategy', opts.ocrStrategy ?? 'ocr_api');
+	if (opts.extractionMode === 'field' && opts.categoryId) {
+		form.append('extractionMode', 'field');
+		form.append('categoryId', opts.categoryId);
+	}
 	if (opts.clientExtractedText) {
 		form.append('clientExtractedText', opts.clientExtractedText);
 		form.append('clientExtractionMethod', opts.clientExtractionMethod ?? 'manual');
@@ -389,6 +404,24 @@ export function uploadDocument(
 		}
 	}
 	return postMultipart<DocumentArtifactPostResponse>('/api/documents', form);
+}
+
+export interface DocumentCategoryOption {
+	id: string;
+	label: string;
+	sublabel?: string;
+	bucket: 'expense' | 'revenue' | 'document_only';
+	expenseType: string | null;
+	persistTarget: string;
+	llmFields: string[];
+	userFields: string[];
+	requiresProject: boolean;
+}
+
+/** Client-safe finance category catalog (for the VisionAI "field" mode picker
+ *  and the inbox confirm form). */
+export function fetchDocumentCategories(): Promise<{ categories: DocumentCategoryOption[] }> {
+	return getJson<{ categories: DocumentCategoryOption[] }>('/api/documents/categories');
 }
 
 export function getDocumentStatus(documentId: string): Promise<DocumentStatusResponse> {

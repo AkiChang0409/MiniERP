@@ -81,6 +81,19 @@ export const POST: RequestHandler = async (event) => {
 				? 'vision_openai'
 				: 'ocr_api';
 
+	// VisionAI "field" extraction mode: the user pre-selected a category so the
+	// vision model can be steered with that category's field list. Only honoured
+	// on a vision route — the OCR.space route always transcribes generically.
+	const extractionModeRaw = form.get('extractionMode');
+	const presetCategoryIdRaw = form.get('categoryId');
+	const isVisionRoute = ocrStrategy === 'vision_openai' || ocrStrategy === 'vision_workers_ai';
+	const extractionMode: 'raw_text' | 'field' =
+		isVisionRoute && extractionModeRaw === 'field' ? 'field' : 'raw_text';
+	const presetCategoryId =
+		extractionMode === 'field' && typeof presetCategoryIdRaw === 'string' && presetCategoryIdRaw.trim()
+			? presetCategoryIdRaw.trim()
+			: undefined;
+
 	// Optional client-preprocessed sibling (vision-enhanced image). When the
 	// browser de-warps / normalises a phone photo it uploads the enhanced JPEG
 	// here while `file` stays the untouched original. Stored alongside; OCR
@@ -145,7 +158,9 @@ export const POST: RequestHandler = async (event) => {
 		userEmail: user.email,
 		clientExtractedText,
 		clientExtractionMethod,
-		ocrStrategy
+		ocrStrategy,
+		extractionMode,
+		presetCategoryId
 	};
 
 	if (shouldProcessInlineForDev(event)) {
@@ -197,8 +212,22 @@ async function processInlineFallback(
 	const {
 		extractDocumentFieldsCapability,
 		classifyDocumentCategoryCapability,
-		categoryIdForDocumentType
+		categoryIdForDocumentType,
+		documentTypeForCategory,
+		buildVisionFieldExtractionPrompt
 	} = await import('$modules/finance');
+
+	// Field mode: build the category-guided vision prompt + preset routing from
+	// the user-chosen category. Falls back to raw_text if the category has no
+	// extractable fields (buildVisionFieldExtractionPrompt returns null).
+	const fieldPrompt =
+		message.extractionMode === 'field' && message.presetCategoryId
+			? buildVisionFieldExtractionPrompt(message.presetCategoryId)
+			: null;
+	const presetCategoryId = fieldPrompt ? message.presetCategoryId : undefined;
+	const presetDocumentType = presetCategoryId
+		? documentTypeForCategory(presetCategoryId)
+		: undefined;
 
 	try {
 		const processed = await service.processDocument({
@@ -207,6 +236,9 @@ async function processInlineFallback(
 			clientExtractedText: message.clientExtractedText,
 			clientExtractionMethod: message.clientExtractionMethod,
 			ocrStrategy: message.ocrStrategy,
+			presetCategoryId,
+			presetDocumentType,
+			visionFieldPrompt: fieldPrompt ?? undefined,
 			categoryClassifier: async ({ tenantId, documentId, fileName, text }) => {
 				const r = await classifyDocumentCategoryCapability.execute(
 					{ documentId, fileName, text },

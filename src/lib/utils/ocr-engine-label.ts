@@ -18,9 +18,16 @@ export interface OcrEngineBadge {
 export function ocrEngineBadge(
 	textExtraction?: { method?: string; provider?: string } | null
 ): OcrEngineBadge | null {
-	const provider = (textExtraction?.provider ?? '').toLowerCase();
+	const rawProvider = (textExtraction?.provider ?? '').toLowerCase();
 	const method = (textExtraction?.method ?? '').toLowerCase();
-	if (!provider && !method) return null;
+	if (!rawProvider && !method) return null;
+
+	// VisionAI "field" extraction mode tags the provider with a `_field` suffix
+	// (e.g. `openai_field`). Strip it for matching but annotate the label so the
+	// user can tell field-guided vision apart from plain transcription.
+	const fieldMode = rawProvider.endsWith('_field');
+	const provider = fieldMode ? rawProvider.slice(0, -'_field'.length) : rawProvider;
+	const fieldSuffix = fieldMode ? ' · Field' : '';
 
 	if (provider === 'ocr_space') {
 		return { label: 'OCR.space', tone: 'bg-violet-50 text-violet-700 ring-violet-200' };
@@ -28,10 +35,10 @@ export function ocrEngineBadge(
 	// Two vision sub-routes — keep them distinct so the user can compare the
 	// external AI API vs Cloudflare Workers AI.
 	if (provider === 'openai') {
-		return { label: 'Vision · API', tone: 'bg-indigo-50 text-indigo-700 ring-indigo-200' };
+		return { label: `Vision · API${fieldSuffix}`, tone: 'bg-indigo-50 text-indigo-700 ring-indigo-200' };
 	}
 	if (provider === 'workers_ai') {
-		return { label: 'Vision · Workers', tone: 'bg-teal-50 text-teal-700 ring-teal-200' };
+		return { label: `Vision · Workers${fieldSuffix}`, tone: 'bg-teal-50 text-teal-700 ring-teal-200' };
 	}
 	if (method === 'vision_model') {
 		return { label: 'Vision AI', tone: 'bg-indigo-50 text-indigo-700 ring-indigo-200' };

@@ -38,7 +38,9 @@ import {
 import {
 	extractDocumentFieldsCapability,
 	classifyDocumentCategoryCapability,
-	categoryIdForDocumentType
+	categoryIdForDocumentType,
+	documentTypeForCategory,
+	buildVisionFieldExtractionPrompt
 } from '../src/modules/finance';
 import { getDb } from '../src/infrastructure/db';
 
@@ -102,6 +104,19 @@ async function processOne(
 				: null
 	});
 
+	// VisionAI "field" extraction mode: the user pre-selected a category before
+	// upload, so steer the vision OCR with that category's field list and skip
+	// classification (the preset is the source of truth). Falls back to raw_text
+	// when the category has no extractable fields (prompt builder returns null).
+	const fieldPrompt =
+		payload.extractionMode === 'field' && payload.presetCategoryId
+			? buildVisionFieldExtractionPrompt(payload.presetCategoryId)
+			: null;
+	const presetCategoryId = fieldPrompt ? payload.presetCategoryId : undefined;
+	const presetDocumentType = presetCategoryId
+		? documentTypeForCategory(presetCategoryId)
+		: undefined;
+
 	await service.processDocument({
 		tenantId: payload.tenantId,
 		documentId: payload.documentId,
@@ -109,8 +124,13 @@ async function processOne(
 		clientExtractionMethod: payload.clientExtractionMethod,
 		// Image OCR route the user chose at upload (vision LLM vs OCR.space).
 		ocrStrategy: payload.ocrStrategy,
+		// Field mode: pre-selected category + category-guided vision prompt.
+		presetCategoryId,
+		presetDocumentType,
+		visionFieldPrompt: fieldPrompt ?? undefined,
 		// Category-first classification: classify straight into a finance
 		// category (source of truth), instead of documentType → lossy map.
+		// Skipped entirely when presetCategoryId is set (field mode).
 		categoryClassifier: async ({ tenantId, documentId, fileName, text }) => {
 			const r = await classifyDocumentCategoryCapability.execute(
 				{ documentId, fileName, text },

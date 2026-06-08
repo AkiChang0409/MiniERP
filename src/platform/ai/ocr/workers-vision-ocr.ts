@@ -196,7 +196,12 @@ async function callVisionModel(
 
 export async function runWorkersVisionOcr(
 	env: Env,
-	input: { imageBytes: Uint8Array; mimeType: string }
+	input: { imageBytes: Uint8Array; mimeType: string },
+	/**
+	 * Optional prompt override for category-guided `field` extraction mode. When
+	 * omitted the generic verbatim-transcription prompts above are used.
+	 */
+	promptOverride?: { system: string; user: string }
 ): Promise<WorkersVisionOcrResult> {
 	if (!env.AI) {
 		return { ok: false, error: 'Workers AI is not available (missing AI binding).' };
@@ -216,11 +221,11 @@ export async function runWorkersVisionOcr(
 	const dataUri = `data:${mime};base64,${uint8ToBase64(input.imageBytes)}`;
 
 	const messages = [
-		{ role: 'system' as const, content: SYSTEM_PROMPT },
+		{ role: 'system' as const, content: promptOverride?.system ?? SYSTEM_PROMPT },
 		{
 			role: 'user' as const,
 			content: [
-				{ type: 'text' as const, text: USER_PROMPT },
+				{ type: 'text' as const, text: promptOverride?.user ?? USER_PROMPT },
 				{ type: 'image_url' as const, image_url: { url: dataUri } }
 			]
 		}

@@ -42,6 +42,11 @@ export { financeCapabilities, financeCapabilityIds };
 // barrel so cross-module callers don't violate Rule 2 of the boundary linter.
 export { extractDocumentFieldsCapability } from './capabilities/extract-document-fields';
 export {
+	buildVisionFieldExtractionPrompt,
+	VISION_FIELD_PROMPT_VERSION,
+	type VisionFieldPrompt
+} from './capabilities/extract-document-fields';
+export {
 	classifyDocumentCategoryCapability,
 	type ClassifyDocumentCategoryInput,
 	type ClassifyDocumentCategoryOutput

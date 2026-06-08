@@ -34,10 +34,11 @@ function readProviderPreference(env: Env): ImageOcrPreference {
 export async function runImageDocumentOcr(
 	env: Env,
 	input: { imageBytes: Uint8Array; mimeType: string; fileName: string },
-	opts: { provider?: ImageOcrPreference } = {}
+	opts: { provider?: ImageOcrPreference; promptOverride?: { system: string; user: string } } = {}
 ): Promise<ImageDocumentOcrResult> {
 	const preference = opts.provider ?? readProviderPreference(env);
 	const openaiKey = readEnv(env, 'OPENAI_API_KEY') || readEnv(env, 'LLM_API_KEY');
+	const promptOverride = opts.promptOverride;
 
 	if (preference !== 'workers_ai') {
 		if (!openaiKey && preference === 'openai') {
@@ -48,9 +49,9 @@ export async function runImageDocumentOcr(
 			};
 		}
 		if (!openaiKey) {
-			return runWorkersFallback(env, input);
+			return runWorkersFallback(env, input, promptOverride);
 		}
-		const result = await runOpenAiVisionOcr(env, { imageBytes: input.imageBytes, mimeType: input.mimeType });
+		const result = await runOpenAiVisionOcr(env, { imageBytes: input.imageBytes, mimeType: input.mimeType }, promptOverride);
 		if (result.ok) {
 			return { ok: true, text: result.text, provider: 'openai' };
 		}
@@ -60,14 +61,15 @@ export async function runImageDocumentOcr(
 		console.warn(`[image-ocr] OpenAI failed (${result.error}), falling back to Workers AI.`);
 	}
 
-	return runWorkersFallback(env, input);
+	return runWorkersFallback(env, input, promptOverride);
 }
 
 async function runWorkersFallback(
 	env: Env,
-	input: { imageBytes: Uint8Array; mimeType: string }
+	input: { imageBytes: Uint8Array; mimeType: string },
+	promptOverride?: { system: string; user: string }
 ): Promise<ImageDocumentOcrResult> {
-	const visionResult = await runWorkersVisionOcr(env, { imageBytes: input.imageBytes, mimeType: input.mimeType });
+	const visionResult = await runWorkersVisionOcr(env, { imageBytes: input.imageBytes, mimeType: input.mimeType }, promptOverride);
 	if (visionResult.ok) {
 		return { ok: true, text: visionResult.text, provider: 'workers_ai' };
 	}

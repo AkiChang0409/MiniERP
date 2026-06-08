@@ -90,7 +90,12 @@ const USER_PROMPT = [
 
 export async function runOpenAiVisionOcr(
 	env: Env,
-	input: { imageBytes: Uint8Array; mimeType: string }
+	input: { imageBytes: Uint8Array; mimeType: string },
+	/**
+	 * Optional prompt override for category-guided `field` extraction mode. When
+	 * omitted the generic verbatim-transcription prompts above are used.
+	 */
+	promptOverride?: { system: string; user: string }
 ): Promise<OpenAiVisionOcrResult> {
 	// Prefer the dedicated OPENAI_API_KEY; fall back to LLM_API_KEY so local dev
 	// works without duplicating the same OpenAI key in .dev.vars.
@@ -109,14 +114,17 @@ export async function runOpenAiVisionOcr(
 	const mimeType = input.mimeType.toLowerCase().startsWith('image/') ? input.mimeType : 'image/jpeg';
 	const dataUri = `data:${mimeType};base64,${uint8ToBase64(input.imageBytes)}`;
 
+	const systemPrompt = promptOverride?.system ?? SYSTEM_PROMPT;
+	const userPrompt = promptOverride?.user ?? USER_PROMPT;
+
 	const body = {
 		model,
 		messages: [
-			{ role: 'system', content: SYSTEM_PROMPT },
+			{ role: 'system', content: systemPrompt },
 			{
 				role: 'user',
 				content: [
-					{ type: 'text', text: USER_PROMPT },
+					{ type: 'text', text: userPrompt },
 					// detail:"high" tiles the image at 512x512 native-resolution patches
 					// (+ a low-res macro). Default "auto" silently downscales to 512x512
 					// for typical sizes, which destroys digit accuracy on invoices.

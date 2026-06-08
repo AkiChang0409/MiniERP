@@ -64,6 +64,15 @@ export interface ExtractTextInput {
 	 * sent to OCR.space instead of the vision LLM. Ignored for non-image inputs.
 	 */
 	ocrStrategy?: OcrStrategy;
+	/**
+	 * Optional category-guided vision prompt (VisionAI "field" extraction mode).
+	 * When present AND the input is an image on a vision route, the vision model
+	 * is steered to find the category's fields and emit a focused Markdown
+	 * transcription instead of the generic verbatim prompt. Built finance-side
+	 * (category-aware) and injected by the composition root — the platform layer
+	 * stays category-agnostic. Ignored for the OCR.space route and non-images.
+	 */
+	visionPrompt?: { system: string; user: string };
 }
 
 const PDF_BYTE_READ_LIMIT = 50_000;
@@ -156,7 +165,8 @@ export async function extractTextFromBytesRaw(
 	mimeType: string,
 	fileName: string | undefined,
 	env: Env,
-	ocrStrategy: OcrStrategy = 'vision_openai'
+	ocrStrategy: OcrStrategy = 'vision_openai',
+	visionPrompt?: { system: string; user: string }
 ): Promise<PlatformTextExtractionResult> {
 	if (isPdfMime(mimeType, fileName)) {
 		// DEPRECATED Ship 1: this byte-heuristic only "works" on PDFs whose text
@@ -225,7 +235,7 @@ export async function extractTextFromBytesRaw(
 		const result = await runImageDocumentOcr(
 			env,
 			{ imageBytes: bytes, mimeType, fileName: fileName ?? '' },
-			{ provider: visionProvider }
+			{ provider: visionProvider, promptOverride: visionPrompt }
 		);
 		if (!result.ok) {
 			return buildFailure('vision_failed', result.error, 'vision_model');
@@ -235,7 +245,9 @@ export async function extractTextFromBytesRaw(
 			status: 'success',
 			text: result.text,
 			confidence: result.provider === 'openai' ? 0.9 : 0.85,
-			provider: result.provider,
+			provider: visionPrompt
+				? `${result.provider}_field`
+				: result.provider,
 			providerJobId: result.provider === 'openai' ? readEnv(env, 'OPENAI_VISION_MODEL') || 'gpt-4o-mini' : undefined
 		};
 	}
@@ -352,6 +364,12 @@ export async function extractTextFromBlob(
 	const bytes = await fileService.getBytes(fileRef.key);
 	if (!bytes) return buildFailure('blob_not_found', `No object at ${fileRef.key}`, 'pdf_text');
 
-	return extractTextFromBytesRaw(bytes, fileRef.mimeType, fileRef.fileName, env, ocrStrategy);
+	// The category-guided vision prompt only applies to images on a vision route.
+	const visionPrompt =
+		ocrStrategy !== 'ocr_api' && isImageMime(fileRef.mimeType, fileRef.fileName)
+			? input.visionPrompt
+			: undefined;
+
+	return extractTextFromBytesRaw(bytes, fileRef.mimeType, fileRef.fileName, env, ocrStrategy, visionPrompt);
 }
 

@@ -9,6 +9,11 @@ export {
 	type HeuristicResult
 } from './heuristic';
 export {
+	buildVisionFieldExtractionPrompt,
+	VISION_FIELD_PROMPT_VERSION,
+	type VisionFieldPrompt
+} from './vision-field-prompts';
+export {
 	invoiceSchemaV1,
 	receiptSchemaV1,
 	poSchemaV1,
