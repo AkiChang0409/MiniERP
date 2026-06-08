@@ -247,13 +247,36 @@
 						{data.project.notes}
 					</p>
 				{/if}
-				{#if data.project.attachmentUrl}
-					<p class="mt-3 text-sm">
-						📎
-						<a class="text-[var(--sf-green)] underline" href={data.project.attachmentUrl} target="_blank" rel="noreferrer">
-							{data.project.attachmentName ?? 'Attachment'}
-						</a>
-					</p>
+				{#if data.attachments && data.attachments.length > 0}
+					<div class="mt-4">
+						<p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+							Attachments ({data.attachments.length})
+						</p>
+						<ul class="mt-1 space-y-1">
+							{#each data.attachments as att}
+								<li class="text-sm">
+									<a
+										class="inline-flex items-center gap-1.5 text-[var(--sf-green)] hover:underline"
+										href={att.url}
+										target="_blank"
+										rel="noreferrer"
+									>
+										📎 {att.fileName}
+									</a>
+									{#if att.sizeBytes}
+										<span class="ml-1 text-[11px] text-slate-400">
+											· {(att.sizeBytes / 1024 / 1024).toFixed(2)} MB
+										</span>
+									{/if}
+									{#if att.legacy}
+										<span class="ml-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">
+											legacy
+										</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					</div>
 				{/if}
 			</div>
 			<div class="flex flex-col items-end gap-2">

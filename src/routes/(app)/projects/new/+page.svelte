@@ -15,12 +15,118 @@
 	let priority = $state(5);
 	let ownerId = $state(data.currentUser?.id ?? '');
 	let parentProjectId = $state('');
-	let attachmentUrl = $state('');
-	let attachmentName = $state('');
 	let recurrenceFrequency = $state('');
 	let recurrenceInterval = $state<number | ''>('');
 	let collabSearch = $state('');
 	let selectedCollaborators = $state<Array<{ id: string; email: string; name: string; role: string }>>([]);
+
+	// TKMGMT1 v2 — drag-and-drop attachments (multi-file queue).
+	// Files are accumulated client-side and sent to the server with the rest
+	// of the form. The server uploads them to R2 and persists one
+	// `project_attachments` row per file.
+	const ALLOWED_EXTS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg'];
+	const ACCEPT_ATTR =
+		'.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/png,image/jpeg';
+	const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+
+	let attachmentInput = $state<HTMLInputElement | null>(null);
+	let attachmentFiles = $state<File[]>([]);
+	let attachmentError = $state<string | null>(null);
+	let dragActive = $state(false);
+
+	function extOf(name: string): string {
+		const m = /\.([a-zA-Z0-9]+)$/.exec(name);
+		return m ? m[1].toLowerCase() : '';
+	}
+
+	function formatBytes(n: number): string {
+		if (n < 1024) return `${n} B`;
+		if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+		return `${(n / 1024 / 1024).toFixed(2)} MB`;
+	}
+
+	function fileEmoji(name: string): string {
+		const ext = extOf(name);
+		if (ext === 'pdf') return '📕';
+		if (ext === 'doc' || ext === 'docx') return '📘';
+		if (ext === 'xls' || ext === 'xlsx') return '📗';
+		if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') return '🖼️';
+		return '📄';
+	}
+
+	function fileKey(file: File): string {
+		return `${file.name}::${file.size}::${file.lastModified}`;
+	}
+
+	function syncInput() {
+		// Mirror the queued files back into the hidden <input> so the form
+		// submission carries them as the multi-valued `files` field.
+		if (!attachmentInput) return;
+		const dt = new DataTransfer();
+		for (const f of attachmentFiles) dt.items.add(f);
+		attachmentInput.files = dt.files;
+	}
+
+	function enqueueFiles(incoming: FileList | File[] | null) {
+		if (!incoming || incoming.length === 0) return;
+		attachmentError = null;
+		const seen = new Set(attachmentFiles.map(fileKey));
+		const errors: string[] = [];
+		const next: File[] = [...attachmentFiles];
+		for (const file of Array.from(incoming)) {
+			const ext = extOf(file.name);
+			if (!ALLOWED_EXTS.includes(ext)) {
+				errors.push(`"${file.name}" — unsupported type "${ext || 'unknown'}"`);
+				continue;
+			}
+			if (file.size === 0) {
+				errors.push(`"${file.name}" — empty file`);
+				continue;
+			}
+			if (file.size > MAX_ATTACHMENT_BYTES) {
+				errors.push(`"${file.name}" — ${formatBytes(file.size)} > 15 MB`);
+				continue;
+			}
+			const k = fileKey(file);
+			if (seen.has(k)) continue;
+			seen.add(k);
+			next.push(file);
+		}
+		attachmentFiles = next;
+		if (errors.length > 0) attachmentError = errors.join(' · ');
+		syncInput();
+	}
+
+	function removeQueued(target: File) {
+		const k = fileKey(target);
+		attachmentFiles = attachmentFiles.filter((f) => fileKey(f) !== k);
+		syncInput();
+	}
+
+	function onDragOver(event: DragEvent) {
+		event.preventDefault();
+		dragActive = true;
+	}
+
+	function onDragLeave(event: DragEvent) {
+		event.preventDefault();
+		dragActive = false;
+	}
+
+	function onDrop(event: DragEvent) {
+		event.preventDefault();
+		dragActive = false;
+		enqueueFiles(event.dataTransfer?.files ?? null);
+	}
+
+	function onInputChange(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		enqueueFiles(target.files);
+		// Reset the native input so the same file can be re-picked if removed
+		// from the queue and then chosen again.
+		target.value = '';
+		syncInput();
+	}
 
 	let lastPrefillVersion = $state(-1);
 
@@ -92,7 +198,11 @@
 	title="Create Project"
 	description="Capture all the details that downstream tracking, calendar, and dashboard views rely on."
 >
-	<form class="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm" method="POST">
+	<form
+		class="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+		method="POST"
+		enctype="multipart/form-data"
+	>
 		{#if form?.message}
 			<p class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
 				{form.message}
@@ -314,26 +424,80 @@
 				></textarea>
 			</label>
 
-			<div class="grid gap-4 md:grid-cols-2">
-				<label class="space-y-1 text-sm">
-					<span class="text-slate-700">Attachment URL (PDF)</span>
+			<div class="space-y-1.5 text-sm">
+				<div class="flex items-baseline justify-between gap-2">
+					<span class="text-slate-700">Attachments (optional)</span>
+					{#if attachmentFiles.length > 0}
+						<span class="text-[11px] text-slate-500">
+							{attachmentFiles.length} file{attachmentFiles.length === 1 ? '' : 's'} queued
+						</span>
+					{/if}
+				</div>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					role="button"
+					tabindex="0"
+					aria-label="Drag and drop files here, or click to choose"
+					onclick={() => attachmentInput?.click()}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							attachmentInput?.click();
+						}
+					}}
+					ondragover={onDragOver}
+					ondragenter={onDragOver}
+					ondragleave={onDragLeave}
+					ondrop={onDrop}
+					class="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-center transition {dragActive
+						? 'border-[var(--sf-green)] bg-[var(--sf-green-soft)]'
+						: 'border-slate-300 bg-slate-50/40 hover:border-[var(--sf-green)] hover:bg-slate-50'}"
+				>
+					<span class="text-3xl">📥</span>
+					<p class="text-sm font-medium text-slate-700">
+						Drag &amp; drop files here, or
+						<span class="text-[var(--sf-green)] underline underline-offset-2">click to choose</span>
+					</p>
+					<p class="text-[11px] text-slate-500">
+						{ALLOWED_EXTS.join(', ')} · up to 15 MB each · multiple files supported
+					</p>
 					<input
-						type="url"
-						name="attachmentUrl"
-						class="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-[var(--sf-green)]"
-						placeholder="https://… (paste a link to the PDF)"
-						bind:value={attachmentUrl}
+						bind:this={attachmentInput}
+						type="file"
+						name="files"
+						accept={ACCEPT_ATTR}
+						multiple
+						class="hidden"
+						onchange={onInputChange}
 					/>
-				</label>
-				<label class="space-y-1 text-sm">
-					<span class="text-slate-700">Attachment label</span>
-					<input
-						name="attachmentName"
-						class="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-[var(--sf-green)]"
-						placeholder="e.g. brief.pdf"
-						bind:value={attachmentName}
-					/>
-				</label>
+				</div>
+
+				{#if attachmentFiles.length > 0}
+					<ul class="space-y-1.5 rounded-md border border-slate-200 bg-white p-2">
+						{#each attachmentFiles as file (fileKey(file))}
+							<li class="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-slate-50">
+								<span class="text-xl">{fileEmoji(file.name)}</span>
+								<div class="min-w-0 flex-1">
+									<p class="truncate text-sm font-medium text-slate-800">{file.name}</p>
+									<p class="text-[11px] text-slate-500">
+										{formatBytes(file.size)} · {file.type || extOf(file.name).toUpperCase()}
+									</p>
+								</div>
+								<button
+									type="button"
+									class="rounded-md border border-rose-200 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50"
+									onclick={() => removeQueued(file)}
+								>
+									Remove
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
+				{#if attachmentError}
+					<p class="text-[11px] text-rose-600">{attachmentError}</p>
+				{/if}
 			</div>
 		</section>
 

@@ -118,3 +118,38 @@ export const projectComments = sqliteTable('project_comments', {
 	mentions: text('mentions'),
 	...timeFields
 });
+
+// ---------------------------------------------------------------------------
+// Project Attachments (TKMGMT1 v2 — multi-file)
+// ---------------------------------------------------------------------------
+// Replaces the single `attachmentUrl` / `attachmentName` columns on `projects`.
+// Those columns are kept for back-compat reads; new uploads land here and the
+// service merges legacy single-file rows into the same list when surfaced.
+//
+//   - storageKey : R2 object key. The platform helper `r2FileUrls()` builds
+//                  the public `/api/files?key=…` URL on demand.
+//   - url        : denormalized cached URL — handy for list rendering and
+//                  also a stable reference if the URL scheme ever changes.
+//   - sizeBytes  : recorded at upload time for "X MB" labels in the UI.
+//   - uploadedBy : tracks who attached the file so the audit feed and
+//                  permission checks know who owns it.
+//
+// Soft-delete (`deletedAt`) hides the row in the UI; the underlying R2 object
+// is left for a future retention sweep — consistent with how the existing
+// document-intake `abandonIntake` flow handles file lifecycle.
+// ---------------------------------------------------------------------------
+
+export const projectAttachments = sqliteTable('project_attachments', {
+	id: text('id').primaryKey(),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => projects.id),
+	storageKey: text('storage_key').notNull(),
+	url: text('url').notNull(),
+	fileName: text('file_name').notNull(),
+	contentType: text('content_type'),
+	sizeBytes: integer('size_bytes'),
+	uploadedById: text('uploaded_by_id').references(() => users.id),
+	uploadedByEmail: text('uploaded_by_email'),
+	...timeFields
+});
