@@ -5,6 +5,16 @@ export const inviteCodes = sqliteTable('invite_codes', {
 	id: text('id').primaryKey(),
 	code: text('code').notNull().unique(),
 	roles: text('roles').notNull(),
+	/**
+	 * Optional HR person this invite binds the new account to. Set only for
+	 * employee invites; when the code is consumed at registration a
+	 * `user_person_links` row is created from this value. The personId never
+	 * comes from the registrant — it is fixed here at code-creation time.
+	 *
+	 * Logical FK to persons.id — enforced by the migration. No TS-level
+	 * reference: platform must not import from the HR module.
+	 */
+	linkedPersonId: text('linked_person_id'),
 	createdBy: text('created_by')
 		.notNull()
 		.references(() => users.id),

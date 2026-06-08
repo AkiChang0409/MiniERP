@@ -8,6 +8,7 @@ export function createHrDirectoryApi(source: HrDirectorySource) {
 	return {
 		getProjectComponents: source.getProjectComponents,
 		listEmployees: source.listEmployees,
+		listLinkableEmployees: source.listLinkableEmployees,
 		createEmployeeProfile: source.createEmployeeProfile,
 		getEmployeeDetailPage: source.getEmployeeDetailPage,
 		updateEmployeeProfile: source.updateEmployeeProfile,

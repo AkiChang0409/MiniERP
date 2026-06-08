@@ -4,6 +4,16 @@
 	let { data, form } = $props();
 
 	let copied = $state(false);
+	let selectedRoles = $state<string[]>([]);
+	let linkedPersonId = $state('');
+
+	function toggleRole(role: string, checked: boolean) {
+		selectedRoles = checked
+			? [...selectedRoles, role]
+			: selectedRoles.filter((r) => r !== role);
+		// Clear the person selection when the employee role is removed.
+		if (role === 'employee' && !checked) linkedPersonId = '';
+	}
 
 	async function copyCode(code: string) {
 		try {
@@ -73,6 +83,7 @@
 								type="checkbox"
 								name="role"
 								value={role}
+								onchange={(e) => toggleRole(role, e.currentTarget.checked)}
 								class="h-3.5 w-3.5 rounded border-slate-300 text-[var(--sf-green)] focus:ring-[var(--sf-green)]"
 							/>
 							{role}
@@ -80,6 +91,28 @@
 					{/each}
 				</div>
 			</div>
+
+			{#if selectedRoles.includes('employee')}
+				<label class="block text-sm font-medium text-slate-700">
+					Link to employee
+					<select
+						name="linkedPersonId"
+						bind:value={linkedPersonId}
+						required
+						class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none ring-[var(--sf-green)] focus:ring-2"
+					>
+						<option value="" disabled>Select an employee…</option>
+						{#each data.linkablePersons as p (p.id)}
+							<option value={p.id}>{p.name}{p.email ? ` (${p.email})` : ''}</option>
+						{/each}
+					</select>
+					{#if data.linkablePersons.length === 0}
+						<span class="mt-1 block text-[11px] text-amber-600">
+							No unlinked active employees available. Create an employee in HR first.
+						</span>
+					{/if}
+				</label>
+			{/if}
 
 			<label class="block text-sm font-medium text-slate-700">
 				Expires in (days)
