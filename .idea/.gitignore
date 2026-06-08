@@ -9,3 +9,10 @@
 /dataSources/
 /dataSources.local.xml
 /.vs/
+
+# CI / test artifacts (uploaded by GitHub Actions, not committed)
+/reports
+/coverage
+/playwright-report
+/test-results
+/.svelte-kit
