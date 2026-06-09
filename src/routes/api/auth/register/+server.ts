@@ -4,6 +4,7 @@ import { resolveWorkerAuthEnv } from '$platform/auth/resolve-worker-env';
 import { parseRoles, type AuthRole } from '$platform/auth/config';
 import { UserRepository } from '$platform/auth/user-repository';
 import { InviteCodeRepository } from '$platform/auth/invite-code-repository';
+import { UserPersonLinkRepository } from '$platform/auth/user-person-link-repository';
 import { AuditRepository } from '$platform/audit/audit-repository';
 import { createWorkerContext } from '$platform/modules';
 import { ok, fail } from '$platform/http';
@@ -39,6 +40,7 @@ export const POST: RequestHandler = async (event) => {
 	const activeCount = await userRepo.countActive();
 	let roles: AuthRole[];
 	let inviteCodeId: string | null = null;
+	let linkedPersonId: string | null = null;
 
 	if (activeCount === 0) {
 		roles = ['owner'];
@@ -57,6 +59,8 @@ export const POST: RequestHandler = async (event) => {
 			roles = parsed;
 		}
 		inviteCodeId = code.id;
+		// Identity binding is fixed on the invite, never supplied by the registrant.
+		linkedPersonId = code.linkedPersonId ?? null;
 	}
 
 	const rolesJson = JSON.stringify(roles);
@@ -87,6 +91,40 @@ export const POST: RequestHandler = async (event) => {
 				ipAddress: event.getClientAddress(),
 				metadata: { usedBy: result.user.id, email }
 			});
+		}
+
+		// Bind the new account to its HR person if the invite carried one. The
+		// account already exists, so a binding failure (person already linked,
+		// or partial unique-index race) must not orphan it — record the failure
+		// for manual follow-up and let registration succeed.
+		if (linkedPersonId) {
+			const linkRepo = new UserPersonLinkRepository(ctx.db);
+			try {
+				await linkRepo.linkUserToPerson(result.user.id, linkedPersonId);
+				await auditRepo.writeLog(null, {
+					action: 'user.person_linked',
+					entityType: 'user',
+					entityId: result.user.id,
+					module: 'core',
+					actionType: 'update',
+					ipAddress: event.getClientAddress(),
+					metadata: { personId: linkedPersonId, inviteCodeId }
+				});
+			} catch (linkErr: unknown) {
+				await auditRepo.writeLog(null, {
+					action: 'user.person_link_failed',
+					entityType: 'user',
+					entityId: result.user.id,
+					module: 'core',
+					actionType: 'update',
+					ipAddress: event.getClientAddress(),
+					metadata: {
+						personId: linkedPersonId,
+						inviteCodeId,
+						error: linkErr instanceof Error ? linkErr.message : String(linkErr)
+					}
+				});
+			}
 		}
 
 		await auditRepo.writeLog(null, {

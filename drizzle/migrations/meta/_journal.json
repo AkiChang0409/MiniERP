@@ -92,6 +92,13 @@
       "when": 1780110000000,
       "tag": "0018_pur006_supplier_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1780110000000,
+      "tag": "0018_user_person_links",
+      "breakpoints": true
     }
   ]
 }

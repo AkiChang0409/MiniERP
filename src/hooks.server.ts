@@ -38,6 +38,7 @@ function needsAppAuth(pathname: string) {
 		pathname.startsWith('/projects') ||
 		pathname.startsWith('/procurement') ||
 		pathname.startsWith('/sales-crm') ||
+		pathname.startsWith('/employee') ||
 		pathname.startsWith('/hr/employees') ||
 		pathname.startsWith('/finance/tax') ||
 		pathname.startsWith('/finance/reports') ||

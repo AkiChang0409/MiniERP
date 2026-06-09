@@ -60,6 +60,34 @@ export class EmployeeMasterService {
 		return rows;
 	}
 
+	/**
+	 * Persons that can be bound to a login account: active employee_profiles
+	 * only. Excluding already-linked persons is the caller's job (it needs the
+	 * platform-owned user_person_links table), keeping this query inside the HR
+	 * boundary.
+	 */
+	async listLinkableEmployees() {
+		return this.ctx.db
+			.select({
+				id: schema.persons.id,
+				name: schema.persons.name,
+				email: schema.persons.email
+			})
+			.from(schema.persons)
+			.innerJoin(
+				schema.employeeProfiles,
+				eq(schema.persons.id, schema.employeeProfiles.personId)
+			)
+			.where(
+				and(
+					isNull(schema.persons.deletedAt),
+					isNull(schema.employeeProfiles.deletedAt),
+					eq(schema.employeeProfiles.status, 'active')
+				)
+			)
+			.orderBy(asc(schema.persons.name));
+	}
+
 	async createEmployeeProfile(data: EmployeeProfileInput) {
 		const id = crypto.randomUUID();
 		const profileId = crypto.randomUUID();

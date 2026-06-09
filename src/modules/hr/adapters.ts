@@ -26,6 +26,7 @@ export function createHrDirectoryLegacySource(ctx: ModuleContext): HrDirectorySo
 	return {
 		getProjectComponents: comp.getProjectComponents.bind(comp),
 		listEmployees: employeeMaster.listEmployees.bind(employeeMaster),
+		listLinkableEmployees: employeeMaster.listLinkableEmployees.bind(employeeMaster),
 		createEmployeeProfile: employeeMaster.createEmployeeProfile.bind(employeeMaster),
 		getEmployeeDetailPage: employeeMaster.getEmployeeDetailPage.bind(employeeMaster),
 		updateEmployeeProfile: employeeMaster.updateEmployeeProfile.bind(employeeMaster),

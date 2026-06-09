@@ -12,6 +12,7 @@
 		| 'procurement'
 		| 'sales-crm'
 		| 'inventory'
+		| 'employee'
 		| 'settings';
 
 	type SideLink = {
@@ -39,6 +40,10 @@
 		{ id: 'procurement', href: '/procurement/suppliers', label: 'Procurement', moduleId: 'procurement' },
 		{ id: 'sales-crm', href: '/sales-crm/customers', label: 'Sales CRM', moduleId: 'sales-crm' },
 		{ id: 'inventory', href: '/inventory/items', label: 'Inventory', moduleId: 'inventory' },
+		// Employee self-service: moduleId null → visible to every logged-in user
+		// regardless of role (access is gated by the user_person_links binding,
+		// not a module grant — see /employee/leave route).
+		{ id: 'employee', href: '/employee/leave', label: 'My Space', moduleId: null },
 		{ id: 'settings', href: '/settings', label: 'Setting', moduleId: 'core' }
 	];
 
@@ -116,6 +121,16 @@
 			items: [
 				{ href: '/hr/overtime', label: 'Overtime Management', moduleId: 'hr', icon: 'O' }
 			]
+		}
+	];
+
+	// Employee self-service sidebar — moduleId null so links show for any
+	// logged-in user. Currently just Leave; Attendance / Overtime self-service
+	// can be added here later.
+	const employeeGroups: SideGroup[] = [
+		{
+			title: 'Self-Service',
+			items: [{ href: '/employee/leave', label: 'My Leave', moduleId: null, icon: 'L' }]
 		}
 	];
 
@@ -229,6 +244,8 @@
 		if (path.startsWith('/procurement')) return 'procurement';
 		if (path.startsWith('/sales-crm')) return 'sales-crm';
 		if (path.startsWith('/inventory')) return 'inventory';
+		// Employee self-service portal
+		if (path.startsWith('/employee')) return 'employee';
 		// Project: list and detail routes
 		if (path === '/projects' || path.startsWith('/projects/')) return 'project';
 		// HR: employee master data and leave management
@@ -244,6 +261,7 @@
 		if (primaryFromPath === 'procurement') return procurementGroups;
 		if (primaryFromPath === 'sales-crm') return salesCrmGroups;
 		if (primaryFromPath === 'inventory') return inventoryGroups;
+		if (primaryFromPath === 'employee') return employeeGroups;
 		if (primaryFromPath === 'settings') return settingsGroups;
 		return financeGroups;
 	});
@@ -308,6 +326,10 @@
 		// HR / Overtime
 		if (itemPath === '/hr/overtime') {
 			return path.startsWith('/hr/overtime');
+		}
+		// Employee / My Leave
+		if (itemPath === '/employee/leave') {
+			return path.startsWith('/employee/leave');
 		}
 		// Procurement / Sales CRM
 		if (itemPath === '/procurement/suppliers') {

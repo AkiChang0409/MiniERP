@@ -14,6 +14,9 @@ export { uploadIdempotency, uploadFileDedup } from '$infrastructure/storage/uplo
 // Invite codes (RBAC user invitation)
 export { inviteCodes } from '$platform/auth/invite-codes.schema';
 
+// User ↔ HR person identity binding
+export { userPersonLinks } from '$platform/auth/user-person-links.schema';
+
 // better-auth tables (sessions, accounts, verifications)
 export { sessions, accounts, verifications } from '../../platform/auth/auth-tables';
 

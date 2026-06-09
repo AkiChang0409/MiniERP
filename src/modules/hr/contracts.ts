@@ -20,6 +20,7 @@ type LegacyPersonService = InstanceType<typeof PersonService>;
 export interface HrDirectorySource {
 	getProjectComponents: LegacyCompensationService['getProjectComponents'];
 	listEmployees: LegacyEmployeeMasterService['listEmployees'];
+	listLinkableEmployees: LegacyEmployeeMasterService['listLinkableEmployees'];
 	createEmployeeProfile: LegacyEmployeeMasterService['createEmployeeProfile'];
 	getEmployeeDetailPage: LegacyEmployeeMasterService['getEmployeeDetailPage'];
 	updateEmployeeProfile: LegacyEmployeeMasterService['updateEmployeeProfile'];
