@@ -24,6 +24,11 @@ export interface ProjectSource {
 	removeCollaborator: ProjectServiceMethods['removeCollaborator'];
 	listComments: ProjectServiceMethods['listComments'];
 	addComment: ProjectServiceMethods['addComment'];
+	// TKMGMT1 v2 — multi-file attachments
+	listAttachments: ProjectServiceMethods['listAttachments'];
+	addAttachment: ProjectServiceMethods['addAttachment'];
+	removeAttachment: ProjectServiceMethods['removeAttachment'];
+	clearLegacyAttachment: ProjectServiceMethods['clearLegacyAttachment'];
 	// TKMGMT4 + TKMGMT2 gating
 	getEditableScope: ProjectServiceMethods['getEditableScope'];
 	// TKMGMT1 sub-project

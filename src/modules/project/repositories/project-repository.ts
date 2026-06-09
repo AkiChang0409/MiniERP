@@ -4,7 +4,8 @@ import {
 	projects,
 	projectEmployees,
 	projectCollaborators,
-	projectComments
+	projectComments,
+	projectAttachments
 } from './project.schema';
 import { businessPartners } from '$modules/sales-crm/repositories/customer.schema';
 import { users } from '$platform/auth/users.schema';
@@ -323,6 +324,41 @@ export class ProjectCommentRepository extends BaseRepository<typeof projectComme
 			.orderBy(desc(projectComments.createdAt))
 			.limit(opts?.limit ?? 100);
 		return rows;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ProjectAttachmentRepository (TKMGMT1 v2 — multi-file)
+// ---------------------------------------------------------------------------
+
+export class ProjectAttachmentRepository extends BaseRepository<typeof projectAttachments> {
+	constructor(db: DBClient) {
+		super(db, projectAttachments);
+	}
+
+	async listForProject(projectId: string) {
+		return this.db
+			.select()
+			.from(projectAttachments)
+			.where(
+				and(eq(projectAttachments.projectId, projectId), isNull(projectAttachments.deletedAt))
+			)
+			.orderBy(desc(projectAttachments.createdAt));
+	}
+
+	async findOwnedByProject(projectId: string, attachmentId: string) {
+		const rows = await this.db
+			.select()
+			.from(projectAttachments)
+			.where(
+				and(
+					eq(projectAttachments.id, attachmentId),
+					eq(projectAttachments.projectId, projectId),
+					isNull(projectAttachments.deletedAt)
+				)
+			)
+			.limit(1);
+		return rows[0] ?? null;
 	}
 }
 

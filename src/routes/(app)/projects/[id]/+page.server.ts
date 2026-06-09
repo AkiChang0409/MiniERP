@@ -32,6 +32,8 @@ export const load: PageServerLoad = async (event) => {
 	const canEditCrucial = scope === 'owner' || scope === 'manager';
 	const canEdit = scope !== 'none';
 
+	// `attachments` already comes through from +layout.server.ts via SvelteKit
+	// parent-data merging — no need to refetch here.
 	return {
 		...financialDetail,
 		collaborators,

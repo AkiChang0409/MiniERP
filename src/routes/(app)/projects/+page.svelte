@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { computeUrgency } from '$modules/project';
+
 	let { data } = $props();
 
 	const listHref = (page: number, overrides?: Record<string, string>) => {
@@ -13,12 +15,6 @@
 		return qs ? `/projects?${qs}` : '/projects';
 	};
 
-	const todayIso = new Date().toISOString().slice(0, 10);
-	const priorityColor = (priority: number) => {
-		if (priority >= 8) return 'bg-rose-100 text-rose-700';
-		if (priority >= 5) return 'bg-amber-100 text-amber-700';
-		return 'bg-emerald-100 text-emerald-700';
-	};
 	const statusColor = (status: string) => {
 		switch (status) {
 			case 'completed':
@@ -52,6 +48,12 @@
 			</p>
 		</div>
 		<div class="flex shrink-0 items-center gap-2">
+			<a
+				href="/projects/gantt"
+				class="inline-flex items-center justify-center rounded-md border border-slate-300 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
+			>
+				Gantt
+			</a>
 			<a
 				href="/projects/dashboard"
 				class="inline-flex items-center justify-center rounded-md border border-slate-300 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
@@ -161,13 +163,18 @@
 							<th class="px-3 py-2">Project</th>
 							<th class="px-3 py-2">Owner</th>
 							<th class="px-3 py-2">Status</th>
-							<th class="px-3 py-2">Priority</th>
+							<th class="px-3 py-2">Urgency</th>
 							<th class="px-3 py-2">Deadline</th>
 							<th class="px-3 py-2">Customer</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-slate-100">
 						{#each data.projects as project}
+							{@const urg = computeUrgency({
+								status: project.status,
+								startDate: project.startDate,
+								deadline: project.deadline
+							})}
 							<tr class="hover:bg-slate-50/80">
 								<td class="px-0 py-0">
 									<a
@@ -196,19 +203,27 @@
 									</span>
 								</td>
 								<td class="px-3 py-2">
-									<span class="rounded-full px-2 py-0.5 text-[11px] font-medium {priorityColor(project.priority ?? 5)}">
-										P{project.priority ?? 5}
+									<span
+										class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+										style={`background:${urg.soft};color:${urg.text}`}
+										title={urg.percentElapsed != null ? `${urg.percentElapsed}% of time elapsed` : urg.label}
+									>
+										<span class="h-1.5 w-1.5 rounded-full" style={`background:${urg.fill}`}></span>
+										{urg.label}
 									</span>
 								</td>
 								<td class="px-3 py-2">
 									{#if project.deadline}
-										<span
-											class={project.deadline < todayIso && project.status !== 'completed'
-												? 'font-medium text-rose-600'
-												: 'text-slate-700'}
-										>
+										<span class={urg.level === 'overdue' ? 'font-medium text-rose-600' : 'text-slate-700'}>
 											{project.deadline}
 										</span>
+										{#if urg.daysUntilDeadline != null}
+											<span class="block text-[11px] text-slate-400">
+												{urg.daysUntilDeadline >= 0
+													? `${urg.daysUntilDeadline}d left`
+													: `${Math.abs(urg.daysUntilDeadline)}d overdue`}
+											</span>
+										{/if}
 									{:else}
 										<span class="text-slate-400">—</span>
 									{/if}
