@@ -2,22 +2,21 @@
 	import { setAgentPageContext } from '$app-layer/ai-panel/state/context';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
+	import { computeUrgency } from '$modules/project';
 
 	let { data } = $props();
 
-	// TKMGMT acceptance criteria — derived helpers
-	const todayIso = new Date().toISOString().slice(0, 10);
-	const isOverdue = $derived(
-		!!data.project.deadline && data.project.deadline < todayIso && data.project.status !== 'completed'
+	const urgency = $derived(
+		computeUrgency({
+			status: data.project.status,
+			startDate: data.project.startDate,
+			deadline: data.project.deadline,
+			createdAt: data.project.createdAt
+		})
 	);
+	const isOverdue = $derived(urgency.level === 'overdue');
 
 	const statusLabel = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-
-	const priorityBadge = (p: number) => {
-		if (p >= 8) return 'bg-rose-100 text-rose-700';
-		if (p >= 5) return 'bg-amber-100 text-amber-700';
-		return 'bg-emerald-100 text-emerald-700';
-	};
 
 	let newCommentBody = $state('');
 	let newCollaboratorEmail = $state('');
@@ -179,8 +178,22 @@
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div class="min-w-0 flex-1">
 				<div class="flex flex-wrap items-center gap-2">
-					<span class="rounded-full px-2 py-0.5 text-[11px] font-medium {priorityBadge(data.project.priority ?? 5)}">
-						P{data.project.priority ?? 5}
+					<span
+						class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
+						style={`background:${urgency.soft};color:${urgency.text}`}
+						title={urgency.percentElapsed != null
+							? `${urgency.percentElapsed}% of the time window has elapsed`
+							: urgency.label}
+					>
+						<span class="h-1.5 w-1.5 rounded-full" style={`background:${urgency.fill}`}></span>
+						{urgency.label}
+						{#if urgency.daysUntilDeadline != null}
+							<span class="opacity-70">
+								· {urgency.daysUntilDeadline >= 0
+									? `${urgency.daysUntilDeadline}d left`
+									: `${Math.abs(urgency.daysUntilDeadline)}d overdue`}
+							</span>
+						{/if}
 					</span>
 					<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
 						{statusLabel(data.project.status)}

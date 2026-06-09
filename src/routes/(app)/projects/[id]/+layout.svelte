@@ -499,28 +499,18 @@
 						</select>
 					</label>
 
-					<div class="grid grid-cols-2 gap-3">
-						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
-							Deadline
-							<input
-								type="date"
-								name="deadline"
-								value={data.project.deadline ?? ''}
-								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
-							/>
-						</label>
-						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
-							Priority (1–10)
-							<input
-								type="number"
-								name="priority"
-								min="1"
-								max="10"
-								value={data.project.priority ?? 5}
-								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
-							/>
-						</label>
-					</div>
+					<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+						Deadline
+						<input
+							type="date"
+							name="deadline"
+							value={data.project.deadline ?? ''}
+							class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+						/>
+						<span class="block pt-1 text-[11px] font-normal text-slate-500">
+							Urgency colour (green → yellow → red) updates automatically based on this date.
+						</span>
+					</label>
 
 					<div class="grid grid-cols-2 gap-3">
 						<label class="block space-y-1.5 text-xs font-medium text-slate-700">

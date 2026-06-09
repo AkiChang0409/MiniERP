@@ -153,3 +153,132 @@ export const projectAttachments = sqliteTable('project_attachments', {
 	uploadedByEmail: text('uploaded_by_email'),
 	...timeFields
 });
+
+// ---------------------------------------------------------------------------
+// Project Tasks (Phase 1B — Gantt foundation, Motion-style)
+// ---------------------------------------------------------------------------
+// Each task is a single bar on the project's detailed Gantt. `parentTaskId`
+// gives a one-level subtask hierarchy (we keep it shallow on purpose — deep
+// nesting hurts Gantt readability). `orderIndex` is the manual sort the user
+// drags around inside a row group.
+//
+//   - status   : matches the project status enum vocabulary for consistency
+//                (unassigned / ongoing / under_review / completed)
+//   - assigneeId : platform user the task is assigned to (TKMGMT4-style)
+//   - estimatedHours : used by the auto-assign workload balancer (Phase 3 /
+//                      Epic 4) — no behaviour change if left null
+// ---------------------------------------------------------------------------
+
+export const projectTasks = sqliteTable('project_tasks', {
+	id: text('id').primaryKey(),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => projects.id),
+	parentTaskId: text('parent_task_id').references((): AnySQLiteColumn => projectTasks.id),
+	name: text('name').notNull(),
+	description: text('description'),
+	status: text('status', {
+		enum: ['unassigned', 'ongoing', 'under_review', 'completed', 'blocked']
+	})
+		.notNull()
+		.default('unassigned'),
+	startDate: text('start_date'),
+	endDate: text('end_date'),
+	assigneeId: text('assignee_id').references(() => users.id),
+	estimatedHours: integer('estimated_hours'),
+	orderIndex: integer('order_index').notNull().default(0),
+	completedAt: text('completed_at'),
+	isMilestone: integer('is_milestone', { mode: 'boolean' }).notNull().default(false),
+	// Stages flow from the workflow engine (Phase 2B). Stored as the stage id
+	// so a task always knows which stage progression it advances. Nullable
+	// because workflows are an opt-in per project.
+	workflowStageId: text('workflow_stage_id'),
+	...timeFields
+});
+
+// ---------------------------------------------------------------------------
+// Task Dependencies
+// ---------------------------------------------------------------------------
+// Finish-to-Start is the default (the typical Gantt arrow). The other kinds
+// are scaffolded for the critical-path resolver but the v1 UI only renders
+// `finish_to_start`.
+// ---------------------------------------------------------------------------
+
+export const projectTaskDependencies = sqliteTable('project_task_dependencies', {
+	id: text('id').primaryKey(),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => projects.id),
+	fromTaskId: text('from_task_id')
+		.notNull()
+		.references(() => projectTasks.id),
+	toTaskId: text('to_task_id')
+		.notNull()
+		.references(() => projectTasks.id),
+	kind: text('kind', {
+		enum: ['finish_to_start', 'start_to_start', 'finish_to_finish', 'start_to_finish']
+	})
+		.notNull()
+		.default('finish_to_start'),
+	lagDays: integer('lag_days').notNull().default(0),
+	...timeFields
+});
+
+// ---------------------------------------------------------------------------
+// Workflow Stages (Phase 2B / Epic 3)
+// ---------------------------------------------------------------------------
+// A project can opt into a named workflow (e.g. "Request → Approval →
+// Procurement → Execution → Review"). Stages are ordered and the auto-advance
+// engine moves the project forward when all tasks tagged with a stage finish.
+//
+//   - `kind` lets a stage carry a non-task requirement (approval gate, budget
+//     check), enforced by the rules engine.
+//   - `conditionExpression` is a tiny JSON DSL the rules engine reads; v1
+//     stores it as opaque JSON and only evaluates a couple of shapes.
+// ---------------------------------------------------------------------------
+
+export const projectWorkflowStages = sqliteTable('project_workflow_stages', {
+	id: text('id').primaryKey(),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => projects.id),
+	name: text('name').notNull(),
+	orderIndex: integer('order_index').notNull().default(0),
+	kind: text('kind', { enum: ['task_group', 'approval', 'budget_gate', 'manual'] })
+		.notNull()
+		.default('task_group'),
+	status: text('status', {
+		enum: ['pending', 'in_progress', 'completed', 'blocked', 'skipped']
+	})
+		.notNull()
+		.default('pending'),
+	conditionExpression: text('condition_expression'),
+	completedAt: text('completed_at'),
+	...timeFields
+});
+
+// ---------------------------------------------------------------------------
+// Calendar integrations (Phase 3 / Epic 5 scaffold)
+// ---------------------------------------------------------------------------
+// Tracks per-user OAuth bindings to Google Calendar / Outlook. Real
+// credentials need GOOGLE_CALENDAR_CLIENT_ID / OUTLOOK_CLIENT_ID env values to
+// be wired by the operator; the schema is ready so the UI can show a
+// "Connect" button now.
+// ---------------------------------------------------------------------------
+
+export const projectCalendarIntegrations = sqliteTable('project_calendar_integrations', {
+	id: text('id').primaryKey(),
+	userId: text('user_id')
+		.notNull()
+		.references(() => users.id),
+	provider: text('provider', { enum: ['google', 'outlook'] }).notNull(),
+	externalAccountEmail: text('external_account_email'),
+	accessTokenEncrypted: text('access_token_encrypted'),
+	refreshTokenEncrypted: text('refresh_token_encrypted'),
+	expiresAt: text('expires_at'),
+	scope: text('scope'),
+	status: text('status', { enum: ['active', 'expired', 'revoked'] })
+		.notNull()
+		.default('active'),
+	...timeFields
+});

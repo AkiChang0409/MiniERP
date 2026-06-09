@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { computeUrgency } from '$modules/project';
 
 	let { data } = $props();
 
@@ -11,6 +12,7 @@
 		status: string;
 		deadline: string | null;
 		priority: number;
+		startDate?: string | null;
 		ownerEmail: string | null;
 		ownerName: string | null;
 	};
@@ -27,11 +29,15 @@
 	const statusMeta = (status: string) =>
 		STATUS_PALETTE[status] ?? { fill: '#cbd5e1', soft: '#f1f5f9', text: '#475569', label: status };
 
-	const priorityMeta = (priority: number) => {
-		if (priority >= 8) return { soft: '#fee2e2', text: '#b91c1c', label: 'High' };
-		if (priority >= 5) return { soft: '#fef3c7', text: '#92400e', label: 'Medium' };
-		return { soft: '#dcfce7', text: '#166534', label: 'Low' };
-	};
+	// Auto-urgency (TKMGMT-v2): the colour is derived from the deadline, never
+	// from a user-entered priority number. Keeps the dashboard, list, calendar,
+	// and Gantt in lock-step.
+	const urgencyOf = (p: DeadlineRow) =>
+		computeUrgency({
+			status: p.status,
+			deadline: p.deadline,
+			startDate: p.startDate ?? null
+		});
 
 	const totalStatusCount = $derived(
 		(data.dashboard.statusSummary ?? []).reduce(
@@ -258,7 +264,7 @@
 				<ul class="mt-4 divide-y divide-slate-100">
 					{#each data.dashboard.upcoming as p (p.id)}
 						{@const meta = statusMeta(p.status)}
-						{@const pm = priorityMeta(p.priority ?? 5)}
+						{@const urg = urgencyOf(p as DeadlineRow)}
 						{@const d = daysFromToday(p.deadline)}
 						<li>
 							<a
@@ -281,10 +287,11 @@
 								</div>
 								<div class="flex shrink-0 items-center gap-2">
 									<span
-										class="rounded-full px-2 py-0.5 text-[10px] font-medium"
-										style={`background:${pm.soft};color:${pm.text}`}
+										class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+										style={`background:${urg.soft};color:${urg.text}`}
 									>
-										P{p.priority}
+										<span class="h-1.5 w-1.5 rounded-full" style={`background:${urg.fill}`}></span>
+										{urg.label}
 									</span>
 									<span
 										class="rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -326,7 +333,7 @@
 							<th class="px-3 py-2 font-medium">Project</th>
 							<th class="px-3 py-2 font-medium">Owner</th>
 							<th class="px-3 py-2 font-medium">Status</th>
-							<th class="px-3 py-2 font-medium">Priority</th>
+							<th class="px-3 py-2 font-medium">Urgency</th>
 							<th class="px-3 py-2 font-medium">Deadline</th>
 							<th class="px-3 py-2 text-right font-medium">Overdue</th>
 						</tr>
@@ -334,7 +341,7 @@
 					<tbody class="divide-y divide-slate-100">
 						{#each data.dashboard.overdue as p (p.id)}
 							{@const meta = statusMeta(p.status)}
-							{@const pm = priorityMeta(p.priority ?? 5)}
+							{@const urg = urgencyOf(p as DeadlineRow)}
 							{@const d = daysFromToday(p.deadline)}
 							<tr class="cursor-pointer hover:bg-rose-50/40" onclick={() => (window.location.href = `/projects/${p.id}`)}>
 								<td class="px-3 py-2">
@@ -354,10 +361,11 @@
 								</td>
 								<td class="px-3 py-2">
 									<span
-										class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-										style={`background:${pm.soft};color:${pm.text}`}
+										class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+										style={`background:${urg.soft};color:${urg.text}`}
 									>
-										P{p.priority}
+										<span class="h-1.5 w-1.5 rounded-full" style={`background:${urg.fill}`}></span>
+										{urg.label}
 									</span>
 								</td>
 								<td class="px-3 py-2 font-medium text-rose-700">{p.deadline ?? '—'}</td>

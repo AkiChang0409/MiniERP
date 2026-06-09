@@ -220,7 +220,7 @@
 	// project pages and should stay inside the default centered max-w-6xl
 	// container along with `/projects` itself.
 	const isProjectDetailPage = $derived(
-		/^\/projects\/(?!new$|dashboard(\/|$)|calendar(\/|$))[^/]+/.test(path)
+		/^\/projects\/(?!new$|dashboard(\/|$)|calendar(\/|$)|gantt(\/|$))[^/]+/.test(path)
 	);
 
 	// Determine which primary section the route belongs to

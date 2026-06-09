@@ -25,6 +25,18 @@ export {
 	type ProjectCreateInput,
 	type ProjectUpdateInput
 } from './services/legacy-project-service';
+export {
+	computeUrgency,
+	urgencyBadgeClasses,
+	type UrgencyLevel,
+	type UrgencyResult
+} from './services/urgency';
+export {
+	ProjectTaskService,
+	type TaskCreateInput,
+	type TaskUpdateInput,
+	type TaskDependencyInput
+} from './services/task-service';
 export { projectActions };
 export type { ProjectSource } from './contracts';
 export type { ProjectInboundContract, ProjectPublicGroup } from './contracts/inbound';

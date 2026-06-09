@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { computeUrgency } from '$modules/project';
+
 	let { data } = $props();
 
 	type CalEntry = {
@@ -102,13 +104,13 @@
 		return out;
 	});
 
-	const priorityMeta = (priority: number) => {
-		if (priority >= 8)
-			return { soft: '#fee2e2', text: '#b91c1c', border: '#fecaca' };
-		if (priority >= 5)
-			return { soft: '#fef3c7', text: '#92400e', border: '#fde68a' };
-		return { soft: '#dcfce7', text: '#166534', border: '#bbf7d0' };
-	};
+	// Calendar chip colour now follows the same auto-urgency logic as the
+	// list / dashboard / Gantt — derived from the deadline, no manual priority.
+	const urgencyForEntry = (entry: CalEntry) =>
+		computeUrgency({
+			status: entry.status,
+			deadline: entry.deadline
+		});
 </script>
 
 <div class="space-y-5">
@@ -203,16 +205,16 @@
 			</div>
 			<div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
 				<span class="inline-flex items-center gap-1">
-					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fecaca"></span>
-					Priority 8-10
+					<span class="inline-block h-2 w-2 rounded-sm" style="background:#bbf7d0"></span>
+					On track
 				</span>
 				<span class="inline-flex items-center gap-1">
 					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fde68a"></span>
-					Priority 5-7
+					Watch
 				</span>
 				<span class="inline-flex items-center gap-1">
-					<span class="inline-block h-2 w-2 rounded-sm" style="background:#bbf7d0"></span>
-					Priority 1-4
+					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fecaca"></span>
+					Urgent / overdue
 				</span>
 				<span class="inline-flex items-center gap-1">
 					<span class="opacity-60">⟳</span>
@@ -265,14 +267,14 @@
 							{#if entries.length > 0}
 								<ul class="space-y-1">
 									{#each entries.slice(0, 3) as entry (entry.id)}
-										{@const pm = priorityMeta(entry.priority ?? 5)}
+										{@const urg = urgencyForEntry(entry)}
 										{@const meta = statusMeta(entry.status)}
 										<li>
 											<a
 												href={`/projects/${entry.id}`}
 												class="block truncate rounded border px-1.5 py-1 text-[10.5px] leading-tight"
-												style={`background:${pm.soft};color:${pm.text};border-color:${pm.border}`}
-												title={`${entry.name} · ${meta.label} · P${entry.priority}`}
+												style={`background:${urg.soft};color:${urg.text};border-color:${urg.border}`}
+												title={`${entry.name} · ${meta.label} · ${urg.label}`}
 											>
 												<span class="font-medium">
 													{#if entry.recurrenceFrequency}<span class="opacity-70">⟳ </span>{/if}{entry.name}
