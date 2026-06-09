@@ -294,17 +294,63 @@
 		</div>
 	</section>
 
-	<!-- Subscribe note -->
-	<section class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-		<p class="font-medium text-slate-700">Sync to Google Calendar or Outlook</p>
-		<p class="mt-1">
-			Click <span class="font-medium text-[var(--sf-green)]">Download .ics</span> for a one-off
-			snapshot, or paste
-			<code class="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
-				{icsHref}
-			</code>
-			into your calendar app to subscribe to the live feed. Two-way edits will land in v2 once the
-			platform-side OAuth integration ships.
+	<!-- Two-way sync (Epic 5) -->
+	<section class="rounded-xl border border-slate-200 bg-white p-4 text-xs">
+		<p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+			Two-way calendar sync
 		</p>
+		<p class="mt-1 text-slate-600">
+			Connect your calendar to push these deadlines (and reschedules) directly to Google
+			Calendar or Outlook.
+		</p>
+		<div class="mt-3 grid gap-2 sm:grid-cols-2">
+			{#each (data.integrations ?? []) as int}
+				<div class="rounded-md border border-slate-200 bg-slate-50/50 p-3">
+					<p class="text-sm font-medium capitalize text-slate-800">{int.provider}</p>
+					{#if !int.configured}
+						<p class="mt-1 text-[11px] text-amber-700">
+							Operator needs to set
+							<code class="font-mono text-[10px]">
+								{int.provider === 'google'
+									? 'GOOGLE_CALENDAR_CLIENT_ID + SECRET'
+									: 'OUTLOOK_CLIENT_ID + SECRET'}
+							</code>
+							to enable.
+						</p>
+					{:else if int.connected}
+						<p class="mt-1 text-[11px] text-slate-600">
+							Connected as <span class="font-mono">{int.externalAccountEmail}</span>
+						</p>
+						<form
+							method="POST"
+							action={`/api/projects/calendar/oauth/${int.provider}/disconnect`}
+							class="mt-2"
+						>
+							<button
+								type="submit"
+								class="rounded-md border border-rose-200 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50"
+							>
+								Disconnect
+							</button>
+						</form>
+					{:else}
+						<a
+							class="mt-2 inline-flex rounded-md border border-[var(--sf-green)] bg-[var(--sf-green-soft)] px-2 py-1 text-[11px] font-medium text-[var(--sf-green)] hover:bg-emerald-100"
+							href={`/api/projects/calendar/oauth/${int.provider}/start`}
+						>
+							Connect {int.provider}
+						</a>
+					{/if}
+				</div>
+			{/each}
+		</div>
+
+		<details class="mt-3 text-[11px] text-slate-500">
+			<summary class="cursor-pointer">Or subscribe via ICS</summary>
+			<p class="mt-1">
+				Paste this URL into any calendar app to subscribe to a read-only feed:
+				<code class="block rounded bg-slate-50 px-1.5 py-0.5 font-mono">{icsHref}</code>
+			</p>
+		</details>
 	</section>
 </div>

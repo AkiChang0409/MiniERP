@@ -1,7 +1,10 @@
 import type { PageServerLoad } from './$types';
 
 import { createModuleContext } from '$platform/modules';
-import { createProjectApi } from '$modules/project';
+import {
+	createProjectApi,
+	ProjectCalendarIntegrationService
+} from '$modules/project';
 
 function firstOfMonth(date: Date): Date {
 	return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
@@ -31,7 +34,8 @@ export const load: PageServerLoad = async (event) => {
 		return {
 			entries: [],
 			month: { year: new Date().getUTCFullYear(), month: new Date().getUTCMonth() },
-			range: { from: '', to: '' }
+			range: { from: '', to: '' },
+			integrations: []
 		};
 	}
 
@@ -43,11 +47,17 @@ export const load: PageServerLoad = async (event) => {
 
 	const ctx = await createModuleContext(event);
 	const project = createProjectApi(ctx);
-	const entries = await project.getCalendarEntries({ fromIso, toIso });
+	const integrationsSvc = new ProjectCalendarIntegrationService(ctx);
+
+	const [entries, integrations] = await Promise.all([
+		project.getCalendarEntries({ fromIso, toIso }),
+		integrationsSvc.statusForUser()
+	]);
 
 	return {
 		entries,
 		month: { year, month },
-		range: { from: fromIso, to: toIso }
+		range: { from: fromIso, to: toIso },
+		integrations
 	};
 };

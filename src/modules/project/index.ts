@@ -38,6 +38,16 @@ export {
 	type TaskDependencyInput
 } from './services/task-service';
 export {
+	ProjectAutoAssignService,
+	type AutoAssignInput,
+	type AutoAssignResult
+} from './services/auto-assign';
+export {
+	ProjectCalendarIntegrationService,
+	type CalendarProvider,
+	type ConnectStatus
+} from './services/calendar-integration';
+export {
 	generateProjectPlan,
 	type GeneratedPlan,
 	type GeneratePlanInput
@@ -57,6 +67,16 @@ export {
 	type ExtractedTaskBundle,
 	type ExtractTasksInput
 } from './capabilities/extract-tasks';
+export {
+	draftMeetingAgenda,
+	type MeetingAgenda,
+	type DraftAgendaInput
+} from './capabilities/meeting-agenda';
+export {
+	processMeetingTranscript,
+	type MeetingNotes,
+	type ProcessMeetingNotesInput
+} from './capabilities/meeting-notes';
 export { projectActions };
 export type { ProjectSource } from './contracts';
 export type { ProjectInboundContract, ProjectPublicGroup } from './contracts/inbound';
