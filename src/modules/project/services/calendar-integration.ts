@@ -65,7 +65,23 @@ export class ProjectCalendarIntegrationService {
 	async statusForUser(): Promise<ConnectStatus[]> {
 		const user = this.ctx.user;
 		if (!user) return [];
-		const rows = await this.repo.listForUser(user.id);
+
+		// If migration 0010 hasn't run yet, the table doesn't exist — surface
+		// "configured but not connected" for both providers so the page still
+		// renders. The user gets a clear hint in the page footer telling them
+		// to run `npm run db:migrate:local`.
+		let rows: Awaited<ReturnType<typeof this.repo.listForUser>> = [];
+		try {
+			rows = await this.repo.listForUser(user.id);
+		} catch (err) {
+			const msg = (err as Error)?.message ?? '';
+			if (!/no such table|project_calendar_integrations/i.test(msg)) {
+				throw err;
+			}
+			// Table missing — fall through with empty rows; UI will treat as
+			// "not connected" and the operator runs the migration.
+		}
+
 		const out: ConnectStatus[] = [];
 		for (const provider of ['google', 'outlook'] as const) {
 			const cfg = providerConfig(provider, this.ctx.env);

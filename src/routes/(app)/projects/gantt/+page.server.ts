@@ -29,10 +29,26 @@ export const load: PageServerLoad = async (event) => {
 	const from = event.url.searchParams.get('from') ?? range.from;
 	const to = event.url.searchParams.get('to') ?? range.to;
 
-	const { projects } = await svc.portfolio({ scope, fromIso: from, toIso: to });
+	// Portfolio query joins `project_tasks` — if migration 0010 hasn't run,
+	// degrade to a project-only view rather than 500.
+	let projects: Awaited<ReturnType<typeof svc.portfolio>>['projects'] = [];
+	let dataMessage: string | null = null;
+	try {
+		const result = await svc.portfolio({ scope, fromIso: from, toIso: to });
+		projects = result.projects;
+	} catch (err) {
+		const msg = (err as Error)?.message ?? '';
+		if (/no such table|project_tasks/i.test(msg)) {
+			dataMessage =
+				'Database is missing the project_tasks table. Run `npm run db:migrate:local` to apply migration 0010.';
+		} else {
+			throw err;
+		}
+	}
 
 	return {
 		projects,
-		filters: { scope, from, to }
+		filters: { scope, from, to },
+		dataMessage
 	};
 };
