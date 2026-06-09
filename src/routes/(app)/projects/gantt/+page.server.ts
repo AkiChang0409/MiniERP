@@ -1,7 +1,11 @@
 import type { PageServerLoad } from './$types';
 
 import { createModuleContext } from '$platform/modules';
-import { ProjectTaskService } from '$modules/project';
+import {
+	ProjectTaskService,
+	computeUrgency,
+	type UrgencyResult
+} from '$modules/project';
 
 function defaultRange(): { from: string; to: string } {
 	const today = new Date();
@@ -46,9 +50,59 @@ export const load: PageServerLoad = async (event) => {
 		}
 	}
 
+	// "Tasks scheduled past deadline" popup (Motion-style). We classify the
+	// portfolio projects into two buckets:
+	//
+	//   HARD deadline — overdue (deadline < today, not completed)
+	//   SOFT deadline — urgent tier (<20% of the time window remaining)
+	//
+	// Both buckets exclude `completed` and `archived`. The popup only shows
+	// if there's something in either list.
+	type AlertItem = {
+		id: string;
+		name: string;
+		deadline: string | null;
+		owner: string;
+		daysUntil: number | null;
+		urgency: UrgencyResult;
+	};
+	const alertsHard: AlertItem[] = [];
+	const alertsSoft: AlertItem[] = [];
+	const now = new Date();
+	for (const p of projects) {
+		if (p.status === 'completed' || p.status === 'archived') continue;
+		const urg = computeUrgency({
+			status: p.status,
+			startDate: p.startDate,
+			deadline: p.deadline,
+			createdAt: p.createdAt,
+			now
+		});
+		const item: AlertItem = {
+			id: p.id,
+			name: p.name,
+			deadline: p.deadline ?? null,
+			owner: p.ownerName ?? p.ownerEmail ?? '— unassigned —',
+			daysUntil: urg.daysUntilDeadline,
+			urgency: urg
+		};
+		if (urg.level === 'overdue') alertsHard.push(item);
+		else if (urg.level === 'urgent') alertsSoft.push(item);
+	}
+	alertsHard.sort(
+		(a, b) => (a.daysUntil ?? -Infinity) - (b.daysUntil ?? -Infinity)
+	);
+	alertsSoft.sort(
+		(a, b) => (a.daysUntil ?? Infinity) - (b.daysUntil ?? Infinity)
+	);
+
 	return {
 		projects,
 		filters: { scope, from, to },
-		dataMessage
+		dataMessage,
+		alerts: {
+			hard: alertsHard,
+			soft: alertsSoft
+		}
 	};
 };

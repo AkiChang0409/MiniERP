@@ -275,6 +275,83 @@
 			/* swallow — next refresh will resync */
 		}
 	}
+
+	// --- "Tasks scheduled past deadline" popup (Motion-style) ----------------
+	// Mirrors Motion's overlay: HARD section (overdue) and SOFT section (urgent
+	// but not yet past). Auto-opens once per browser session if there's
+	// something to show; user can dismiss permanently for that session.
+	type Alert = {
+		id: string;
+		name: string;
+		deadline: string | null;
+		owner: string;
+		daysUntil: number | null;
+		urgency: { label: string; soft: string; text: string; fill: string };
+	};
+	let alertOpen = $state(false);
+	let alertActioning = $state<string | null>(null);
+	let alertDismissed = $state<Set<string>>(new Set());
+
+	const alertHard = $derived(
+		((data.alerts?.hard ?? []) as Alert[]).filter((a) => !alertDismissed.has(`hard:${a.id}`))
+	);
+	const alertSoft = $derived(
+		((data.alerts?.soft ?? []) as Alert[]).filter((a) => !alertDismissed.has(`soft:${a.id}`))
+	);
+	const alertHasAny = $derived(alertHard.length + alertSoft.length > 0);
+
+	$effect(() => {
+		// Auto-open once per browser session.
+		if (typeof window === 'undefined') return;
+		if (!alertHasAny) return;
+		try {
+			const seen = sessionStorage.getItem('gantt-alerts-seen');
+			if (!seen) {
+				alertOpen = true;
+				sessionStorage.setItem('gantt-alerts-seen', '1');
+			}
+		} catch {
+			/* private mode — just open it */
+			alertOpen = true;
+		}
+	});
+
+	function localDismiss(bucket: 'hard' | 'soft', id: string) {
+		const next = new Set(alertDismissed);
+		next.add(`${bucket}:${id}`);
+		alertDismissed = next;
+	}
+
+	async function postponeDeadline(projectId: string, days: number) {
+		alertActioning = projectId;
+		try {
+			const project = data.projects.find((p) => p.id === projectId);
+			if (!project || !project.deadline) return;
+			const base = new Date(project.deadline);
+			base.setDate(base.getDate() + days);
+			const newDeadline = base.toISOString().slice(0, 10);
+			await fetch(`/api/projects/${projectId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ deadline: newDeadline })
+			});
+			localDismiss('hard', projectId);
+			localDismiss('soft', projectId);
+		} finally {
+			alertActioning = null;
+		}
+	}
+
+	async function markCompleted(projectId: string) {
+		alertActioning = projectId;
+		try {
+			await fetch(`/api/projects/${projectId}/complete`, { method: 'POST' });
+			localDismiss('hard', projectId);
+			localDismiss('soft', projectId);
+		} finally {
+			alertActioning = null;
+		}
+	}
 </script>
 
 <svelte:window onpointermove={onPointerMove} onpointerup={onPointerUp} />
@@ -294,6 +371,15 @@
 			</p>
 		</div>
 		<div class="flex shrink-0 items-center gap-2">
+			{#if alertHasAny}
+				<button
+					type="button"
+					onclick={() => (alertOpen = true)}
+					class="inline-flex items-center justify-center gap-1.5 rounded-md border border-rose-300 bg-rose-50 px-3.5 py-2 text-[13px] font-medium text-rose-700 hover:bg-rose-100"
+				>
+					⚠ {alertHard.length + alertSoft.length} past deadline
+				</button>
+			{/if}
 			<a
 				href="/projects/dashboard"
 				class="inline-flex items-center justify-center rounded-md border border-slate-300 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-50"
@@ -609,3 +695,175 @@
 		(longest chain in the task DAG).
 	</p>
 </div>
+
+<!-- "Tasks scheduled past deadline" popup (Motion-style) -->
+{#if alertOpen && alertHasAny}
+	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+		<button
+			type="button"
+			class="absolute inset-0 bg-slate-900/40"
+			aria-label="Close past-deadline dialog"
+			onclick={() => (alertOpen = false)}
+		></button>
+		<div
+			class="relative max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="past-deadline-title"
+		>
+			<div class="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
+				<div>
+					<h2 id="past-deadline-title" class="text-base font-semibold text-slate-900">
+						Tasks scheduled past deadline
+					</h2>
+					<p class="mt-0.5 text-xs text-slate-500">
+						{alertHard.length} past hard deadline · {alertSoft.length} approaching
+					</p>
+				</div>
+				<button
+					type="button"
+					class="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+					onclick={() => (alertOpen = false)}
+					aria-label="Close"
+				>
+					×
+				</button>
+			</div>
+
+			<div class="max-h-[65vh] overflow-y-auto px-5 py-4">
+				{#if alertHard.length > 0}
+					<p class="text-[11px] font-semibold uppercase tracking-wider text-rose-700">
+						Scheduled after hard deadline
+					</p>
+					<ul class="mt-2 space-y-1.5">
+						{#each alertHard as item (item.id)}
+							<li
+								class="flex flex-wrap items-center gap-2 rounded-md border-l-4 border-rose-500 bg-rose-50/40 px-3 py-2.5"
+							>
+								<div class="min-w-0 flex-1">
+									<a
+										class="block truncate text-sm font-medium text-slate-900 hover:text-[var(--sf-green)]"
+										href={`/projects/${item.id}`}
+									>
+										{item.name}
+									</a>
+									<p class="text-[11px] text-slate-500">
+										owner: {item.owner}
+										{#if item.deadline}
+											· <span class="font-medium text-rose-700">
+												due {item.deadline}
+											</span>
+											{#if item.daysUntil != null}
+												<span class="text-rose-600">
+													({Math.abs(item.daysUntil)}d overdue)
+												</span>
+											{/if}
+										{/if}
+									</p>
+								</div>
+								<div class="flex shrink-0 items-center gap-1">
+									<button
+										type="button"
+										class="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+										disabled={alertActioning === item.id}
+										onclick={() => postponeDeadline(item.id, 7)}
+										title="Push the deadline out by 7 days"
+									>
+										+7 days
+									</button>
+									<button
+										type="button"
+										class="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+										disabled={alertActioning === item.id}
+										onclick={() => markCompleted(item.id)}
+										title="Mark this project completed"
+									>
+										Mark done
+									</button>
+									<button
+										type="button"
+										class="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+										onclick={() => localDismiss('hard', item.id)}
+										title="Hide from this session"
+									>
+										This is fine
+									</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
+				{#if alertSoft.length > 0}
+					<p class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+						Scheduled after soft deadline
+					</p>
+					<ul class="mt-2 space-y-1.5">
+						{#each alertSoft as item (item.id)}
+							<li
+								class="flex flex-wrap items-center gap-2 rounded-md border-l-4 border-amber-400 bg-amber-50/40 px-3 py-2.5"
+							>
+								<div class="min-w-0 flex-1">
+									<a
+										class="block truncate text-sm font-medium text-slate-900 hover:text-[var(--sf-green)]"
+										href={`/projects/${item.id}`}
+									>
+										{item.name}
+									</a>
+									<p class="text-[11px] text-slate-500">
+										owner: {item.owner}
+										{#if item.deadline}
+											· <span class="font-medium text-amber-700">due {item.deadline}</span>
+											{#if item.daysUntil != null && item.daysUntil >= 0}
+												<span class="text-amber-700">({item.daysUntil}d left)</span>
+											{/if}
+										{/if}
+									</p>
+								</div>
+								<div class="flex shrink-0 items-center gap-1">
+									<button
+										type="button"
+										class="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+										disabled={alertActioning === item.id}
+										onclick={() => postponeDeadline(item.id, 7)}
+									>
+										+7 days
+									</button>
+									<button
+										type="button"
+										class="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+										disabled={alertActioning === item.id}
+										onclick={() => markCompleted(item.id)}
+									>
+										Mark done
+									</button>
+									<button
+										type="button"
+										class="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+										onclick={() => localDismiss('soft', item.id)}
+									>
+										This is fine
+									</button>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
+
+			<div class="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3">
+				<p class="text-[11px] text-slate-500">
+					Hover the Gantt bars to see live urgency. Adjusting a deadline here updates the bar
+					colour automatically.
+				</p>
+				<button
+					type="button"
+					class="rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2f5e2c]"
+					onclick={() => (alertOpen = false)}
+				>
+					Got it
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}

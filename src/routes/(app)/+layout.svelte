@@ -34,7 +34,7 @@
 		moduleId: string | null;
 	}> = [
 		{ id: 'finance', href: '/finance/dashboard', label: 'Finance', moduleId: 'finance' },
-		{ id: 'project', href: '/projects', label: 'Project', moduleId: 'project' },
+		{ id: 'project', href: '/projects/gantt', label: 'Project', moduleId: 'project' },
 		{ id: 'hr', href: '/hr/employees', label: 'HR', moduleId: 'hr' },
 		{ id: 'procurement', href: '/procurement/suppliers', label: 'Procurement', moduleId: 'procurement' },
 		{ id: 'sales-crm', href: '/sales-crm/customers', label: 'Sales CRM', moduleId: 'sales-crm' },
@@ -193,6 +193,9 @@
 			{
 				title: 'Projects',
 				items: [
+					{ href: '/projects/gantt', label: 'Gantt', moduleId: 'project', icon: 'G' },
+					{ href: '/projects/dashboard', label: 'Dashboard', moduleId: 'project', icon: 'D' },
+					{ href: '/projects/calendar', label: 'Calendar', moduleId: 'project', icon: 'C' },
 					{ href: '/projects', label: 'All Projects', moduleId: 'project', icon: 'P', badge: c?.all },
 					{
 						href: '/projects?status=active',
