@@ -2,9 +2,205 @@
 	import { setAgentPageContext } from '$app-layer/ai-panel/state/context';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import { computeUrgency } from '$modules/project';
 
 	let { data } = $props();
+
+	// Pick up an AI-generated plan that the create form stashed in
+	// sessionStorage and materialise it as real tasks. One-shot — we wipe the
+	// key as soon as we read it so a refresh doesn't double-create.
+	let materializingPlan = $state(false);
+	let materializeMessage = $state<string | null>(null);
+
+	// --- AI Chat (Epic 7) — floating widget on the detail page -------------
+	type ChatTurn = {
+		role: 'user' | 'assistant';
+		text: string;
+		citations?: Array<{ kind: string; ref: string; excerpt?: string }>;
+		needsHuman?: boolean;
+	};
+	let chatOpen = $state(false);
+	let chatInput = $state('');
+	let chatLoading = $state(false);
+	let chatTurns = $state<ChatTurn[]>([]);
+	let chatError = $state<string | null>(null);
+
+	async function askProjectQuestion() {
+		const q = chatInput.trim();
+		if (!q) return;
+		chatTurns = [...chatTurns, { role: 'user', text: q }];
+		chatInput = '';
+		chatLoading = true;
+		chatError = null;
+		try {
+			const r = await fetch(`/api/projects/${data.project.id}/chat`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ question: q })
+			});
+			const body = await r.json();
+			const answer = body?.data?.answer ?? body?.answer;
+			if (!r.ok || !answer) {
+				chatError = body?.error ?? 'Could not answer.';
+				return;
+			}
+			chatTurns = [
+				...chatTurns,
+				{
+					role: 'assistant',
+					text: answer.answer,
+					citations: answer.citations,
+					needsHuman: answer.needsHuman
+				}
+			];
+		} catch (e) {
+			chatError = (e as Error).message;
+		} finally {
+			chatLoading = false;
+		}
+	}
+
+	// --- Docs Assistant (Epic 10) — turn an attachment into draft tasks ----
+	let extractLoading = $state<string | null>(null);
+	let extractMessage = $state<string | null>(null);
+	async function extractTasksFromAttachment(att: { id: string; fileName: string; url: string }) {
+		extractMessage = null;
+		extractLoading = att.id;
+		try {
+			// First, ask the document-intake module for the raw text behind the
+			// attachment. For project-side attachments stored in R2 directly we
+			// don't have OCR, so we fall back to fetching the file contents as
+			// text where possible (PDFs that are already text-extractable show up
+			// here; image-only docs need the full intake pipeline).
+			let rawText = '';
+			try {
+				const txtRes = await fetch(att.url);
+				if (txtRes.ok) {
+					const buf = await txtRes.arrayBuffer();
+					rawText = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf));
+				}
+			} catch {
+				/* swallow — empty rawText will surface a clean error below */
+			}
+			if (!rawText.trim()) {
+				extractMessage = `Cannot read "${att.fileName}" as text. For PDFs and images, upload via the AI Inbox so OCR runs first, then re-try here.`;
+				return;
+			}
+			const r = await fetch(`/api/projects/${data.project.id}/extract-tasks`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ rawText })
+			});
+			const body = await r.json();
+			const bundle = body?.data?.bundle ?? body?.bundle;
+			if (!r.ok || !bundle) {
+				extractMessage = body?.error ?? 'Extraction failed.';
+				return;
+			}
+			// Promote each suggested task to a real task. Confidence < 0.5 is
+			// dropped; everything else goes in and the user can groom from
+			// there.
+			let created = 0;
+			for (const t of bundle.tasks ?? []) {
+				if (t.confidence < 0.5) continue;
+				const dueDate = t.dueDate ?? null;
+				const startDate = new Date().toISOString().slice(0, 10);
+				const r2 = await fetch(`/api/projects/${data.project.id}/tasks`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						name: t.name,
+						description: t.description ?? null,
+						startDate,
+						endDate: dueDate
+					})
+				});
+				if (r2.ok) created += 1;
+			}
+			extractMessage = `Extracted ${created} task suggestion${created === 1 ? '' : 's'} from "${att.fileName}". Review them on the Gantt.`;
+			await invalidateAll();
+		} catch (e) {
+			extractMessage = (e as Error).message;
+		} finally {
+			extractLoading = null;
+		}
+	}
+	onMount(async () => {
+		try {
+			const raw = sessionStorage.getItem('pendingProjectPlan');
+			if (!raw) return;
+			sessionStorage.removeItem('pendingProjectPlan');
+			const plan = JSON.parse(raw) as {
+				tasks: Array<{
+					name: string;
+					description?: string;
+					durationDays: number;
+					startOffsetDays?: number;
+					dependsOnIndices?: number[];
+					isMilestone?: boolean;
+					estimatedHours?: number;
+					stageName?: string;
+				}>;
+				stages?: string[];
+				savedAt: number;
+			};
+			if (!plan?.tasks || plan.tasks.length === 0) return;
+			// stale guard — only materialise plans saved in the last 5 minutes
+			if (Date.now() - plan.savedAt > 5 * 60 * 1000) return;
+
+			materializingPlan = true;
+			const startBase = data.project.startDate
+				? new Date(data.project.startDate)
+				: new Date(data.project.createdAt);
+			const createdIds: string[] = [];
+			for (let i = 0; i < plan.tasks.length; i++) {
+				const t = plan.tasks[i];
+				const start = new Date(startBase);
+				start.setDate(start.getDate() + (t.startOffsetDays ?? 0));
+				const end = new Date(start);
+				end.setDate(end.getDate() + Math.max(1, t.durationDays));
+				const r = await fetch(`/api/projects/${data.project.id}/tasks`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						name: t.name,
+						description: t.description ?? null,
+						startDate: start.toISOString().slice(0, 10),
+						endDate: end.toISOString().slice(0, 10),
+						isMilestone: !!t.isMilestone,
+						estimatedHours: t.estimatedHours ?? null
+					})
+				});
+				if (r.ok) {
+					const body = await r.json();
+					createdIds.push(body?.data?.id ?? body?.id);
+				}
+			}
+			// Best-effort dependency wiring once all tasks exist.
+			for (let i = 0; i < plan.tasks.length; i++) {
+				const deps = plan.tasks[i].dependsOnIndices ?? [];
+				for (const depIdx of deps) {
+					const fromId = createdIds[depIdx];
+					const toId = createdIds[i];
+					if (!fromId || !toId) continue;
+					await fetch(`/api/projects/${data.project.id}/tasks/dependencies`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ fromTaskId: fromId, toTaskId: toId })
+					}).catch(() => {});
+				}
+			}
+			materializingPlan = false;
+			materializeMessage = `Created ${createdIds.length} task${
+				createdIds.length === 1 ? '' : 's'
+			} from your AI plan.`;
+			await invalidateAll();
+		} catch (e) {
+			materializingPlan = false;
+			materializeMessage = `Failed to materialise plan: ${(e as Error).message}`;
+		}
+	});
 
 	const urgency = $derived(
 		computeUrgency({
@@ -173,6 +369,17 @@
 		</div>
 	{/if}
 
+	{#if materializingPlan}
+		<div class="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+			Creating tasks from your AI-generated plan…
+		</div>
+	{/if}
+	{#if materializeMessage}
+		<div class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+			{materializeMessage}
+		</div>
+	{/if}
+
 	<!-- TKMGMT1/3/4 — Project overview card -->
 	<section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
 		<div class="flex flex-wrap items-start justify-between gap-3">
@@ -267,7 +474,7 @@
 						</p>
 						<ul class="mt-1 space-y-1">
 							{#each data.attachments as att}
-								<li class="text-sm">
+								<li class="flex flex-wrap items-center gap-2 text-sm">
 									<a
 										class="inline-flex items-center gap-1.5 text-[var(--sf-green)] hover:underline"
 										href={att.url}
@@ -277,14 +484,25 @@
 										📎 {att.fileName}
 									</a>
 									{#if att.sizeBytes}
-										<span class="ml-1 text-[11px] text-slate-400">
+										<span class="text-[11px] text-slate-400">
 											· {(att.sizeBytes / 1024 / 1024).toFixed(2)} MB
 										</span>
 									{/if}
 									{#if att.legacy}
-										<span class="ml-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">
+										<span class="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">
 											legacy
 										</span>
+									{/if}
+									{#if data.canEdit && !att.legacy}
+										<button
+											type="button"
+											class="ml-auto rounded border border-[var(--sf-green)] bg-[var(--sf-green-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--sf-green)] hover:bg-emerald-100 disabled:opacity-60"
+											disabled={extractLoading === att.id}
+											onclick={() => extractTasksFromAttachment(att)}
+											title="AI suggests tasks from this document"
+										>
+											{extractLoading === att.id ? '…' : 'AI · Extract tasks'}
+										</button>
 									{/if}
 								</li>
 							{/each}
@@ -767,6 +985,103 @@
 				</table>
 			</div>
 		</div>
+	</div>
+{/if}
+
+<!-- AI Chat widget (Epic 7) — floating bottom-right -->
+<div class="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
+	{#if chatOpen}
+		<div class="w-80 max-w-[90vw] rounded-xl border border-slate-200 bg-white shadow-xl">
+			<div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
+				<div>
+					<p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--sf-green)]">
+						Ask this project
+					</p>
+					<p class="text-[10px] text-slate-500">Powered by AI · grounded in this project's data</p>
+				</div>
+				<button
+					type="button"
+					class="rounded-md p-1 text-slate-500 hover:bg-slate-100"
+					onclick={() => (chatOpen = false)}
+					aria-label="Close chat"
+				>
+					×
+				</button>
+			</div>
+			<div class="max-h-72 overflow-y-auto px-3 py-2 text-[13px]">
+				{#if chatTurns.length === 0}
+					<p class="py-6 text-center text-slate-500">
+						Try "What's overdue?" or "Who owns the survey task?"
+					</p>
+				{:else}
+					{#each chatTurns as turn, i (i)}
+						<div class="mb-3 {turn.role === 'user' ? 'text-right' : ''}">
+							<div
+								class="inline-block max-w-[85%] rounded-lg px-3 py-2 {turn.role === 'user'
+									? 'bg-[var(--sf-green)] text-white'
+									: 'bg-slate-100 text-slate-800'}"
+							>
+								{turn.text}
+							</div>
+							{#if turn.role === 'assistant' && turn.citations && turn.citations.length > 0}
+								<p class="mt-1 text-[10px] text-slate-500">
+									Refs: {turn.citations.map((c) => `${c.kind}:${c.ref.slice(0, 8)}`).join(', ')}
+								</p>
+							{/if}
+							{#if turn.role === 'assistant' && turn.needsHuman}
+								<p class="mt-1 text-[10px] text-amber-700">
+									⚠ AI flagged this as outside its knowledge — consider asking a teammate.
+								</p>
+							{/if}
+						</div>
+					{/each}
+				{/if}
+				{#if chatError}
+					<p class="text-[11px] text-rose-700">{chatError}</p>
+				{/if}
+			</div>
+			<form
+				class="flex gap-1 border-t border-slate-200 p-2"
+				onsubmit={(e) => {
+					e.preventDefault();
+					askProjectQuestion();
+				}}
+			>
+				<input
+					type="text"
+					class="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[var(--sf-green)]"
+					placeholder="Ask a question…"
+					bind:value={chatInput}
+				/>
+				<button
+					type="submit"
+					class="rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c] disabled:opacity-60"
+					disabled={chatLoading || !chatInput.trim()}
+				>
+					{chatLoading ? '…' : 'Ask'}
+				</button>
+			</form>
+		</div>
+	{/if}
+	<button
+		type="button"
+		class="rounded-full bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-[#2f5e2c]"
+		onclick={() => (chatOpen = !chatOpen)}
+	>
+		{chatOpen ? 'Hide chat' : '💬 Ask this project'}
+	</button>
+</div>
+
+{#if extractMessage}
+	<div class="fixed bottom-20 left-4 z-40 max-w-md rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 shadow">
+		{extractMessage}
+		<button
+			type="button"
+			class="ml-2 text-[11px] text-emerald-700 underline"
+			onclick={() => (extractMessage = null)}
+		>
+			dismiss
+		</button>
 	</div>
 {/if}
 

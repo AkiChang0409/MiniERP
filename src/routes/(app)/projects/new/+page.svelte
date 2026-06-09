@@ -127,6 +127,87 @@
 		syncInput();
 	}
 
+	// --- AI Project Manager (Epic 1) ---------------------------------------
+	type PlanTask = {
+		name: string;
+		description?: string;
+		durationDays: number;
+		startOffsetDays?: number;
+		dependsOnIndices?: number[];
+		isMilestone?: boolean;
+		estimatedHours?: number;
+		stageName?: string;
+	};
+
+	let aiPrompt = $state('');
+	let aiLoading = $state(false);
+	let aiError = $state<string | null>(null);
+	let aiPlanTasks = $state<PlanTask[]>([]);
+	let aiPlanStages = $state<string[]>([]);
+	let aiConfidence = $state<number | null>(null);
+
+	async function generatePlan() {
+		aiError = null;
+		aiLoading = true;
+		try {
+			const res = await fetch('/api/projects/generate-plan', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					prompt: aiPrompt,
+					knownStartDate: startDate || null,
+					knownDeadline: deadline || null
+				})
+			});
+			const body = await res.json();
+			if (!res.ok) {
+				aiError = body?.error || body?.message || 'Plan generation failed.';
+				return;
+			}
+			const plan = body?.data?.plan ?? body?.plan;
+			if (!plan) {
+				aiError = 'No plan returned.';
+				return;
+			}
+			projectName = plan.projectName;
+			if (plan.description) description = plan.description;
+			aiPlanTasks = plan.tasks;
+			aiPlanStages = plan.stages ?? [];
+			aiConfidence = plan.confidence;
+			if (!deadline && plan.totalDurationDays) {
+				const start = new Date(startDate || new Date().toISOString().slice(0, 10));
+				start.setDate(start.getDate() + plan.totalDurationDays);
+				deadline = start.toISOString().slice(0, 10);
+			}
+		} catch (e) {
+			aiError = (e as Error).message;
+		} finally {
+			aiLoading = false;
+		}
+	}
+
+	// After the project is saved, the server action redirects to /projects/[id].
+	// We piggy-back on `form?.ok` from SvelteKit to materialise tasks via the
+	// API. Since the form does a 303 redirect we can't intercept post-save
+	// inside the same page — so we stash the plan in sessionStorage and the
+	// detail page picks it up. Simpler than passing it through the URL.
+	$effect(() => {
+		if (aiPlanTasks.length > 0) {
+			try {
+				sessionStorage.setItem(
+					'pendingProjectPlan',
+					JSON.stringify({
+						tasks: aiPlanTasks,
+						stages: aiPlanStages,
+						savedAt: Date.now()
+					})
+				);
+			} catch {
+				/* private mode — ignore */
+			}
+		}
+	});
+
 	let lastPrefillVersion = $state(-1);
 
 	const collaboratorRolesJson = $derived(
@@ -197,6 +278,74 @@
 	title="Create Project"
 	description="Capture all the details that downstream tracking, calendar, and dashboard views rely on."
 >
+	<!-- AI Project Manager (Epic 1) — drop the high-level description here and
+	     the model returns an editable plan that fills the form below. -->
+	<section class="rounded-xl border border-[var(--sf-green)] bg-[var(--sf-green-soft)] p-5 shadow-sm">
+		<div class="flex items-start justify-between gap-3">
+			<div>
+				<p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--sf-green)]">
+					AI Assist · optional
+				</p>
+				<h2 class="mt-1 text-sm font-medium text-slate-900">
+					Describe the project in plain English
+				</h2>
+				<p class="mt-1 text-[12px] text-slate-600">
+					e.g. <em>"Renovate the beachfront restaurant by June, includes kitchen refit and
+					rebranding"</em>. The plan is editable — you stay in control.
+				</p>
+			</div>
+			{#if aiConfidence != null}
+				<span class="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[var(--sf-green)]">
+					Confidence {Math.round(aiConfidence * 100)}%
+				</span>
+			{/if}
+		</div>
+
+		<div class="mt-3 flex flex-col gap-2 sm:flex-row">
+			<textarea
+				class="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--sf-green)]"
+				rows="2"
+				placeholder="High-level description…"
+				bind:value={aiPrompt}
+			></textarea>
+			<button
+				type="button"
+				class="rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c] disabled:opacity-60"
+				disabled={aiLoading || !aiPrompt.trim()}
+				onclick={generatePlan}
+			>
+				{aiLoading ? 'Generating…' : 'Generate plan'}
+			</button>
+		</div>
+
+		{#if aiError}
+			<p class="mt-2 text-[11px] text-rose-700">{aiError}</p>
+		{/if}
+
+		{#if aiPlanTasks.length > 0}
+			<div class="mt-4 rounded-md border border-slate-200 bg-white p-3">
+				<p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+					Suggested tasks · {aiPlanTasks.length}
+				</p>
+				<ul class="mt-2 space-y-1">
+					{#each aiPlanTasks as t, i}
+						<li class="flex items-baseline gap-2 text-[12px]">
+							<span class="w-6 text-right text-slate-400">{i + 1}.</span>
+							<span class="flex-1 text-slate-700">
+								{t.name}
+								{#if t.isMilestone}<span class="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">milestone</span>{/if}
+							</span>
+							<span class="text-slate-500">{t.durationDays}d</span>
+						</li>
+					{/each}
+				</ul>
+				<p class="mt-2 text-[11px] text-slate-500">
+					Tasks will be created after the project is saved.
+				</p>
+			</div>
+		{/if}
+	</section>
+
 	<form
 		class="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
 		method="POST"

@@ -99,6 +99,36 @@
 		};
 	});
 
+	// AI exec summary (Epic 9). Fetched lazily so a slow LLM never blocks
+	// the dashboard from rendering.
+	type ExecSummary = {
+		headline: string;
+		insights: string[];
+		risks: Array<{ title: string; severity: 'low' | 'medium' | 'high' }>;
+	};
+	let execSummary = $state<ExecSummary | null>(null);
+	let execLoading = $state(false);
+	let execError = $state<string | null>(null);
+
+	async function loadExecSummary() {
+		execLoading = true;
+		execError = null;
+		try {
+			const r = await fetch('/api/projects/dashboard/summary');
+			const body = await r.json();
+			const summary = body?.data?.summary ?? body?.summary;
+			if (!summary) {
+				execError = body?.error ?? 'Summary unavailable.';
+				return;
+			}
+			execSummary = summary;
+		} catch (e) {
+			execError = (e as Error).message;
+		} finally {
+			execLoading = false;
+		}
+	}
+
 	const todayIso = new Date().toISOString().slice(0, 10);
 	const daysFromToday = (deadline: string | null) => {
 		if (!deadline) return 0;
@@ -155,6 +185,59 @@
 			</a>
 		</div>
 	</header>
+
+	<!-- AI exec summary banner (Epic 9) -->
+	<section class="rounded-xl border border-[var(--sf-green)] bg-[var(--sf-green-soft)] p-4 shadow-sm">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0 flex-1">
+				<p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--sf-green)]">
+					AI brief
+				</p>
+				{#if execSummary}
+					<p class="mt-1 text-sm font-medium text-slate-900">{execSummary.headline}</p>
+					{#if execSummary.insights.length > 0}
+						<ul class="mt-2 list-disc pl-5 text-[13px] text-slate-700">
+							{#each execSummary.insights as ins}
+								<li>{ins}</li>
+							{/each}
+						</ul>
+					{/if}
+					{#if execSummary.risks.length > 0}
+						<div class="mt-3 flex flex-wrap gap-2">
+							{#each execSummary.risks as r}
+								<span
+									class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+									style={r.severity === 'high'
+										? 'background:#fee2e2;color:#991b1b'
+										: r.severity === 'medium'
+										? 'background:#fef3c7;color:#92400e'
+										: 'background:#dcfce7;color:#166534'}
+								>
+									{r.severity.toUpperCase()} · {r.title}
+								</span>
+							{/each}
+						</div>
+					{/if}
+				{:else if execLoading}
+					<p class="mt-1 text-sm text-slate-500">Asking the AI for a brief…</p>
+				{:else if execError}
+					<p class="mt-1 text-[12px] text-rose-700">{execError}</p>
+				{:else}
+					<p class="mt-1 text-[12px] text-slate-600">
+						One-paragraph executive overview with risk callouts.
+					</p>
+				{/if}
+			</div>
+			<button
+				type="button"
+				class="rounded-md border border-[var(--sf-green)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--sf-green)] hover:bg-emerald-50"
+				disabled={execLoading}
+				onclick={loadExecSummary}
+			>
+				{execSummary ? 'Refresh' : 'Generate'}
+			</button>
+		</div>
+	</section>
 
 	<!-- KPI strip -->
 	<section class="grid grid-cols-2 gap-4 md:grid-cols-4">

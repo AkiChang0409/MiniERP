@@ -37,6 +37,26 @@ export {
 	type TaskUpdateInput,
 	type TaskDependencyInput
 } from './services/task-service';
+export {
+	generateProjectPlan,
+	type GeneratedPlan,
+	type GeneratePlanInput
+} from './capabilities/generate-plan';
+export {
+	summarizeDashboard,
+	type DashboardSummary,
+	type SummarizeDashboardInput
+} from './capabilities/summarize-dashboard';
+export {
+	answerProjectQuestion,
+	type ProjectAnswer,
+	type AnswerQuestionInput
+} from './capabilities/answer-question';
+export {
+	extractTasksFromText,
+	type ExtractedTaskBundle,
+	type ExtractTasksInput
+} from './capabilities/extract-tasks';
 export { projectActions };
 export type { ProjectSource } from './contracts';
 export type { ProjectInboundContract, ProjectPublicGroup } from './contracts/inbound';
