@@ -117,6 +117,43 @@
 	let projectTasks = $state<Record<string, { tasks: Task[]; deps: Dep[]; loading: boolean }>>({});
 	let criticalPathSet = $state<Record<string, Set<string>>>({});
 
+	// Precomputed row geometry — flat list with Y coordinates so the SVG body
+	// can just iterate. Earlier versions tried to use `{@const}` as a mutable
+	// counter, which Svelte doesn't allow.
+	type Row =
+		| { kind: 'project'; y: number; project: Project }
+		| { kind: 'task'; y: number; project: Project; task: Task };
+
+	const TICK_HEIGHT = 40;
+	const rows = $derived.by<Row[]>(() => {
+		const out: Row[] = [];
+		let y = TICK_HEIGHT;
+		for (const p of projects) {
+			out.push({ kind: 'project', y, project: p });
+			y += ROW_HEIGHT;
+			if (expandedProjectId === p.id && projectTasks[p.id]) {
+				for (const task of projectTasks[p.id].tasks) {
+					out.push({ kind: 'task', y, project: p, task });
+					y += ROW_HEIGHT;
+				}
+			}
+		}
+		return out;
+	});
+	const chartHeight = $derived(
+		rows.length === 0 ? TICK_HEIGHT + ROW_HEIGHT : rows[rows.length - 1].y + ROW_HEIGHT
+	);
+	// Lookup map: taskId → Y. Used to draw dependency arrows in O(1) without
+	// re-walking the rows list per arrow.
+	const taskYByProject = $derived.by<Record<string, Record<string, number>>>(() => {
+		const map: Record<string, Record<string, number>> = {};
+		for (const row of rows) {
+			if (row.kind !== 'task') continue;
+			(map[row.project.id] ||= {})[row.task.id] = row.y;
+		}
+		return map;
+	});
+
 	async function toggleExpand(p: Project) {
 		if (expandedProjectId === p.id) {
 			expandedProjectId = null;
@@ -385,26 +422,19 @@
 			<div class="min-w-0 flex-1 overflow-x-auto">
 				<svg
 					width={chartWidth}
-					height={projects.reduce((acc, p) => {
-						const own = ROW_HEIGHT;
-						const taskRows =
-							expandedProjectId === p.id && projectTasks[p.id]
-								? projectTasks[p.id].tasks.length * ROW_HEIGHT
-								: 0;
-						return acc + own + taskRows;
-					}, 40)}
+					height={chartHeight}
 					xmlns="http://www.w3.org/2000/svg"
 					class="select-none"
 				>
 					<!-- Tick header -->
 					<g>
-						<rect x="0" y="0" width={chartWidth} height="40" fill="#f8fafc"></rect>
+						<rect x="0" y="0" width={chartWidth} height={TICK_HEIGHT} fill="#f8fafc"></rect>
 						{#each ticks as tick}
 							<line
 								x1={tick.x}
 								x2={tick.x}
 								y1="0"
-								y2={ROW_HEIGHT * (projects.length + 6)}
+								y2={chartHeight}
 								stroke={tick.major ? '#cbd5e1' : '#e2e8f0'}
 								stroke-width={tick.major ? 1 : 0.5}
 							></line>
@@ -417,7 +447,7 @@
 								x1={todayX}
 								x2={todayX}
 								y1="0"
-								y2={ROW_HEIGHT * (projects.length + 6)}
+								y2={chartHeight}
 								stroke="#16a34a"
 								stroke-width="1.5"
 								stroke-dasharray="4 2"
@@ -428,154 +458,138 @@
 						{/if}
 					</g>
 
-					<!-- Project bars -->
-					{@const renderedRows = { y: 40 } as { y: number }}
-					{#each projects as p (p.id)}
-						{@const urg = computeUrgency({
-							status: p.status,
-							startDate: p.startDate,
-							deadline: p.deadline,
-							createdAt: p.createdAt
-						})}
-						{@const startDay = dayOffset(p.startDate ?? p.createdAt)}
-						{@const endDay = dayOffset(p.deadline)}
-						{@const x = Math.max(0, startDay * pxPerDay)}
-						{@const w = Math.max(8, (endDay - startDay) * pxPerDay)}
-						<g>
-							<rect
-								x="0"
-								y={renderedRows.y}
-								width={chartWidth}
-								height={ROW_HEIGHT}
-								fill={expandedProjectId === p.id ? '#f1f5f9' : 'transparent'}
-							></rect>
-							<a href={`/projects/${p.id}`}>
-								<title>{p.name} — {urg.label}, {p.completionPct}% complete</title>
+					<!-- Bars + tasks, iterated from the precomputed row list. -->
+					{#each rows as row (row.kind === 'project' ? `p:${row.project.id}` : `t:${row.task.id}`)}
+						{#if row.kind === 'project'}
+							{@const urg = computeUrgency({
+								status: row.project.status,
+								startDate: row.project.startDate,
+								deadline: row.project.deadline,
+								createdAt: row.project.createdAt
+							})}
+							{@const startDay = dayOffset(row.project.startDate ?? row.project.createdAt)}
+							{@const endDay = dayOffset(row.project.deadline)}
+							{@const x = Math.max(0, startDay * pxPerDay)}
+							{@const w = Math.max(8, (endDay - startDay) * pxPerDay)}
+							<g>
 								<rect
-									x={x}
-									y={renderedRows.y + (ROW_HEIGHT - BAR_HEIGHT) / 2}
-									width={w}
-									height={BAR_HEIGHT}
-									rx="4"
-									fill={urg.soft}
-									stroke={urg.border}
-									stroke-width="1"
+									x="0"
+									y={row.y}
+									width={chartWidth}
+									height={ROW_HEIGHT}
+									fill={expandedProjectId === row.project.id ? '#f1f5f9' : 'transparent'}
 								></rect>
-								<!-- inner progress -->
-								<rect
-									x={x}
-									y={renderedRows.y + (ROW_HEIGHT - BAR_HEIGHT) / 2}
-									width={Math.max(0, (w * p.completionPct) / 100)}
-									height={BAR_HEIGHT}
-									rx="4"
-									fill={urg.fill}
-									fill-opacity="0.8"
-								></rect>
-								<text
-									x={x + 6}
-									y={renderedRows.y + ROW_HEIGHT / 2 + 4}
-									font-size="11"
-									fill={urg.text}
-									font-weight="600"
-								>
-									{p.name}
-								</text>
-							</a>
-						</g>
-						{(renderedRows.y += ROW_HEIGHT, '')}
-
-						{#if expandedProjectId === p.id && projectTasks[p.id]}
-							{#each projectTasks[p.id].tasks as t (t.id)}
-								{@const tStart = dayOffset(t.startDate)}
-								{@const tEnd = dayOffset(t.endDate)}
-								{@const previewDays = drag && drag.taskId === t.id ? dragDeltaDays : 0}
-								{@const tx =
-									(tStart + (drag && drag.taskId === t.id && drag.mode === 'move' ? previewDays : drag && drag.taskId === t.id && drag.mode === 'resize-left' ? previewDays : 0)) *
-									pxPerDay}
-								{@const tw =
-									Math.max(
-										6,
-										(tEnd -
-											tStart +
-											(drag && drag.taskId === t.id && drag.mode === 'resize-right' ? previewDays : 0) -
-											(drag && drag.taskId === t.id && drag.mode === 'resize-left' ? previewDays : 0)) *
-											pxPerDay
-									)}
-								{@const isCp = criticalPathSet[p.id]?.has(t.id) ?? false}
-								<g>
+								<a href={`/projects/${row.project.id}`}>
+									<title>
+										{row.project.name} — {urg.label}, {row.project.completionPct}% complete
+									</title>
 									<rect
-										x="0"
-										y={renderedRows.y}
-										width={chartWidth}
-										height={ROW_HEIGHT}
-										fill="#fafafa"
+										x={x}
+										y={row.y + (ROW_HEIGHT - BAR_HEIGHT) / 2}
+										width={w}
+										height={BAR_HEIGHT}
+										rx="4"
+										fill={urg.soft}
+										stroke={urg.border}
+										stroke-width="1"
 									></rect>
-									{#if t.startDate && t.endDate}
-										<g style="cursor: grab;">
-											<rect
-												x={tx}
-												y={renderedRows.y + (ROW_HEIGHT - 14) / 2}
-												width={tw}
-												height="14"
-												rx="3"
-												fill={t.status === 'completed' ? '#bbf7d0' : isCp ? '#fef3c7' : '#e0f2fe'}
-												stroke={isCp ? '#f59e0b' : '#7dd3fc'}
-												stroke-width={isCp ? 1.5 : 1}
-												onpointerdown={(e) => beginDrag(e, 'move', t)}
-											></rect>
-											<!-- resize handles -->
-											<rect
-												x={tx}
-												y={renderedRows.y + (ROW_HEIGHT - 14) / 2}
-												width="4"
-												height="14"
-												fill="transparent"
-												style="cursor: ew-resize;"
-												onpointerdown={(e) => beginDrag(e, 'resize-left', t)}
-											></rect>
-											<rect
-												x={tx + tw - 4}
-												y={renderedRows.y + (ROW_HEIGHT - 14) / 2}
-												width="4"
-												height="14"
-												fill="transparent"
-												style="cursor: ew-resize;"
-												onpointerdown={(e) => beginDrag(e, 'resize-right', t)}
-											></rect>
-											<text
-												x={tx + 4}
-												y={renderedRows.y + ROW_HEIGHT / 2 + 4}
-												font-size="10"
-												fill={t.status === 'completed' ? '#166534' : isCp ? '#92400e' : '#0c4a6e'}
-											>
-												{t.name}
-											</text>
-										</g>
-									{/if}
-								</g>
+									<rect
+										x={x}
+										y={row.y + (ROW_HEIGHT - BAR_HEIGHT) / 2}
+										width={Math.max(0, (w * row.project.completionPct) / 100)}
+										height={BAR_HEIGHT}
+										rx="4"
+										fill={urg.fill}
+										fill-opacity="0.8"
+									></rect>
+									<text
+										x={x + 6}
+										y={row.y + ROW_HEIGHT / 2 + 4}
+										font-size="11"
+										fill={urg.text}
+										font-weight="600"
+									>
+										{row.project.name}
+									</text>
+								</a>
+							</g>
+						{:else}
+							{@const t = row.task}
+							{@const p = row.project}
+							{@const tStart = dayOffset(t.startDate)}
+							{@const tEnd = dayOffset(t.endDate)}
+							{@const dragSelf = drag && drag.taskId === t.id}
+							{@const previewDays = dragSelf ? dragDeltaDays : 0}
+							{@const moveDelta = dragSelf && drag?.mode === 'move' ? previewDays : 0}
+							{@const leftDelta = dragSelf && drag?.mode === 'resize-left' ? previewDays : 0}
+							{@const rightDelta = dragSelf && drag?.mode === 'resize-right' ? previewDays : 0}
+							{@const tx = (tStart + moveDelta + leftDelta) * pxPerDay}
+							{@const tw = Math.max(
+								6,
+								(tEnd - tStart + rightDelta - leftDelta) * pxPerDay
+							)}
+							{@const isCp = criticalPathSet[p.id]?.has(t.id) ?? false}
+							<g>
+								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#fafafa"></rect>
+								{#if t.startDate && t.endDate}
+									<g style="cursor: grab;">
+										<rect
+											x={tx}
+											y={row.y + (ROW_HEIGHT - 14) / 2}
+											width={tw}
+											height="14"
+											rx="3"
+											fill={t.status === 'completed' ? '#bbf7d0' : isCp ? '#fef3c7' : '#e0f2fe'}
+											stroke={isCp ? '#f59e0b' : '#7dd3fc'}
+											stroke-width={isCp ? 1.5 : 1}
+											onpointerdown={(e) => beginDrag(e, 'move', t)}
+										></rect>
+										<rect
+											x={tx}
+											y={row.y + (ROW_HEIGHT - 14) / 2}
+											width="4"
+											height="14"
+											fill="transparent"
+											style="cursor: ew-resize;"
+											onpointerdown={(e) => beginDrag(e, 'resize-left', t)}
+										></rect>
+										<rect
+											x={tx + tw - 4}
+											y={row.y + (ROW_HEIGHT - 14) / 2}
+											width="4"
+											height="14"
+											fill="transparent"
+											style="cursor: ew-resize;"
+											onpointerdown={(e) => beginDrag(e, 'resize-right', t)}
+										></rect>
+										<text
+											x={tx + 4}
+											y={row.y + ROW_HEIGHT / 2 + 4}
+											font-size="10"
+											fill={t.status === 'completed' ? '#166534' : isCp ? '#92400e' : '#0c4a6e'}
+										>
+											{t.name}
+										</text>
+									</g>
+								{/if}
+							</g>
 
-								<!-- Dependency arrows: drawn from prerequisite END to dependent START -->
-								{#each projectTasks[p.id].deps.filter((d) => d.toTaskId === t.id) as dep}
-									{@const fromTask = projectTasks[p.id].tasks.find((x) => x.id === dep.fromTaskId)}
-									{#if fromTask && fromTask.endDate && t.startDate}
-										{@const fx = (dayOffset(fromTask.endDate) + 1) * pxPerDay}
-										{@const fy =
-											40 +
-											ROW_HEIGHT *
-												(projects.findIndex((q) => q.id === p.id) +
-													projectTasks[p.id].tasks.findIndex((x) => x.id === fromTask.id) +
-													1)}
-										<path
-											d={`M ${fx} ${fy + ROW_HEIGHT / 2} L ${fx + 8} ${fy + ROW_HEIGHT / 2} L ${fx + 8} ${renderedRows.y + ROW_HEIGHT / 2} L ${tx} ${renderedRows.y + ROW_HEIGHT / 2}`}
-											fill="none"
-											stroke="#94a3b8"
-											stroke-width="1"
-											stroke-dasharray="2 2"
-										></path>
-									{/if}
-								{/each}
-
-								{(renderedRows.y += ROW_HEIGHT, '')}
+							<!-- Dependency arrows: prerequisite END → dependent START.
+							     Uses the precomputed taskYByProject map so we don't have
+							     to re-walk the row list per arrow. -->
+							{#each projectTasks[p.id].deps.filter((d) => d.toTaskId === t.id) as dep}
+								{@const fromTask = projectTasks[p.id].tasks.find((x) => x.id === dep.fromTaskId)}
+								{@const fromY = taskYByProject[p.id]?.[dep.fromTaskId]}
+								{#if fromTask && fromTask.endDate && t.startDate && fromY != null}
+									{@const fx = (dayOffset(fromTask.endDate) + 1) * pxPerDay}
+									<path
+										d={`M ${fx} ${fromY + ROW_HEIGHT / 2} L ${fx + 8} ${fromY + ROW_HEIGHT / 2} L ${fx + 8} ${row.y + ROW_HEIGHT / 2} L ${tx} ${row.y + ROW_HEIGHT / 2}`}
+										fill="none"
+										stroke="#94a3b8"
+										stroke-width="1"
+										stroke-dasharray="2 2"
+									></path>
+								{/if}
 							{/each}
 						{/if}
 					{/each}

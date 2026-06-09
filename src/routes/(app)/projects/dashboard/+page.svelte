@@ -83,12 +83,11 @@
 		return `conic-gradient(${parts.join(', ')})`;
 	});
 
-	// TKMGMT10 — Dashboard auto-refreshes so numbers don't drift.
+	// TKMGMT10 — Dashboard auto-refreshes so numbers don't drift. The "last
+	// refreshed at" label is purely derived from the server payload, which
+	// changes whenever invalidateAll() reloads the page data.
 	let refreshTimer: ReturnType<typeof setInterval> | null = null;
-	let lastRefreshedAt = $state(new Date(data.dashboard.generatedAt));
-	$effect(() => {
-		lastRefreshedAt = new Date(data.dashboard.generatedAt);
-	});
+	const lastRefreshedAt = $derived(new Date(data.dashboard.generatedAt));
 
 	onMount(() => {
 		refreshTimer = setInterval(() => {
