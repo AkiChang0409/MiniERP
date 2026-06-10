@@ -39,7 +39,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ question: q })
 			});
-			const body = await r.json();
+			const body: any = await r.json();
 			const answer = body?.data?.answer ?? body?.answer;
 			if (!r.ok || !answer) {
 				chatError = body?.error ?? 'Could not answer.';
@@ -92,7 +92,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ rawText })
 			});
-			const body = await r.json();
+			const body: any = await r.json();
 			const bundle = body?.data?.bundle ?? body?.bundle;
 			if (!r.ok || !bundle) {
 				extractMessage = body?.error ?? 'Extraction failed.';
@@ -173,7 +173,7 @@
 					})
 				});
 				if (r.ok) {
-					const body = await r.json();
+					const body: any = await r.json();
 					createdIds.push(body?.data?.id ?? body?.id);
 				}
 			}

@@ -61,7 +61,7 @@
 				headers: { Accept: 'application/json' }
 			});
 			if (!r.ok) return;
-			const body = await r.json();
+			const body: any = await r.json();
 			attachments = (body?.data?.attachments ?? body?.attachments ?? []) as Attachment[];
 		} catch {
 			// ignore — keep current list
@@ -103,7 +103,7 @@
 			if (!r.ok) {
 				let msg = 'Upload failed';
 				try {
-					const body = await r.json();
+					const body: any = await r.json();
 					msg = body?.error || body?.message || msg;
 				} catch {
 					/* noop */
@@ -129,7 +129,7 @@
 			if (!r.ok) {
 				let msg = 'Delete failed';
 				try {
-					const body = await r.json();
+					const body: any = await r.json();
 					msg = body?.error || body?.message || msg;
 				} catch {
 					/* noop */

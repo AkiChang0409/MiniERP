@@ -163,7 +163,7 @@
 		if (!projectTasks[p.id]) {
 			projectTasks = { ...projectTasks, [p.id]: { tasks: [], deps: [], loading: true } };
 			try {
-				const [taskRes, pathRes] = await Promise.all([
+				const [taskRes, pathRes]: [any, any] = await Promise.all([
 					fetch(`/api/projects/${p.id}/tasks`).then((r) => r.json()),
 					fetch(`/api/projects/${p.id}/critical-path`).then((r) => r.json())
 				]);
