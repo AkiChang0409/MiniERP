@@ -4,10 +4,10 @@
 # v4 boundary linter. They are tracked as transitional debt to be cleaned up
 # by promoting the deep-imported surfaces into module public APIs:
 #
-#   - HR employee-service uses finance/rules + finance legacy-expense-repository
-#     for staff-cost calc; should be exposed via createFinanceApi.
-#   - legacy-document-intake-service uses finance ExpenseService for AI panel
-#     intake; should call createFinanceApi instead.
+#   - HR employee-service still deep-imports project's project.schema
+#     (projectEmployees); should narrow to createProjectApi. Its former
+#     finance deep-imports (rules + legacy-expense-repository) are resolved:
+#     it now calls createFinanceApi().expenses.getProjectExpenseSums().
 #   - platform/ai/ocr/* shouldn't import modules at all (Rule 3); the LLM
 #     prompts/extractors that depend on finance schemas should move into
 #     $modules/finance/capabilities/.
@@ -17,8 +17,6 @@
 # Exempting them keeps the linter useful for catching NEW violations while
 # the documented backlog is worked.
 
-src/modules/document-intake/services/legacy-document-intake-service.ts
-src/modules/hr/services/employee-master-service.ts
 src/modules/hr/services/employee-service.ts
 src/platform/ai/ocr/expense-detection.ts
 src/platform/ai/ocr/llm-extract.ts

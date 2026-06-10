@@ -9,12 +9,11 @@ import {
 	createFinanceApi,
 	findCategoryById,
 	financeAgentManifest,
-	financeRules,
+	validateExpenseRecord,
 	type CategoryDefinition
 } from '$modules/finance';
 import { appendAgentAuditEntry } from '$platform/audit/audit-log';
 
-const { validateExpenseRecord } = financeRules;
 
 /**
  * POST /api/documents/[id]/confirm

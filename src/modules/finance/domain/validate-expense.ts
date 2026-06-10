@@ -1,4 +1,4 @@
-import { expenseRecordSchema } from '../schemas/expense.schema';
+import { expenseRecordSchema } from './expense.schema';
 
 export function validateExpenseRecord(input: unknown) {
 	return expenseRecordSchema.safeParse(input);

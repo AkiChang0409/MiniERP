@@ -5,6 +5,7 @@ import { financeDashboardCards, financeNavigationEntries, financeWorkspaceEntrie
 import { financeCapabilityIds } from './capabilities';
 import { financeEventContracts } from './domain/events';
 import { financeInboundContracts } from './contracts/inbound';
+import { registerFinanceHandlers } from './events';
 import { financeOutboundContracts } from './integrations/contracts';
 import { financeWorkflowIds } from './workflows';
 
@@ -54,5 +55,6 @@ export const financeManifestV2: ModuleManifestV2 = {
 
 export const financeModule: ModuleDefinition = {
 	manifest: toLegacyModuleManifest(financeManifestV2),
-	manifestV2: financeManifestV2
+	manifestV2: financeManifestV2,
+	registerHandlers: registerFinanceHandlers
 };

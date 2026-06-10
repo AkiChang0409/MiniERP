@@ -9,11 +9,7 @@ import {
 	staffCostPayoutJoinConditions,
 	staffCostSumExpr
 } from '../repositories/employee-repository';
-import { expenses } from '$modules/finance/repositories/expense.schema';
-import {
-	projectExpenseOpexSumExpr,
-	projectExpenseSalesCostSumExpr
-} from '$modules/finance/repositories/legacy-expense-repository';
+import { createFinanceApi } from '$modules/finance';
 import { persons } from '../repositories/person.schema';
 import {
 	compensationComponents,
@@ -506,13 +502,9 @@ export class ProjectStaffingService {
 
 		// Wave 2.1b: invoicesIn no longer queried — sales-cost expenses (i.e. supplier
 		// invoice intake) live in expenses with expenseType='sales_cost'.
-		const expenseWhere = and(eq(expenses.projectId, projectId), isNull(expenses.deletedAt));
-		const [expSalesCostRow, expOpexRow] = await Promise.all([
-			db.select({ total: projectExpenseSalesCostSumExpr() }).from(expenses).where(expenseWhere),
-			db.select({ total: projectExpenseOpexSumExpr() }).from(expenses).where(expenseWhere)
-		]);
-		const salesCostTotal = expSalesCostRow[0]?.total ?? 0;
-		const opexTotal = expOpexRow[0]?.total ?? 0;
+		const expenseSums = await createFinanceApi(this.ctx).expenses.getProjectExpenseSums(projectId);
+		const salesCostTotal = expenseSums.salesCost ?? 0;
+		const opexTotal = expenseSums.opex ?? 0;
 		const expenseTotal = salesCostTotal + opexTotal;
 
 		const staffCostAllTime = staffAllRow?.total ?? 0;

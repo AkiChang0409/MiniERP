@@ -1,4 +1,4 @@
-import { validateExpenseRecord } from '../../rules/validate-expense';
+import { validateExpenseRecord } from '../../domain/validate-expense';
 import type { FinanceValidationIssue } from '../../agent/types';
 import type { FinanceCapability } from '../types';
 import { validateExpenseDraftInputSchema } from './schema';

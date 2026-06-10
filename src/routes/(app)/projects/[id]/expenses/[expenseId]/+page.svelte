@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import StorageTextPreview from '$app-layer/components/StorageTextPreview.svelte';
-	import { CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS } from '$modules/finance/schemas/expense-upload';
+	import { CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS } from '$modules/finance/domain/expense-upload';
 
 	let { data, form } = $props();
 

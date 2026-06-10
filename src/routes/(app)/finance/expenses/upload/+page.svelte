@@ -23,7 +23,7 @@
 		normalizeExpenseCurrency,
 		type ExpenseType,
 		type ExpenseCategory
-	} from '$modules/finance/schemas/expense-upload';
+	} from '$modules/finance/domain/expense-upload';
 
 	let { data } = $props();
 

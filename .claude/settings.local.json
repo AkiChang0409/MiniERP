@@ -84,7 +84,28 @@
       "Bash(sed -n '40,200p' src/modules/finance/adapters/employee-lookup-adapter.ts)",
       "Bash(sed -n '25,40p' src/modules/finance/services/expense-service.ts)",
       "Bash(sed -n '355,430p' \"ref_files/v4/BaseLine/3_模块参考.md\")",
-      "Bash(sed -n '205,235p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")"
+      "Bash(sed -n '205,235p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")",
+      "Bash(git mv *)",
+      "Bash(sed -n '540,580p' src/modules/document-intake/services/legacy-document-intake-service.ts)",
+      "Bash(sed -n '10,20p' src/modules/hr/services/employee-service.ts)",
+      "Bash(grep -rn \"finance/rules\\\\|\\\\.\\\\./rules\\\\|\\\\.\\\\./\\\\.\\\\./rules\" src --include=*.ts)",
+      "Bash(grep -rn \"finance/schemas\\\\|from '\\\\.\\\\./schemas\\\\|from '\\\\.\\\\./\\\\.\\\\./schemas\" src --include=*.ts)",
+      "Bash(cat drizzle.config.ts)",
+      "Bash(cat drizzle.config.*)",
+      "Bash(awk 'NR>=940 && NR<=1010' src/modules/finance/services/expense-service.ts)",
+      "Bash(grep -nE \"getProjectExpenseSums|createExpense|getByProject|return \\\\{|^\\\\t\\\\t[a-zA-Z]+,?$|^\\\\t};\")",
+      "Bash(sed -n '772,800p' src/modules/finance/services/legacy-expense-service.ts)",
+      "Bash(sed -n '475,517p' src/modules/finance/services/legacy-expense-service.ts)",
+      "Bash(sed -n '600,665p' src/modules/document-intake/services/legacy-document-intake-service.ts)",
+      "Bash(sed -n \"/type FinanceProjectExpenseInput/,/};/p\" src/modules/finance/services/expense-service.ts)",
+      "Bash(sed -n '549,600p' src/modules/finance/services/expense-service.ts)",
+      "Bash(sed -n '11,30p' src/modules/finance/services/revenue-service.ts)",
+      "Bash(sed -n \"/getProjectExpenseSums/,/}/p\" src/modules/finance/repositories/expense-repository.ts)",
+      "Bash(git rm *)",
+      "Bash(grep -vE \"\\\\.ts$|\\\\.md$\")",
+      "Bash(sed -n '320,345p' \"ref_files/v4/BaseLine/3_模块参考.md\")",
+      "Bash(sed -n '375,400p' \"ref_files/v4/BaseLine/3_模块参考.md\")",
+      "Bash(sed -n '505,515p' \"ref_files/v4/BaseLine/3_模块参考.md\")"
     ]
   }
 }

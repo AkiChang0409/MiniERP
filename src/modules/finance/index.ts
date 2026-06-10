@@ -1,13 +1,6 @@
-import * as financeAgent from './agent';
 import { financeAppSurface } from './app';
 import { financeCapabilities, financeCapabilityIds } from './capabilities';
 import { financeModule, financeManifestV2 } from './module';
-import * as financeContracts from './contracts/index';
-import * as financeEvents from './events';
-import * as financePolicies from './policies';
-import * as financeRepositories from './repositories';
-import * as financeRules from './rules';
-import * as financeServices from './services';
 import { financeWorkflows, financeWorkflowIds } from './workflows';
 
 
@@ -111,24 +104,9 @@ export {
 	calcGstFromSubtotal,
 	calcGstFromGrossAmount,
 	calcSubtotalFromGross
-} from './rules/gst-constants';
-export type { GstSupplyCode } from './rules/gst-constants';
+} from './domain/gst-constants';
+export type { GstSupplyCode } from './domain/gst-constants';
 
-export {
-	financeContracts,
-	financeServices,
-	financeRules,
-	financeRepositories,
-	financePolicies,
-	financeEvents
-};
-
-export const financePublicSurface = {
-	manifest: financeManifestV2,
-	agent: financeAgent,
-	contracts: financeContracts,
-	capabilities: financeCapabilities,
-	workflows: financeWorkflows,
-	services: financeServices,
-	app: financeAppSurface
-};
+// Curated domain-rule re-export (no namespace barrels of internal layers:
+// repositories / services / contracts / policies / events stay module-private).
+export { validateExpenseRecord, estimateSingaporeResidentTax } from './domain/rules';

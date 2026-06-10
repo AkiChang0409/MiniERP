@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estimateSingaporeResidentTax } from '$modules/finance/rules/estimate-singapore-resident-tax';
+import { estimateSingaporeResidentTax } from '$modules/finance';
 
 describe('estimateSingaporeResidentTax', () => {
 	it('returns 0 for zero income', () => {

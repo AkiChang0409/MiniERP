@@ -1,12 +1,21 @@
 /**
- * Canonical domain-rules surface. New code should import finance business
- * rules from `domain/rules`.
- *
- * NOTE: the rule implementations currently still physically live under
- * `../rules/*` because they have cross-module deep importers
- * (`$modules/finance/rules`, routes, tests) + boundary-allowlist entries.
- * Relocating the files into `domain/` is a separate, cross-module commit
- * (update hr / routes / tests / allowlist). Until then this barrel is the
- * forward-facing import point.
+ * Canonical domain-rules barrel. Pure business rules, no route/DB wiring.
  */
-export * from '../rules/index';
+export { validateExpenseRecord } from './validate-expense';
+export { validateRevenueRecord } from './validate-revenue';
+export { detectDuplicateFinanceRecord } from './detect-duplicate';
+export { estimateSingaporeResidentTax } from './estimate-singapore-resident-tax';
+export {
+	SG_GST_RATE,
+	SG_GST_RATE_PERCENT,
+	GST_SUPPLY_CODES,
+	GST_SUPPLY_CODE_LABELS,
+	GST_SUPPLY_CODE_RATE,
+	INVOICE_TYPE_TO_GST_CODE,
+	GST_CODE_TO_INVOICE_TYPES,
+	calcGstFromSubtotal,
+	calcGstFromGrossAmount,
+	calcSubtotalFromGross,
+	resolveGstCode
+} from './gst-constants';
+export type { GstSupplyCode } from './gst-constants';

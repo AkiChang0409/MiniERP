@@ -5,8 +5,8 @@ import {
 	EXPENSE_DOC_TYPES,
 	type ExpenseCategory,
 	type ExpenseType
-} from '$modules/finance/schemas/expense-upload';
-import { buildDocumentMetadata, parseDocumentMetadata } from '$modules/finance/schemas/document-metadata';
+} from '$modules/finance/domain/expense-upload';
+import { buildDocumentMetadata, parseDocumentMetadata } from '$modules/finance/domain/document-metadata';
 import { resolveExpenseFilePreview } from '$modules/finance/services/expense-file-preview';
 import { resolveSgdEquivalentForWrite } from '$modules/finance/services/fx/resolve-sgd-equivalent';
 import { objectExists } from '$infrastructure/storage/r2';

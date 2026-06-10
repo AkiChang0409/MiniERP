@@ -1,4 +1,4 @@
-import { detectDuplicateFinanceRecord } from '../../rules/detect-duplicate';
+import { detectDuplicateFinanceRecord } from '../../domain/detect-duplicate';
 import type { FinanceCapability } from '../types';
 import { detectDuplicateInputSchema } from './schema';
 
