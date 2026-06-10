@@ -17,6 +17,9 @@ export { inviteCodes } from '$platform/auth/invite-codes.schema';
 // User ↔ HR person identity binding
 export { userPersonLinks } from '$platform/auth/user-person-links.schema';
 
+// External channel identity ↔ MiniERP user binding (e.g. Lark open_id)
+export { externalIdentityLinks } from '$platform/auth/external-identity-links.schema';
+
 // better-auth tables (sessions, accounts, verifications)
 export { sessions, accounts, verifications } from '../../platform/auth/auth-tables';
 
