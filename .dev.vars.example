@@ -1,6 +1,13 @@
 # Copy to `.dev.vars` for `wrangler dev` / `npm run dev:cf` (do not commit `.dev.vars`).
 # Wrangler injects these into `env` in the Worker.
 
+# --- Lark (Feishu) app — webhook URL verification + app credentials ---
+# Get these from the Lark/Feishu developer console (App ID / App Secret / Verification Token).
+# LARK_APP_ID=cli_xxxxxxxxxxxxxxxx
+# LARK_APP_SECRET=
+# LARK_VERIFICATION_TOKEN=
+# LARK_ENCRYPT_KEY=        # optional; leave unset unless Encrypt Key is enabled in the console
+
 # Required for better-auth (generate a new random string, e.g. openssl rand -hex 32)
 BETTER_AUTH_SECRET=
 

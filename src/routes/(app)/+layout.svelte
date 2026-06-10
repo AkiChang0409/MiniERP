@@ -131,6 +131,12 @@
 		{
 			title: 'Self-Service',
 			items: [{ href: '/employee/leave', label: 'My Leave', moduleId: null, icon: 'L' }]
+		},
+		{
+			title: 'AI (Test)',
+			items: [
+				{ href: '/employee/ai-console', label: 'AI Capability Console', moduleId: null, icon: 'A' }
+			]
 		}
 	];
 
@@ -330,6 +336,10 @@
 		// Employee / My Leave
 		if (itemPath === '/employee/leave') {
 			return path.startsWith('/employee/leave');
+		}
+		// Employee / AI Console (test)
+		if (itemPath === '/employee/ai-console') {
+			return path.startsWith('/employee/ai-console');
 		}
 		// Procurement / Sales CRM
 		if (itemPath === '/procurement/suppliers') {

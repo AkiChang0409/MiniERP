@@ -46,6 +46,21 @@ export {
 } from './compat';
 export type { HrDirectorySource, HrLegacySources, HrPeopleSource } from './contracts';
 
+// HR Agent surface (Phase 1) — intent classifier + manifest + policy for the
+// AI capability layer. Capabilities themselves are registered from the app
+// composition root (`register-ai-capabilities.ts`), which may deep-import the
+// `./capabilities` and `./agent` sub-barrels directly.
+export {
+	hrAgentManifest,
+	type HrAgentManifest,
+	HR_AGENT_ID,
+	hrAgentAllowedCapabilities,
+	findHrCapabilityPolicy,
+	type HrCapabilityPolicyEntry,
+	classifyHrIntent,
+	type HrIntentResult
+} from './agent';
+
 export const employeeActions: AgentAction[] = [
 	{
 		id: 'view_employees',

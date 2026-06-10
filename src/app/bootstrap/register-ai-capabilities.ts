@@ -15,6 +15,13 @@ import {
 	suggestNextFinanceTaskCapability,
 	validateExpenseDraftCapability
 } from '$modules/finance/capabilities';
+import { HR_AGENT_ID, hrAgentAllowedCapabilities } from '$modules/hr/agent';
+import {
+	approveLeaveRequestCapability,
+	listPendingLeaveCapability,
+	submitLeaveRequestCapability,
+	type HrCapability
+} from '$modules/hr/capabilities';
 import {
 	registerCapabilities,
 	type CapabilityRegistration
@@ -49,11 +56,52 @@ const registrations: CapabilityRegistration[] = financeCapabilities.map((capabil
 			requiredUserPermissions: policyEntry.requiredUserPermissions,
 			requiresConfirmation: policyEntry.requiresConfirmation,
 			auditRequired: true,
-			enabled: true
+			enabled: true,
+			// All currently registered finance capabilities only read/analyze.
+			// A capability that requires confirmation is, by definition, a write;
+			// this keeps the write⇒requiresConfirmation invariant true by construction.
+			sideEffect: policyEntry.requiresConfirmation ? 'write' : 'read'
 		},
 		capability
 	};
 });
+
+// HR Agent (Phase 1): leave list / submit / approve. Each manifest lifts the
+// capability's Zod input/output schemas + the policy entry's risk/permission/
+// sideEffect. The write⇒requiresConfirmation invariant is enforced at register.
+const hrCapabilities: HrCapability<unknown, unknown>[] = [
+	listPendingLeaveCapability,
+	submitLeaveRequestCapability,
+	approveLeaveRequestCapability
+];
+
+for (const capability of hrCapabilities) {
+	const policyEntry = hrAgentAllowedCapabilities.find((entry) => entry.id === capability.id);
+	if (!policyEntry) {
+		throw new Error(
+			`No policy entry for HR capability ${capability.id}. Update hr/agent/policy.ts.`
+		);
+	}
+	registrations.push({
+		manifest: {
+			id: capability.id,
+			ownerModule: 'hr',
+			description: capability.description,
+			riskLevel: policyEntry.riskLevel,
+			allowedAgents: [HR_AGENT_ID],
+			requiredUserPermissions: policyEntry.requiredUserPermissions,
+			requiresConfirmation: policyEntry.requiresConfirmation,
+			auditRequired: true,
+			enabled: true,
+			sideEffect: policyEntry.sideEffect,
+			inputSchema: capability.inputSchema,
+			outputSchema: capability.outputSchema,
+			persistTarget: policyEntry.persistTarget,
+			idempotencyKey: capability.idempotencyKey
+		},
+		capability
+	});
+}
 
 // Document Intake pre-registers classify-document for the future Document Agent.
 registrations.push({
@@ -66,7 +114,8 @@ registrations.push({
 		requiredUserPermissions: ['finance:view'],
 		requiresConfirmation: false,
 		auditRequired: true,
-		enabled: true
+		enabled: true,
+		sideEffect: 'read'
 	},
 	capability: classifyDocumentCapability
 });
