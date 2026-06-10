@@ -110,7 +110,11 @@
       "Bash(sed -n \"/## 4. 文档更新协议/,/更新原则/p\" \"ref_files/v4/BaseLine/0_README.md\")",
       "Bash(grep -rn \"finance/services/legacy-expense\\\\|finance/repositories/legacy-expense\\\\|legacy-expense-service.ts \\(812\\\\|legacy-expense-repository.ts \\\\`\" ref_files/v4/BaseLine/)",
       "Bash(grep -n \"policies/\\\\|policies\\\\b\\\\|contracts/\\\\|contracts 仅剩\\\\|仅剩 \\\\`inbound\\\\|app/\" \"ref_files/v4/BaseLine/3_模块参考.md\")",
-      "Bash(grep -rn 'from '\\\\''\\\\$app-layer\\\\|from '\\\\''.*\\\\/app\\\\/' src/routes --include=*.ts)"
+      "Bash(grep -rn 'from '\\\\''\\\\$app-layer\\\\|from '\\\\''.*\\\\/app\\\\/' src/routes --include=*.ts)",
+      "Bash(npm run *)",
+      "Bash(sed -n '158,172p' \"ref_files/v4/BaseLine/7_未完成工作.md\")",
+      "Bash(sed -n '162,172p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")",
+      "Bash(sed -n '535,557p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")"
     ]
   }
 }

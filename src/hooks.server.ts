@@ -18,6 +18,8 @@ import {
 import '$app-layer/bootstrap/register-modules';
 // Register AI capabilities into the platform capability registry (side-effect import)
 import '$app-layer/bootstrap/register-ai-capabilities';
+// Register workflow definitions into the platform workflow registry (side-effect import)
+import '$app-layer/bootstrap/register-workflows';
 
 function isPublicAppPath(pathname: string) {
 	return (

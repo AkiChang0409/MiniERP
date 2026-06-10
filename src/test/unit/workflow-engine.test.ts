@@ -11,8 +11,7 @@ import {
 	type WorkflowDefinition
 } from '$platform/workflow/workflow-registry';
 import { startWorkflow, getState } from '$platform/workflow/workflow-runtime';
-import { advanceInstance } from '$platform/workflow/workflow-engine';
-import type { GovernedRunContext } from '$platform/ai/governed-capability';
+import { advanceInstance, type WorkflowRunIdentity } from '$platform/workflow/workflow-engine';
 
 /**
  * Proves the engine is genuinely generic: it is exercised with a fabricated,
@@ -65,18 +64,13 @@ const testWorkflow: WorkflowDefinition = {
 	applyStepResult: ({ outputs }) => ({ dataPatch: { lastOutput: outputs[0] } })
 };
 
-const baseRun: Omit<
-	GovernedRunContext,
-	'workflowId' | 'workflowStep' | 'currentStepAllowedCapabilities'
-> = {
+const baseRun: WorkflowRunIdentity = {
 	agentId: 'test-agent',
 	agentVersion: '0.0.0',
-	userId: 'u1',
-	userEmail: 'u1@example.com',
-	userRoles: ['owner'],
-	tenantId: 't1',
+	user: { id: 'u1', email: 'u1@example.com', roles: ['owner'] } as App.Locals['user'],
 	db: {} as never, // unused: auditRequired=false
-	capabilityCtx: { tenantId: 't1', userId: 'u1', useMock: true }
+	env: {} as never, // unused: echo capability ignores ctx.env
+	useMock: true
 };
 
 describe('generic workflow engine', () => {

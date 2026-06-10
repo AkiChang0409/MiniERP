@@ -2,10 +2,7 @@ import type { RequestHandler } from './$types';
 
 import { fail, ok } from '$platform/http';
 import { createModuleContext } from '$platform/modules';
-import {
-	confirmWorkflow,
-	type ConfirmBody
-} from '$app-layer/workflow/finance-workflow-orchestrator';
+import { confirmFinanceWorkflow, type ConfirmBody } from '$modules/finance';
 
 export const POST: RequestHandler = async (event) => {
 	if (!event.platform) return fail('Cloudflare platform bindings are required', 500);
@@ -19,13 +16,7 @@ export const POST: RequestHandler = async (event) => {
 	if (!body) return fail('Invalid JSON body', 400);
 
 	const ctx = await createModuleContext(event);
-	const result = await confirmWorkflow({
-		env: event.platform.env,
-		user,
-		ctx,
-		workflowInstanceId: id,
-		body
-	});
+	const result = await confirmFinanceWorkflow(ctx, { instanceId: id, body });
 
 	return result.ok ? ok(result.data) : fail(result.message, result.status, result.details);
 };

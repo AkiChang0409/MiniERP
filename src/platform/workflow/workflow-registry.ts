@@ -1,4 +1,14 @@
+import type { DBClient } from '$infrastructure/db';
 import type { WorkflowStateRecord, WorkflowStatus } from './workflow-runtime';
+
+/** Request-scoped runtime handed to step-input hooks that need to reach
+ * platform/infrastructure or another module's public API (e.g. loading a
+ * document's OCR text). Module-agnostic. */
+export interface WorkflowRuntimeContext {
+	env: Env;
+	db: DBClient;
+	user: App.Locals['user'];
+}
 
 /**
  * Generic workflow-definition registry. Modules own their workflow definitions
@@ -19,6 +29,7 @@ export interface ResolveStepInputArgs {
 	state: WorkflowStateRecord;
 	targetStep: string;
 	payload: unknown;
+	runtime: WorkflowRuntimeContext;
 }
 
 export interface ApplyStepResultArgs {
@@ -50,6 +61,22 @@ export interface WorkflowDefinition {
 	 * workflow state, and optionally set a terminal status. Defaults to no patch.
 	 */
 	applyStepResult?: (args: ApplyStepResultArgs) => ApplyStepResult | Promise<ApplyStepResult>;
+}
+
+/**
+ * Thrown by a definition's `resolveStepInput`/`applyStepResult` hook to reject
+ * bad step input with a specific HTTP status (engine maps it to a failure
+ * result). Lets domain hooks reproduce per-step 400 validation without the
+ * engine knowing any domain rules.
+ */
+export class WorkflowStepError extends Error {
+	constructor(
+		public readonly status: number,
+		message: string
+	) {
+		super(message);
+		this.name = 'WorkflowStepError';
+	}
 }
 
 const definitions = new Map<string, WorkflowDefinition>();

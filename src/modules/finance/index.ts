@@ -110,3 +110,11 @@ export type { GstSupplyCode } from './domain/gst-constants';
 // Curated domain-rule re-export (no namespace barrels of internal layers:
 // repositories / services / contracts / policies / events stay module-private).
 export { validateExpenseRecord, estimateSingaporeResidentTax } from './domain/rules';
+
+// Workflow definitions (for the platform engine registry) + confirm use-case.
+export { buildFinanceWorkflowDefinitions, type FinanceWorkflowDeps } from './workflows/register';
+export {
+	confirmFinanceWorkflow,
+	type ConfirmBody,
+	type WorkflowConfirmResult
+} from './services/workflow-confirm';
