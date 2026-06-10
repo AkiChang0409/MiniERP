@@ -6,6 +6,168 @@
 	let { data, children } = $props();
 	let settingsOpen = $state(false);
 
+	// --- TKMGMT1 v2: attachment manager state ----------------------------------
+	const ATTACH_ALLOWED = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg'];
+	const ATTACH_ACCEPT =
+		'.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/png,image/jpeg';
+	const ATTACH_MAX = 15 * 1024 * 1024;
+
+	type Attachment = {
+		id: string;
+		fileName: string;
+		url: string;
+		storageKey: string;
+		contentType: string | null;
+		sizeBytes: number | null;
+		uploadedById: string | null;
+		uploadedByEmail: string | null;
+		createdAt: string;
+		legacy?: boolean;
+	};
+
+	let attachments = $state<Attachment[]>([]);
+	let attachUploading = $state(false);
+	let attachError = $state<string | null>(null);
+	let attachDragActive = $state(false);
+	let attachInput = $state<HTMLInputElement | null>(null);
+
+	$effect(() => {
+		// Re-sync from server data each time the loader refreshes.
+		attachments = ((data as any).attachments ?? []) as Attachment[];
+	});
+
+	function attachExtOf(name: string): string {
+		const m = /\.([a-zA-Z0-9]+)$/.exec(name);
+		return m ? m[1].toLowerCase() : '';
+	}
+	function attachFormatBytes(n: number | null | undefined): string {
+		if (!n || n <= 0) return '';
+		if (n < 1024) return `${n} B`;
+		if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+		return `${(n / 1024 / 1024).toFixed(2)} MB`;
+	}
+	function attachEmoji(name: string): string {
+		const ext = attachExtOf(name);
+		if (ext === 'pdf') return '📕';
+		if (ext === 'doc' || ext === 'docx') return '📘';
+		if (ext === 'xls' || ext === 'xlsx') return '📗';
+		if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') return '🖼️';
+		return '📄';
+	}
+
+	async function refreshAttachments(projectId: string) {
+		try {
+			const r = await fetch(`/api/projects/${projectId}/attachments`, {
+				headers: { Accept: 'application/json' }
+			});
+			if (!r.ok) return;
+			const body = await r.json();
+			attachments = (body?.data?.attachments ?? body?.attachments ?? []) as Attachment[];
+		} catch {
+			// ignore — keep current list
+		}
+	}
+
+	async function uploadAttachmentFiles(projectId: string, files: FileList | File[]) {
+		const valid: File[] = [];
+		const errs: string[] = [];
+		for (const f of Array.from(files)) {
+			const ext = attachExtOf(f.name);
+			if (!ATTACH_ALLOWED.includes(ext)) {
+				errs.push(`"${f.name}" — unsupported type "${ext || 'unknown'}"`);
+				continue;
+			}
+			if (f.size === 0) {
+				errs.push(`"${f.name}" — empty file`);
+				continue;
+			}
+			if (f.size > ATTACH_MAX) {
+				errs.push(`"${f.name}" — ${attachFormatBytes(f.size)} > 15 MB`);
+				continue;
+			}
+			valid.push(f);
+		}
+		if (valid.length === 0) {
+			attachError = errs.join(' · ') || 'No valid files selected.';
+			return;
+		}
+		attachError = errs.length > 0 ? errs.join(' · ') : null;
+		attachUploading = true;
+		try {
+			const fd = new FormData();
+			for (const f of valid) fd.append('files', f);
+			const r = await fetch(`/api/projects/${projectId}/attachments`, {
+				method: 'POST',
+				body: fd
+			});
+			if (!r.ok) {
+				let msg = 'Upload failed';
+				try {
+					const body = await r.json();
+					msg = body?.error || body?.message || msg;
+				} catch {
+					/* noop */
+				}
+				attachError = msg;
+				return;
+			}
+			await refreshAttachments(projectId);
+			await invalidateAll();
+		} catch (e) {
+			attachError = (e as Error).message ?? 'Upload failed';
+		} finally {
+			attachUploading = false;
+		}
+	}
+
+	async function deleteAttachment(projectId: string, attachmentId: string) {
+		try {
+			const r = await fetch(
+				`/api/projects/${projectId}/attachments/${attachmentId}`,
+				{ method: 'DELETE' }
+			);
+			if (!r.ok) {
+				let msg = 'Delete failed';
+				try {
+					const body = await r.json();
+					msg = body?.error || body?.message || msg;
+				} catch {
+					/* noop */
+				}
+				attachError = msg;
+				return;
+			}
+			await refreshAttachments(projectId);
+			await invalidateAll();
+		} catch (e) {
+			attachError = (e as Error).message ?? 'Delete failed';
+		}
+	}
+
+	function attachOnDragOver(e: DragEvent) {
+		e.preventDefault();
+		attachDragActive = true;
+	}
+	function attachOnDragLeave(e: DragEvent) {
+		e.preventDefault();
+		attachDragActive = false;
+	}
+	function attachOnDrop(e: DragEvent, projectId: string) {
+		e.preventDefault();
+		attachDragActive = false;
+		const files = e.dataTransfer?.files;
+		if (!files || files.length === 0) return;
+		void uploadAttachmentFiles(projectId, files);
+	}
+	function attachOnPick(e: Event, projectId: string) {
+		const target = e.currentTarget as HTMLInputElement;
+		const files = target.files;
+		if (files && files.length > 0) {
+			void uploadAttachmentFiles(projectId, files);
+		}
+		target.value = '';
+	}
+
 	const formatStatus = (s: string) =>
 		s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -337,28 +499,18 @@
 						</select>
 					</label>
 
-					<div class="grid grid-cols-2 gap-3">
-						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
-							Deadline
-							<input
-								type="date"
-								name="deadline"
-								value={data.project.deadline ?? ''}
-								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
-							/>
-						</label>
-						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
-							Priority (1–10)
-							<input
-								type="number"
-								name="priority"
-								min="1"
-								max="10"
-								value={data.project.priority ?? 5}
-								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
-							/>
-						</label>
-					</div>
+					<label class="block space-y-1.5 text-xs font-medium text-slate-700">
+						Deadline
+						<input
+							type="date"
+							name="deadline"
+							value={data.project.deadline ?? ''}
+							class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+						/>
+						<span class="block pt-1 text-[11px] font-normal text-slate-500">
+							Urgency colour (green → yellow → red) updates automatically based on this date.
+						</span>
+					</label>
 
 					<div class="grid grid-cols-2 gap-3">
 						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
@@ -426,24 +578,91 @@
 						>{data.project.notes ?? ''}</textarea>
 					</label>
 
-					<div class="grid grid-cols-2 gap-3">
-						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
-							Attachment URL
+					<!-- TKMGMT1 v2 — multi-file attachments. Uploads happen inline
+					(no need to submit the settings form) so the user can manage
+					files mid-edit. New files always append; existing files can be
+					removed individually. -->
+					<div class="space-y-2">
+						<div class="flex items-baseline justify-between text-xs font-medium text-slate-700">
+							<span>Attachments</span>
+							<span class="font-normal text-slate-500">
+								{attachments.length} file{attachments.length === 1 ? '' : 's'}
+							</span>
+						</div>
+
+						{#if attachments.length > 0}
+							<ul class="space-y-1.5 rounded-md border border-slate-200 bg-white p-2">
+								{#each attachments as att (att.id)}
+									<li class="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-slate-50">
+										<span class="text-xl">{attachEmoji(att.fileName)}</span>
+										<div class="min-w-0 flex-1">
+											<a
+												class="block truncate text-[13px] font-medium text-slate-800 hover:text-[var(--sf-green)] hover:underline"
+												href={att.url}
+												target="_blank"
+												rel="noreferrer"
+											>
+												{att.fileName}
+											</a>
+											<p class="text-[11px] text-slate-500">
+												{#if att.legacy}
+													<span class="mr-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">legacy</span>
+												{/if}
+												{attachFormatBytes(att.sizeBytes)}{#if att.uploadedByEmail}
+													· uploaded by {att.uploadedByEmail}{/if}
+											</p>
+										</div>
+										<button
+											type="button"
+											class="rounded-md border border-rose-200 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50"
+											onclick={() => deleteAttachment(data.project.id, att.id)}
+										>
+											Remove
+										</button>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							role="button"
+							tabindex="0"
+							aria-label="Drag and drop files here, or click to choose"
+							onclick={() => attachInput?.click()}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									attachInput?.click();
+								}
+							}}
+							ondragover={attachOnDragOver}
+							ondragenter={attachOnDragOver}
+							ondragleave={attachOnDragLeave}
+							ondrop={(e) => attachOnDrop(e, data.project.id)}
+							class="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-md border-2 border-dashed px-3 py-4 text-center text-[12px] transition {attachDragActive
+								? 'border-[var(--sf-green)] bg-[var(--sf-green-soft)]'
+								: 'border-slate-300 bg-slate-50/40 hover:border-[var(--sf-green)] hover:bg-slate-50'}"
+						>
+							<span class="text-2xl">📥</span>
+							<p class="font-medium text-slate-700">
+								{attachUploading ? 'Uploading…' : 'Drag & drop or click to add files'}
+							</p>
+							<p class="text-[11px] text-slate-500">
+								{ATTACH_ALLOWED.join(', ')} · up to 15 MB each · multiple files supported
+							</p>
 							<input
-								type="url"
-								name="attachmentUrl"
-								value={data.project.attachmentUrl ?? ''}
-								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
+								bind:this={attachInput}
+								type="file"
+								accept={ATTACH_ACCEPT}
+								multiple
+								class="hidden"
+								onchange={(e) => attachOnPick(e, data.project.id)}
 							/>
-						</label>
-						<label class="block space-y-1.5 text-xs font-medium text-slate-700">
-							Attachment label
-							<input
-								name="attachmentName"
-								value={data.project.attachmentName ?? ''}
-								class="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] font-normal outline-none focus:border-[var(--sf-green)] focus:ring-1 focus:ring-[var(--sf-green)]"
-							/>
-						</label>
+						</div>
+						{#if attachError}
+							<p class="text-[11px] text-rose-600">{attachError}</p>
+						{/if}
 					</div>
 
 					<div class="flex gap-2 pt-2">

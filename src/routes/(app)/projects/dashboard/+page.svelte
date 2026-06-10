@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { computeUrgency } from '$modules/project';
 
 	let { data } = $props();
 
@@ -11,6 +12,7 @@
 		status: string;
 		deadline: string | null;
 		priority: number;
+		startDate?: string | null;
 		ownerEmail: string | null;
 		ownerName: string | null;
 	};
@@ -27,11 +29,15 @@
 	const statusMeta = (status: string) =>
 		STATUS_PALETTE[status] ?? { fill: '#cbd5e1', soft: '#f1f5f9', text: '#475569', label: status };
 
-	const priorityMeta = (priority: number) => {
-		if (priority >= 8) return { soft: '#fee2e2', text: '#b91c1c', label: 'High' };
-		if (priority >= 5) return { soft: '#fef3c7', text: '#92400e', label: 'Medium' };
-		return { soft: '#dcfce7', text: '#166534', label: 'Low' };
-	};
+	// Auto-urgency (TKMGMT-v2): the colour is derived from the deadline, never
+	// from a user-entered priority number. Keeps the dashboard, list, calendar,
+	// and Gantt in lock-step.
+	const urgencyOf = (p: DeadlineRow) =>
+		computeUrgency({
+			status: p.status,
+			deadline: p.deadline,
+			startDate: p.startDate ?? null
+		});
 
 	const totalStatusCount = $derived(
 		(data.dashboard.statusSummary ?? []).reduce(
@@ -77,12 +83,11 @@
 		return `conic-gradient(${parts.join(', ')})`;
 	});
 
-	// TKMGMT10 — Dashboard auto-refreshes so numbers don't drift.
+	// TKMGMT10 — Dashboard auto-refreshes so numbers don't drift. The "last
+	// refreshed at" label is purely derived from the server payload, which
+	// changes whenever invalidateAll() reloads the page data.
 	let refreshTimer: ReturnType<typeof setInterval> | null = null;
-	let lastRefreshedAt = $state(new Date(data.dashboard.generatedAt));
-	$effect(() => {
-		lastRefreshedAt = new Date(data.dashboard.generatedAt);
-	});
+	const lastRefreshedAt = $derived(new Date(data.dashboard.generatedAt));
 
 	onMount(() => {
 		refreshTimer = setInterval(() => {
@@ -92,6 +97,36 @@
 			if (refreshTimer) clearInterval(refreshTimer);
 		};
 	});
+
+	// AI exec summary (Epic 9). Fetched lazily so a slow LLM never blocks
+	// the dashboard from rendering.
+	type ExecSummary = {
+		headline: string;
+		insights: string[];
+		risks: Array<{ title: string; severity: 'low' | 'medium' | 'high' }>;
+	};
+	let execSummary = $state<ExecSummary | null>(null);
+	let execLoading = $state(false);
+	let execError = $state<string | null>(null);
+
+	async function loadExecSummary() {
+		execLoading = true;
+		execError = null;
+		try {
+			const r = await fetch('/api/projects/dashboard/summary');
+			const body = await r.json();
+			const summary = body?.data?.summary ?? body?.summary;
+			if (!summary) {
+				execError = body?.error ?? 'Summary unavailable.';
+				return;
+			}
+			execSummary = summary;
+		} catch (e) {
+			execError = (e as Error).message;
+		} finally {
+			execLoading = false;
+		}
+	}
 
 	const todayIso = new Date().toISOString().slice(0, 10);
 	const daysFromToday = (deadline: string | null) => {
@@ -149,6 +184,59 @@
 			</a>
 		</div>
 	</header>
+
+	<!-- AI exec summary banner (Epic 9) -->
+	<section class="rounded-xl border border-[var(--sf-green)] bg-[var(--sf-green-soft)] p-4 shadow-sm">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0 flex-1">
+				<p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--sf-green)]">
+					AI brief
+				</p>
+				{#if execSummary}
+					<p class="mt-1 text-sm font-medium text-slate-900">{execSummary.headline}</p>
+					{#if execSummary.insights.length > 0}
+						<ul class="mt-2 list-disc pl-5 text-[13px] text-slate-700">
+							{#each execSummary.insights as ins}
+								<li>{ins}</li>
+							{/each}
+						</ul>
+					{/if}
+					{#if execSummary.risks.length > 0}
+						<div class="mt-3 flex flex-wrap gap-2">
+							{#each execSummary.risks as r}
+								<span
+									class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+									style={r.severity === 'high'
+										? 'background:#fee2e2;color:#991b1b'
+										: r.severity === 'medium'
+										? 'background:#fef3c7;color:#92400e'
+										: 'background:#dcfce7;color:#166534'}
+								>
+									{r.severity.toUpperCase()} · {r.title}
+								</span>
+							{/each}
+						</div>
+					{/if}
+				{:else if execLoading}
+					<p class="mt-1 text-sm text-slate-500">Asking the AI for a brief…</p>
+				{:else if execError}
+					<p class="mt-1 text-[12px] text-rose-700">{execError}</p>
+				{:else}
+					<p class="mt-1 text-[12px] text-slate-600">
+						One-paragraph executive overview with risk callouts.
+					</p>
+				{/if}
+			</div>
+			<button
+				type="button"
+				class="rounded-md border border-[var(--sf-green)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--sf-green)] hover:bg-emerald-50"
+				disabled={execLoading}
+				onclick={loadExecSummary}
+			>
+				{execSummary ? 'Refresh' : 'Generate'}
+			</button>
+		</div>
+	</section>
 
 	<!-- KPI strip -->
 	<section class="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -258,7 +346,7 @@
 				<ul class="mt-4 divide-y divide-slate-100">
 					{#each data.dashboard.upcoming as p (p.id)}
 						{@const meta = statusMeta(p.status)}
-						{@const pm = priorityMeta(p.priority ?? 5)}
+						{@const urg = urgencyOf(p as DeadlineRow)}
 						{@const d = daysFromToday(p.deadline)}
 						<li>
 							<a
@@ -281,10 +369,11 @@
 								</div>
 								<div class="flex shrink-0 items-center gap-2">
 									<span
-										class="rounded-full px-2 py-0.5 text-[10px] font-medium"
-										style={`background:${pm.soft};color:${pm.text}`}
+										class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+										style={`background:${urg.soft};color:${urg.text}`}
 									>
-										P{p.priority}
+										<span class="h-1.5 w-1.5 rounded-full" style={`background:${urg.fill}`}></span>
+										{urg.label}
 									</span>
 									<span
 										class="rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -326,7 +415,7 @@
 							<th class="px-3 py-2 font-medium">Project</th>
 							<th class="px-3 py-2 font-medium">Owner</th>
 							<th class="px-3 py-2 font-medium">Status</th>
-							<th class="px-3 py-2 font-medium">Priority</th>
+							<th class="px-3 py-2 font-medium">Urgency</th>
 							<th class="px-3 py-2 font-medium">Deadline</th>
 							<th class="px-3 py-2 text-right font-medium">Overdue</th>
 						</tr>
@@ -334,7 +423,7 @@
 					<tbody class="divide-y divide-slate-100">
 						{#each data.dashboard.overdue as p (p.id)}
 							{@const meta = statusMeta(p.status)}
-							{@const pm = priorityMeta(p.priority ?? 5)}
+							{@const urg = urgencyOf(p as DeadlineRow)}
 							{@const d = daysFromToday(p.deadline)}
 							<tr class="cursor-pointer hover:bg-rose-50/40" onclick={() => (window.location.href = `/projects/${p.id}`)}>
 								<td class="px-3 py-2">
@@ -354,10 +443,11 @@
 								</td>
 								<td class="px-3 py-2">
 									<span
-										class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-										style={`background:${pm.soft};color:${pm.text}`}
+										class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+										style={`background:${urg.soft};color:${urg.text}`}
 									>
-										P{p.priority}
+										<span class="h-1.5 w-1.5 rounded-full" style={`background:${urg.fill}`}></span>
+										{urg.label}
 									</span>
 								</td>
 								<td class="px-3 py-2 font-medium text-rose-700">{p.deadline ?? '—'}</td>

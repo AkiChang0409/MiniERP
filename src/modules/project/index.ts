@@ -25,6 +25,58 @@ export {
 	type ProjectCreateInput,
 	type ProjectUpdateInput
 } from './services/legacy-project-service';
+export {
+	computeUrgency,
+	urgencyBadgeClasses,
+	type UrgencyLevel,
+	type UrgencyResult
+} from './services/urgency';
+export {
+	ProjectTaskService,
+	type TaskCreateInput,
+	type TaskUpdateInput,
+	type TaskDependencyInput
+} from './services/task-service';
+export {
+	ProjectAutoAssignService,
+	type AutoAssignInput,
+	type AutoAssignResult
+} from './services/auto-assign';
+export {
+	ProjectCalendarIntegrationService,
+	type CalendarProvider,
+	type ConnectStatus
+} from './services/calendar-integration';
+export {
+	generateProjectPlan,
+	type GeneratedPlan,
+	type GeneratePlanInput
+} from './capabilities/generate-plan';
+export {
+	summarizeDashboard,
+	type DashboardSummary,
+	type SummarizeDashboardInput
+} from './capabilities/summarize-dashboard';
+export {
+	answerProjectQuestion,
+	type ProjectAnswer,
+	type AnswerQuestionInput
+} from './capabilities/answer-question';
+export {
+	extractTasksFromText,
+	type ExtractedTaskBundle,
+	type ExtractTasksInput
+} from './capabilities/extract-tasks';
+export {
+	draftMeetingAgenda,
+	type MeetingAgenda,
+	type DraftAgendaInput
+} from './capabilities/meeting-agenda';
+export {
+	processMeetingTranscript,
+	type MeetingNotes,
+	type ProcessMeetingNotesInput
+} from './capabilities/meeting-notes';
 export { projectActions };
 export type { ProjectSource } from './contracts';
 export type { ProjectInboundContract, ProjectPublicGroup } from './contracts/inbound';

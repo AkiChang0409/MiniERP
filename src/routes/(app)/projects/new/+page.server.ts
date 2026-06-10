@@ -8,6 +8,61 @@ import {
 	ProjectPermissionError,
 	ProjectValidationError
 } from '$modules/project';
+import { r2FileUrls } from '$platform/files/r2-file-urls';
+
+// Allowed attachment types per user spec — extension + MIME pair so we accept
+// drag-drops from OSes that mis-report the type. Keep them in sync with the
+// `accept` attribute on the picker in +page.svelte.
+const ALLOWED_EXT = new Set([
+	'pdf',
+	'doc',
+	'docx',
+	'xls',
+	'xlsx',
+	'png',
+	'jpg',
+	'jpeg'
+]);
+const ALLOWED_MIME = new Set([
+	'application/pdf',
+	'application/msword',
+	'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+	'application/vnd.ms-excel',
+	'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+	'image/png',
+	'image/jpeg',
+	'image/jpg'
+]);
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15 MB
+
+function sanitizeFileName(name: string): string {
+	const base = name.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120);
+	return base || 'attachment';
+}
+
+function extOf(name: string): string {
+	const m = /\.([a-zA-Z0-9]+)$/.exec(name);
+	return m ? m[1].toLowerCase() : '';
+}
+
+function validateAttachment(file: File): { ok: true } | { ok: false; message: string } {
+	if (file.size === 0) return { ok: false, message: 'Attachment file is empty.' };
+	if (file.size > MAX_ATTACHMENT_BYTES) {
+		return {
+			ok: false,
+			message: `Attachment is too large (${Math.round(file.size / 1024 / 1024)}MB > 15MB).`
+		};
+	}
+	const ext = extOf(file.name);
+	const mime = (file.type || '').toLowerCase();
+	if (!ALLOWED_EXT.has(ext) && !ALLOWED_MIME.has(mime)) {
+		return {
+			ok: false,
+			message: `Unsupported file type "${ext || mime || 'unknown'}". Allowed: ${[...ALLOWED_EXT].join(', ')}.`
+		};
+	}
+	return { ok: true };
+}
 
 export const load: PageServerLoad = async (event) => {
 	if (!event.platform) {
@@ -59,8 +114,6 @@ export const actions: Actions = {
 		const notes = String(form.get('notes') ?? '').trim();
 		const priorityRaw = String(form.get('priority') ?? '5');
 		const priority = Number.parseInt(priorityRaw, 10);
-		const attachmentUrl = String(form.get('attachmentUrl') ?? '').trim();
-		const attachmentName = String(form.get('attachmentName') ?? '').trim();
 		const ownerId = String(form.get('ownerId') ?? '').trim();
 		const parentProjectId = String(form.get('parentProjectId') ?? '').trim();
 		const recurrenceFrequency = String(form.get('recurrenceFrequency') ?? '').trim();
@@ -81,6 +134,26 @@ export const actions: Actions = {
 			// ignore — use empty roles map
 		}
 
+		// Drag-and-drop attachments (TKMGMT1 v2 — multi-file). Each file goes
+		// through the same allow-list + size check the API route uses, and the
+		// per-file failures are surfaced so the user can retry the bad ones.
+		const incomingFiles = form
+			.getAll('files')
+			.filter((v): v is File => v instanceof File && v.size > 0);
+		const pendingAttachments: File[] = [];
+		const preFlightErrors: string[] = [];
+		for (const file of incomingFiles) {
+			const verdict = validateAttachment(file);
+			if (verdict.ok) {
+				pendingAttachments.push(file);
+			} else {
+				preFlightErrors.push(`"${file.name}" — ${verdict.message}`);
+			}
+		}
+		if (preFlightErrors.length > 0) {
+			return fail(400, { message: preFlightErrors.join(' · ') });
+		}
+
 		if (!name) {
 			return fail(400, { message: 'Project name is required.' });
 		}
@@ -91,6 +164,7 @@ export const actions: Actions = {
 		const ctx = await createModuleContext(event);
 		const project = createProjectApi(ctx);
 
+		let createdProjectId: string | null = null;
 		try {
 			const created = await project.create({
 				businessPartnerId: customerId || null,
@@ -104,8 +178,8 @@ export const actions: Actions = {
 				description: description || undefined,
 				notes: notes || undefined,
 				priority: Number.isFinite(priority) ? Math.min(10, Math.max(1, priority)) : 5,
-				attachmentUrl: attachmentUrl || null,
-				attachmentName: attachmentName || null,
+				attachmentUrl: null,
+				attachmentName: null,
 				recurrenceFrequency:
 					recurrenceFrequency === 'daily' ||
 					recurrenceFrequency === 'weekly' ||
@@ -119,6 +193,37 @@ export const actions: Actions = {
 					role: collaboratorRoles[id] ?? null
 				}))
 			});
+			createdProjectId = created.id;
+
+			// Push every queued file to R2 and persist one project_attachments
+			// row per file. Each file is stored under its own UUID key so
+			// re-uploading a same-named file later never overwrites the old one.
+			if (pendingAttachments.length > 0) {
+				const datePart = new Date().toISOString().slice(0, 10);
+				for (const file of pendingAttachments) {
+					const safeName = sanitizeFileName(file.name);
+					const key = `projects/${created.id}/attachments/${datePart}/${crypto.randomUUID()}-${safeName}`;
+					await event.platform.env.R2.put(key, await file.arrayBuffer(), {
+						httpMetadata: {
+							contentType: file.type || 'application/octet-stream'
+						},
+						customMetadata: {
+							projectId: created.id,
+							originalName: file.name,
+							uploadedBy: ctx.user?.id ?? 'unknown'
+						}
+					});
+					const { fileViewUrl } = r2FileUrls(key);
+					await project.addAttachment({
+						projectId: created.id,
+						storageKey: key,
+						url: fileViewUrl ?? '',
+						fileName: file.name,
+						contentType: file.type || null,
+						sizeBytes: file.size
+					});
+				}
+			}
 
 			throw redirect(303, `/projects/${created.id}`);
 		} catch (e) {
@@ -131,6 +236,12 @@ export const actions: Actions = {
 			}
 			if (e instanceof ProjectPermissionError) {
 				return fail(403, { message: e.message });
+			}
+			// If we already created the project but the upload failed, surface a
+			// note and still redirect — the project exists, the user can re-upload
+			// from the settings dialog.
+			if (createdProjectId) {
+				throw redirect(303, `/projects/${createdProjectId}?upload_error=1`);
 			}
 			throw e;
 		}
