@@ -69,7 +69,22 @@
       "Bash(npx -y @mermaid-js/mermaid-cli -i aggregates.mmd -o aggregates.png -p puppeteer.json -b white -s 2)",
       "Bash(node docs/.docxbuild/build-docx.mjs)",
       "Bash(python \"C:/Users/akiwc/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/dbdc43c1-8995-4c66-a8f4-cbeccc01c41e/96dbf42a-ed72-4ce1-842e-eb888629b3e7/skills/docx/scripts/office/validate.py\" docs/Lecturer-Feedback-Response.docx)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(sed -n '1,40p' src/modules/finance/capabilities/extract-invoice-fields/mock.ts)",
+      "Bash(sed -n '77,110p' src/modules/finance/capabilities/extract-document-fields/capability.ts)",
+      "Bash(sed -n '41,70p' src/modules/finance/capabilities/classify-document-category/capability.ts)",
+      "Bash(sed -n '50,80p' src/modules/finance/capabilities/match-purchase-order/mock.ts)",
+      "Bash(sed -n '10,40p' src/modules/finance/capabilities/detect-duplicate/capability.ts)",
+      "Bash(sed -n '132,140p' src/modules/finance/capabilities/extract-invoice-fields/capability.ts)",
+      "Bash(sed -n '702,710p' src/modules/finance/capabilities/extract-document-fields/capability.ts)",
+      "Bash(sed -n '155,163p' src/modules/finance/capabilities/classify-document-category/capability.ts)",
+      "Bash(sed -n '20,24p' src/modules/finance/capabilities/match-supplier/capability.ts)",
+      "Bash(sed -n '25,33p' src/modules/finance/capabilities/match-purchase-order/capability.ts)",
+      "Bash(python3 -)",
+      "Bash(sed -n '40,200p' src/modules/finance/adapters/employee-lookup-adapter.ts)",
+      "Bash(sed -n '25,40p' src/modules/finance/services/expense-service.ts)",
+      "Bash(sed -n '355,430p' \"ref_files/v4/BaseLine/3_模块参考.md\")",
+      "Bash(sed -n '205,235p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")"
     ]
   }
 }

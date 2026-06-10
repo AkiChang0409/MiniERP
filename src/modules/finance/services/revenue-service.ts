@@ -5,7 +5,7 @@ import { resolveExpenseFilePreview } from '$modules/finance/services/expense-fil
 import type { ModuleContext } from '$platform/modules/types';
 import { AuditService } from '$platform/audit/audit-service';
 import { businessPartners, projects, revenue } from '../../../infrastructure/db/schema';
-import { listFinanceProjectNames } from '../adapters';
+import { listFinanceProjectNames } from '../integrations';
 import { RevenueRepository } from '../repositories';
 
 type FinanceRevenueCreateInput = {

@@ -29,7 +29,7 @@ import {
 	findFinanceProjectLookup,
 	listFinanceEmployees,
 	listFinanceProjectNames
-} from '../adapters';
+} from '../integrations';
 import { ExpenseRepository } from '../repositories';
 
 const DOCUMENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

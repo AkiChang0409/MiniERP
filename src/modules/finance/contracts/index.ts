@@ -1,4 +1,4 @@
 export * from './inbound';
-export * from './outbound';
-export * from './events';
-export * from './failures';
+export * from '../integrations/contracts';
+export * from '../domain/events';
+export * from '../domain/errors';

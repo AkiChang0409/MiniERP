@@ -1,6 +1,7 @@
 import { validateExpenseRecord } from '../../rules/validate-expense';
 import type { FinanceValidationIssue } from '../../agent/types';
 import type { FinanceCapability } from '../types';
+import { validateExpenseDraftInputSchema } from './schema';
 
 export type ValidateExpenseDraftInput = unknown;
 
@@ -16,6 +17,7 @@ export const validateExpenseDraftCapability: FinanceCapability<
 	id: 'finance.validate-expense-draft',
 	description: 'Validate an expense draft against the deterministic finance schema.',
 	riskLevel: 'R2',
+	inputSchema: validateExpenseDraftInputSchema,
 
 	async execute(input) {
 		const result = validateExpenseRecord(input);

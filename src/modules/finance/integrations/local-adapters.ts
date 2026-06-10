@@ -1,16 +1,13 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { DBClient } from '../../../infrastructure/db';
-import { businessPartners, projects } from '../../../infrastructure/db/schema';
+import { businessPartners, persons, projects } from '../../../infrastructure/db/schema';
 
-export interface ProjectLookupAdapter<TProject = unknown> {
-	getProjectById(projectId: string): Promise<TProject | null>;
-}
-
-export function createProjectLookupAdapter<TProject>(
-	getProjectById: (projectId: string) => Promise<TProject | null>
-): ProjectLookupAdapter<TProject> {
-	return { getProjectById };
-}
+/**
+ * Local (modular-monolith) implementations of finance's cross-module lookups.
+ * These read other modules' tables directly via the shared D1 client. When a
+ * module is extracted into its own service, swap these for the HTTP clients in
+ * `http-adapters.ts` behind the same `integrations/contracts.ts` interfaces.
+ */
 
 export type FinanceProjectLookupRow = {
 	id: string;
@@ -57,4 +54,33 @@ export async function listFinanceProjectNames(
 		.where(and(inArray(projects.id, projectIds), isNull(projects.deletedAt)));
 
 	return new Map(rows.map((row) => [row.id, row.name]));
+}
+
+export type FinanceEmployeeDirectoryRow = {
+	id: string;
+	name: string;
+};
+
+export async function listFinanceEmployees(db: DBClient): Promise<FinanceEmployeeDirectoryRow[]> {
+	return db
+		.select({
+			id: persons.id,
+			name: persons.name
+		})
+		.from(persons)
+		.where(isNull(persons.deletedAt))
+		.orderBy(asc(persons.name));
+}
+
+export async function findFinanceEmployeeNameById(
+	db: DBClient,
+	employeeId: string
+): Promise<string | null> {
+	const [row] = await db
+		.select({ name: persons.name })
+		.from(persons)
+		.where(eq(persons.id, employeeId))
+		.limit(1);
+
+	return row?.name ?? null;
 }

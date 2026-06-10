@@ -1,23 +1,17 @@
 import * as financeAgent from './agent';
 import { financeAppSurface } from './app';
 import { financeCapabilities, financeCapabilityIds } from './capabilities';
-import { financeManifestV2 } from './config';
+import { financeModule, financeManifestV2 } from './module';
 import * as financeContracts from './contracts/index';
 import * as financeEvents from './events';
-import type { ModuleDefinition } from '$platform/modules/types';
-import { toLegacyModuleManifest } from '$platform/registry/contracts';
 import * as financePolicies from './policies';
 import * as financeRepositories from './repositories';
 import * as financeRules from './rules';
 import * as financeServices from './services';
 import { financeWorkflows, financeWorkflowIds } from './workflows';
 
-export const financeModule: ModuleDefinition = {
-	manifest: toLegacyModuleManifest(financeManifestV2),
-	manifestV2: financeManifestV2
-};
 
-export { createFinanceApi, type FinanceApi } from './services/api';
+export { createFinanceApi, type FinanceApi } from './api';
 export {
 	financeAgentActionSets,
 	financeAllAgentActions,
@@ -67,7 +61,7 @@ export {
 	type TodayBriefItem,
 	type TodayBriefData
 } from './services/finance-task-service';
-export { financeManifestV2 };
+export { financeModule, financeManifestV2 };
 export {
 	financeAgentManifest,
 	classifyFinanceIntent,

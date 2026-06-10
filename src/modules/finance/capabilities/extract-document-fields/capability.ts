@@ -21,6 +21,7 @@ import {
 } from '../../workflows/financial-document-intake/categories';
 import type { FinanceEvidence } from '../../agent/types';
 import type { FinanceCapability, FinanceCapabilityContext } from '../types';
+import { extractDocumentFieldsInputSchema } from './schema';
 import {
 	buildEvidence,
 	pickFixture,
@@ -707,6 +708,7 @@ export const extractDocumentFieldsCapability: FinanceCapability<
 	description:
 		'Extract structured fields from a finance or archive document per the workflow-selected category.',
 	riskLevel: 'R2',
+	inputSchema: extractDocumentFieldsInputSchema,
 
 	async execute(input, ctx) {
 		const ctxWithEnv = ctx as CapabilityContextWithEnv;

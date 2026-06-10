@@ -1,5 +1,10 @@
 import type { EventContract } from '../../../platform/registry/contracts';
 
+/**
+ * Finance domain events — the canonical list of events this module publishes.
+ * Runtime publishers live in `events/publishers.ts`; the registry contract
+ * (`financeEventContracts`) is consumed by `module.ts` / the module manifest.
+ */
 export const FINANCE_EVENT_TYPES = [
 	'finance.expense.created',
 	'finance.document.processed',

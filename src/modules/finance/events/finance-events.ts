@@ -2,7 +2,7 @@ import {
 	FINANCE_EVENT_TYPES,
 	type FinanceEventContract,
 	type FinanceEventType
-} from '../contracts/events';
+} from '../domain/events';
 
 export { FINANCE_EVENT_TYPES };
 

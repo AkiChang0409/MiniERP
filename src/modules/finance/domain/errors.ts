@@ -1,3 +1,8 @@
+/**
+ * Finance domain failure taxonomy — pure business semantics, no framework/DB/AI.
+ * Describes how each cross-boundary failure should be treated (blocking /
+ * retryable). Consumed by integrations + contract surfaces.
+ */
 export const FINANCE_FAILURE_CODES = [
 	'unavailable',
 	'timeout',

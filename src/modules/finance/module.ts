@@ -1,11 +1,18 @@
-import type { ModuleManifestV2 } from '../../../platform/registry/contracts';
-import { financeDashboardCards, financeNavigationEntries, financeWorkspaceEntries } from '../app';
-import { financeCapabilityIds } from '../capabilities';
-import { financeEventContracts } from '../contracts/events';
-import { financeInboundContracts } from '../contracts/inbound';
-import { financeOutboundContracts } from '../contracts/outbound';
-import { financeWorkflowIds } from '../workflows';
+import type { ModuleManifestV2 } from '$platform/registry/contracts';
+import type { ModuleDefinition } from '$platform/modules/types';
+import { toLegacyModuleManifest } from '$platform/registry/contracts';
+import { financeDashboardCards, financeNavigationEntries, financeWorkspaceEntries } from './app';
+import { financeCapabilityIds } from './capabilities';
+import { financeEventContracts } from './domain/events';
+import { financeInboundContracts } from './contracts/inbound';
+import { financeOutboundContracts } from './integrations/contracts';
+import { financeWorkflowIds } from './workflows';
 
+/**
+ * Finance module registration: manifest assembly (dependencies, routes,
+ * permissions, contract surfaces) + the `ModuleDefinition` consumed by
+ * `register-modules.ts`. This is the module's wiring root.
+ */
 export const financeManifestV2: ModuleManifestV2 = {
 	id: 'finance',
 	name: 'Finance',
@@ -43,4 +50,9 @@ export const financeManifestV2: ModuleManifestV2 = {
 		outbound: financeOutboundContracts,
 		events: financeEventContracts
 	}
+};
+
+export const financeModule: ModuleDefinition = {
+	manifest: toLegacyModuleManifest(financeManifestV2),
+	manifestV2: financeManifestV2
 };

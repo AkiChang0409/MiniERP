@@ -830,7 +830,7 @@ export class ProjectService {
 			uploadedById: row.uploadedById ?? null,
 			uploadedByEmail: row.uploadedByEmail ?? null,
 			createdAt: row.createdAt,
-			legacy: false as const
+			legacy: false
 		}));
 
 		// Legacy single-file fallback: render the old columns as a read-only
