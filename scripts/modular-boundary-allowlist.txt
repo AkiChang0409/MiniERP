@@ -31,6 +31,5 @@ src/routes/(app)/projects/[id]/expenses/[expenseId]/+page.svelte
 src/routes/(app)/projects/[id]/revenue/+page.svelte
 src/routes/api/finance/agent/intent/+server.ts
 src/routes/api/finance/expenses/detect/+server.ts
-src/routes/api/finance/workflow/+server.ts
 src/routes/api/intake/classify/+server.ts
 src/routes/api/intake/reclassify/+server.ts

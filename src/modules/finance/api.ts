@@ -5,3 +5,4 @@
  * `capabilities/` (SDK-for-agent); both ultimately resolve to services here.
  */
 export { createFinanceApi, type FinanceApi } from './services/api';
+export { FINANCE_PUBLIC_GROUPS, type FinancePublicGroup } from './services/api';

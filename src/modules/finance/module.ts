@@ -4,9 +4,8 @@ import { toLegacyModuleManifest } from '$platform/registry/contracts';
 import { financeDashboardCards, financeNavigationEntries, financeWorkspaceEntries } from './app';
 import { financeCapabilityIds } from './capabilities';
 import { financeEventContracts } from './domain/events';
-import { financeInboundContracts } from './contracts/inbound';
+import { financeInboundContracts, financeOutboundContracts } from './integrations/contracts';
 import { registerFinanceHandlers } from './events';
-import { financeOutboundContracts } from './integrations/contracts';
 import { financeWorkflowIds } from './workflows';
 
 /**

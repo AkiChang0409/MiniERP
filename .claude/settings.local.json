@@ -108,7 +108,9 @@
       "Bash(sed -n '505,515p' \"ref_files/v4/BaseLine/3_模块参考.md\")",
       "Bash(sed -n \"/与当前实现的差距/,/^### 3.2/p\" \"ref_files/v4/BaseLine/1_项目与架构.md\")",
       "Bash(sed -n \"/## 4. 文档更新协议/,/更新原则/p\" \"ref_files/v4/BaseLine/0_README.md\")",
-      "Bash(grep -rn \"finance/services/legacy-expense\\\\|finance/repositories/legacy-expense\\\\|legacy-expense-service.ts \\(812\\\\|legacy-expense-repository.ts \\\\`\" ref_files/v4/BaseLine/)"
+      "Bash(grep -rn \"finance/services/legacy-expense\\\\|finance/repositories/legacy-expense\\\\|legacy-expense-service.ts \\(812\\\\|legacy-expense-repository.ts \\\\`\" ref_files/v4/BaseLine/)",
+      "Bash(grep -n \"policies/\\\\|policies\\\\b\\\\|contracts/\\\\|contracts 仅剩\\\\|仅剩 \\\\`inbound\\\\|app/\" \"ref_files/v4/BaseLine/3_模块参考.md\")",
+      "Bash(grep -rn 'from '\\\\''\\\\$app-layer\\\\|from '\\\\''.*\\\\/app\\\\/' src/routes --include=*.ts)"
     ]
   }
 }
