@@ -1,5 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { fail } from '$platform/http';
+import { sendTextMessage } from '$platform/integrations/lark/client';
 
 /**
  * Lark (Feishu) event webhook — Phase: handshake + auth skeleton ONLY.
@@ -82,7 +83,7 @@ export const POST: RequestHandler = async (event) => {
 		return json({ challenge });
 	}
 
-	// --- 2) Event callback — verify token, then acknowledge only ---
+	// --- 2) Event callback — verify token, then handle ---
 	// schema 2.0 → header.token; legacy v1 → top-level token.
 	const header = body.header as Record<string, unknown> | undefined;
 	const token = asString(header?.token) ?? asString(body.token);
@@ -90,11 +91,49 @@ export const POST: RequestHandler = async (event) => {
 		return fail('Invalid verification token', 401);
 	}
 
-	const eventType =
-		asString(header?.event_type) ??
-		asString((body.event as Record<string, unknown> | undefined)?.type) ??
-		'unknown';
-	// Acknowledge fast (Lark retries unless it sees a 2xx). Processing is a later phase.
-	console.log(`[lark] event received and acknowledged (not processed): ${eventType}`);
+	const eventType = asString(header?.event_type) ?? 'unknown';
+	const env = event.platform?.env;
+
+	// Phase 3A: only echo single-chat text messages. No HR capability, no DB,
+	// no identity mapping. Everything else is acknowledged and ignored.
+	if (eventType === 'im.message.receive_v1' && env) {
+		const message = (body.event as Record<string, unknown> | undefined)?.message as
+			| Record<string, unknown>
+			| undefined;
+		const chatId = asString(message?.chat_id);
+		const messageType = asString(message?.message_type);
+		const contentRaw = asString(message?.content);
+
+		if (chatId) {
+			let reply: string;
+			if (messageType === 'text') {
+				// Lark message content is a JSON string, e.g. {"text":"查看待审批请假"}.
+				let userText = '';
+				try {
+					const parsed = JSON.parse(contentRaw ?? '{}') as { text?: unknown };
+					userText = asString(parsed.text) ?? '';
+				} catch {
+					userText = '';
+				}
+				reply = `MiniERP received: ${userText}`;
+			} else {
+				console.log(`[lark] unsupported message type: ${messageType ?? 'unknown'}`);
+				reply = 'MiniERP: unsupported message type (text only for now).';
+			}
+
+			// ACK fast, send the reply after responding (Lark retries on slow/non-2xx).
+			const sending = sendTextMessage(env, chatId, reply).catch((err) =>
+				console.error('[lark] sendTextMessage failed:', err)
+			);
+			const ctx = event.platform?.ctx;
+			if (ctx?.waitUntil) ctx.waitUntil(sending);
+			else await sending;
+		} else {
+			console.log('[lark] message event missing chat_id; skipped');
+		}
+	} else {
+		console.log(`[lark] event acknowledged (not handled in Phase 3A): ${eventType}`);
+	}
+
 	return json({ ok: true });
 };
