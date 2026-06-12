@@ -38,7 +38,8 @@ const PERMISSION_TO_ROLES: Record<string, readonly AuthRole[]> = {
 	'project:edit': ['owner', 'admin', 'project_manager'],
 	'project:staff': ['owner', 'admin', 'project_manager'],
 	'hr:view': ['owner', 'admin', 'hr'],
-	'hr:edit': ['owner', 'admin', 'hr']
+	'hr:edit': ['owner', 'admin', 'hr'],
+	'hr:approve': ['owner', 'admin', 'hr']
 };
 
 function rolesHavePermission(roles: AuthRole[] | null | undefined, permission: string): boolean {

@@ -55,6 +55,12 @@ declare global {
 		/** Resend API (transactional email: verify, reset password). Optional in dev (logs only). */
 		RESEND_API_KEY?: string;
 		EMAIL_FROM?: string;
+		/** Lark (Feishu) app credentials + webhook verification token. */
+		LARK_APP_ID?: string;
+		LARK_APP_SECRET?: string;
+		LARK_VERIFICATION_TOKEN?: string;
+		/** Optional: API base. Default https://open.feishu.cn; international Lark = https://open.larksuite.com */
+		LARK_BASE_URL?: string;
 	}
 
 	namespace App {

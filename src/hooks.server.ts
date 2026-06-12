@@ -56,6 +56,13 @@ function isPublicAuthApi(pathname: string) {
 	return pathname.startsWith('/api/auth');
 }
 
+// External webhooks authenticate via their own provider token inside the
+// handler (e.g. Lark's LARK_VERIFICATION_TOKEN), not a user session, so they
+// must bypass the app's API auth gate.
+function isPublicWebhook(pathname: string) {
+	return pathname === '/api/integrations/lark/webhook';
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
 	if (building) {
 		return resolve(event);
@@ -95,7 +102,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const wantApiAuth = needsApiAuth(path);
 	const wantAppAuth = needsAppAuth(path);
 
-	if (wantAppAuth || (wantApiAuth && !isPublicAuthApi(path))) {
+	if (wantAppAuth || (wantApiAuth && !isPublicAuthApi(path) && !isPublicWebhook(path))) {
 		if (!event.locals.user) {
 			if (wantApiAuth) {
 				return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 });
