@@ -1,23 +1,10 @@
-import * as financeAgent from './agent';
 import { financeAppSurface } from './app';
 import { financeCapabilities, financeCapabilityIds } from './capabilities';
-import { financeManifestV2 } from './config';
-import * as financeContracts from './contracts/index';
-import * as financeEvents from './events';
-import type { ModuleDefinition } from '$platform/modules/types';
-import { toLegacyModuleManifest } from '$platform/registry/contracts';
-import * as financePolicies from './policies';
-import * as financeRepositories from './repositories';
-import * as financeRules from './rules';
-import * as financeServices from './services';
+import { financeModule, financeManifestV2 } from './module';
 import { financeWorkflows, financeWorkflowIds } from './workflows';
 
-export const financeModule: ModuleDefinition = {
-	manifest: toLegacyModuleManifest(financeManifestV2),
-	manifestV2: financeManifestV2
-};
 
-export { createFinanceApi, type FinanceApi } from './services/api';
+export { createFinanceApi, type FinanceApi } from './api';
 export {
 	financeAgentActionSets,
 	financeAllAgentActions,
@@ -31,8 +18,8 @@ export type { FinanceRevenueApi } from './services/revenue-service';
 export type { FinanceTaxesApi } from './services/tax-service';
 export type { CategoryServiceApi } from './services/category-service';
 export type { FinanceEInvoiceApi } from './services/einvoice-service';
-export type { FinanceInboundContract, FinancePublicGroup } from './contracts/inbound';
-export { FINANCE_PUBLIC_GROUPS } from './contracts/inbound';
+export type { FinancePublicGroup } from './api';
+export { FINANCE_PUBLIC_GROUPS } from './api';
 export { financeAppSurface };
 export { financeWorkflows, financeWorkflowIds };
 export { financeCapabilities, financeCapabilityIds };
@@ -67,7 +54,7 @@ export {
 	type TodayBriefItem,
 	type TodayBriefData
 } from './services/finance-task-service';
-export { financeManifestV2 };
+export { financeModule, financeManifestV2 };
 export {
 	financeAgentManifest,
 	classifyFinanceIntent,
@@ -117,24 +104,17 @@ export {
 	calcGstFromSubtotal,
 	calcGstFromGrossAmount,
 	calcSubtotalFromGross
-} from './rules/gst-constants';
-export type { GstSupplyCode } from './rules/gst-constants';
+} from './domain/gst-constants';
+export type { GstSupplyCode } from './domain/gst-constants';
 
+// Curated domain-rule re-export (no namespace barrels of internal layers:
+// repositories / services / contracts / policies / events stay module-private).
+export { validateExpenseRecord, estimateSingaporeResidentTax } from './domain/rules';
+
+// Workflow definitions (for the platform engine registry) + confirm use-case.
+export { buildFinanceWorkflowDefinitions, type FinanceWorkflowDeps } from './workflows/register';
 export {
-	financeContracts,
-	financeServices,
-	financeRules,
-	financeRepositories,
-	financePolicies,
-	financeEvents
-};
-
-export const financePublicSurface = {
-	manifest: financeManifestV2,
-	agent: financeAgent,
-	contracts: financeContracts,
-	capabilities: financeCapabilities,
-	workflows: financeWorkflows,
-	services: financeServices,
-	app: financeAppSurface
-};
+	confirmFinanceWorkflow,
+	type ConfirmBody,
+	type WorkflowConfirmResult
+} from './services/workflow-confirm';

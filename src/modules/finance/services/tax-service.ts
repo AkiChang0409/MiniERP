@@ -9,7 +9,7 @@ import {
 	projectEmployees,
 	revenue
 } from '../../../infrastructure/db/schema';
-import { estimateSingaporeResidentTax, SG_GST_RATE_PERCENT } from '../rules';
+import { estimateSingaporeResidentTax, SG_GST_RATE_PERCENT } from '../domain/rules';
 import {
 	projectExpenseTotalSumExpr,
 	projectRevenueTotalSumExpr,

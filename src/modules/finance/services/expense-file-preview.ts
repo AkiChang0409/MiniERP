@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 
-import type { DocumentMetadata } from '$modules/finance/schemas/document-metadata';
+import type { DocumentMetadata } from '$modules/finance/domain/document-metadata';
 import { inferFileInlinePreviewKind, type FileInlinePreviewKind } from '$platform/files/file-inline-preview';
 import { r2FileUrls } from '$platform/files/r2-file-urls';
 import { schema, type DBClient } from '../../../infrastructure/db';

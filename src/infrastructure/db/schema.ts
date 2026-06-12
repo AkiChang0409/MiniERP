@@ -66,7 +66,12 @@ export {
 	projects,
 	projectEmployees,
 	projectCollaborators,
-	projectComments
+	projectComments,
+	projectAttachments,
+	projectTasks,
+	projectTaskDependencies,
+	projectWorkflowStages,
+	projectCalendarIntegrations
 } from '$modules/project/repositories/project.schema';
 
 // Project archive documents (contracts / quotations / POs)

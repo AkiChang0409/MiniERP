@@ -1,4 +1,4 @@
-import { inferExpenseCurrencyFromText } from '$modules/finance/schemas/expense-upload';
+import { inferExpenseCurrencyFromText } from '$modules/finance/domain/expense-upload';
 import { callAiJsonWithSource, type AiProviderUsed } from '$platform/ai/json-provider';
 
 /** Core shape produced by the OCR pipeline's lightweight LLM / heuristic pass (any voucher type). */

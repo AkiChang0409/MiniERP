@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { computeUrgency } from '$modules/project';
+
 	let { data } = $props();
 
 	type CalEntry = {
@@ -102,13 +104,13 @@
 		return out;
 	});
 
-	const priorityMeta = (priority: number) => {
-		if (priority >= 8)
-			return { soft: '#fee2e2', text: '#b91c1c', border: '#fecaca' };
-		if (priority >= 5)
-			return { soft: '#fef3c7', text: '#92400e', border: '#fde68a' };
-		return { soft: '#dcfce7', text: '#166534', border: '#bbf7d0' };
-	};
+	// Calendar chip colour now follows the same auto-urgency logic as the
+	// list / dashboard / Gantt — derived from the deadline, no manual priority.
+	const urgencyForEntry = (entry: CalEntry) =>
+		computeUrgency({
+			status: entry.status,
+			deadline: entry.deadline
+		});
 </script>
 
 <div class="space-y-5">
@@ -203,16 +205,16 @@
 			</div>
 			<div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
 				<span class="inline-flex items-center gap-1">
-					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fecaca"></span>
-					Priority 8-10
+					<span class="inline-block h-2 w-2 rounded-sm" style="background:#bbf7d0"></span>
+					On track
 				</span>
 				<span class="inline-flex items-center gap-1">
 					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fde68a"></span>
-					Priority 5-7
+					Watch
 				</span>
 				<span class="inline-flex items-center gap-1">
-					<span class="inline-block h-2 w-2 rounded-sm" style="background:#bbf7d0"></span>
-					Priority 1-4
+					<span class="inline-block h-2 w-2 rounded-sm" style="background:#fecaca"></span>
+					Urgent / overdue
 				</span>
 				<span class="inline-flex items-center gap-1">
 					<span class="opacity-60">⟳</span>
@@ -265,14 +267,14 @@
 							{#if entries.length > 0}
 								<ul class="space-y-1">
 									{#each entries.slice(0, 3) as entry (entry.id)}
-										{@const pm = priorityMeta(entry.priority ?? 5)}
+										{@const urg = urgencyForEntry(entry)}
 										{@const meta = statusMeta(entry.status)}
 										<li>
 											<a
 												href={`/projects/${entry.id}`}
 												class="block truncate rounded border px-1.5 py-1 text-[10.5px] leading-tight"
-												style={`background:${pm.soft};color:${pm.text};border-color:${pm.border}`}
-												title={`${entry.name} · ${meta.label} · P${entry.priority}`}
+												style={`background:${urg.soft};color:${urg.text};border-color:${urg.border}`}
+												title={`${entry.name} · ${meta.label} · ${urg.label}`}
 											>
 												<span class="font-medium">
 													{#if entry.recurrenceFrequency}<span class="opacity-70">⟳ </span>{/if}{entry.name}
@@ -292,17 +294,69 @@
 		</div>
 	</section>
 
-	<!-- Subscribe note -->
-	<section class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-		<p class="font-medium text-slate-700">Sync to Google Calendar or Outlook</p>
-		<p class="mt-1">
-			Click <span class="font-medium text-[var(--sf-green)]">Download .ics</span> for a one-off
-			snapshot, or paste
-			<code class="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-700">
-				{icsHref}
-			</code>
-			into your calendar app to subscribe to the live feed. Two-way edits will land in v2 once the
-			platform-side OAuth integration ships.
+	{#if data.dataMessage}
+		<div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+			⚠ {data.dataMessage}
+		</div>
+	{/if}
+
+	<!-- Two-way sync (Epic 5) -->
+	<section class="rounded-xl border border-slate-200 bg-white p-4 text-xs">
+		<p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+			Two-way calendar sync
 		</p>
+		<p class="mt-1 text-slate-600">
+			Connect your calendar to push these deadlines (and reschedules) directly to Google
+			Calendar or Outlook.
+		</p>
+		<div class="mt-3 grid gap-2 sm:grid-cols-2">
+			{#each (data.integrations ?? []) as int}
+				<div class="rounded-md border border-slate-200 bg-slate-50/50 p-3">
+					<p class="text-sm font-medium capitalize text-slate-800">{int.provider}</p>
+					{#if !int.configured}
+						<p class="mt-1 text-[11px] text-amber-700">
+							Operator needs to set
+							<code class="font-mono text-[10px]">
+								{int.provider === 'google'
+									? 'GOOGLE_CALENDAR_CLIENT_ID + SECRET'
+									: 'OUTLOOK_CLIENT_ID + SECRET'}
+							</code>
+							to enable.
+						</p>
+					{:else if int.connected}
+						<p class="mt-1 text-[11px] text-slate-600">
+							Connected as <span class="font-mono">{int.externalAccountEmail}</span>
+						</p>
+						<form
+							method="POST"
+							action={`/api/projects/calendar/oauth/${int.provider}/disconnect`}
+							class="mt-2"
+						>
+							<button
+								type="submit"
+								class="rounded-md border border-rose-200 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50"
+							>
+								Disconnect
+							</button>
+						</form>
+					{:else}
+						<a
+							class="mt-2 inline-flex rounded-md border border-[var(--sf-green)] bg-[var(--sf-green-soft)] px-2 py-1 text-[11px] font-medium text-[var(--sf-green)] hover:bg-emerald-100"
+							href={`/api/projects/calendar/oauth/${int.provider}/start`}
+						>
+							Connect {int.provider}
+						</a>
+					{/if}
+				</div>
+			{/each}
+		</div>
+
+		<details class="mt-3 text-[11px] text-slate-500">
+			<summary class="cursor-pointer">Or subscribe via ICS</summary>
+			<p class="mt-1">
+				Paste this URL into any calendar app to subscribe to a read-only feed:
+				<code class="block rounded bg-slate-50 px-1.5 py-0.5 font-mono">{icsHref}</code>
+			</p>
+		</details>
 	</section>
 </div>

@@ -1,1 +1,2 @@
-export { FINANCE_EVENT_TYPES, createFinanceEvent } from './finance-events';
+export { FINANCE_EVENT_TYPES, createFinanceEvent } from './publishers';
+export { registerFinanceHandlers } from './handlers';

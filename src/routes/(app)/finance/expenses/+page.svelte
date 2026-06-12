@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import PageShell from '$app-layer/components/PageShell.svelte';
-	import { EXPENSE_CATEGORY_OPTIONS, CATEGORY_LABELS, type ExpenseType } from '$modules/finance/schemas/expense-upload';
+	import { EXPENSE_CATEGORY_OPTIONS, CATEGORY_LABELS, type ExpenseType } from '$modules/finance/domain/expense-upload';
 
 	let { data } = $props();
 

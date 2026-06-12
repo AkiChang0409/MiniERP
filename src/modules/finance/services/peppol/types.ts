@@ -1,4 +1,4 @@
-import type { GstSupplyCode } from '../../rules/gst-constants';
+import type { GstSupplyCode } from '../../domain/gst-constants';
 
 export interface PeppolParty {
 	name: string;

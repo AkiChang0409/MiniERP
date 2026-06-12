@@ -17,7 +17,7 @@ import {
 	CATEGORY_DOC_TYPE_MAP,
 	type ExpenseType,
 	type ExpenseCategory
-} from '$modules/finance/schemas/expense-upload';
+} from '$modules/finance/domain/expense-upload';
 import { resolveSgdEquivalentForWrite } from '$modules/finance/services/fx/resolve-sgd-equivalent';
 
 type ExpenseUploadBody = {

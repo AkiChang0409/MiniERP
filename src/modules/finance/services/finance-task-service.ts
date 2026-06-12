@@ -2,7 +2,7 @@ import type { DBClient } from '$infrastructure/db';
 import { DocumentArtifactRepository } from '$modules/document-intake';
 import { financeCapabilities, financeCapabilityIds } from '../capabilities';
 import { financeWorkflows, financeWorkflowIds } from '../workflows';
-import { GstReturnRepository } from '../repositories/legacy-tax-repository';
+import { GstReturnRepository } from '../repositories/tax-repository';
 
 export function createFinanceTaskService() {
 	return {

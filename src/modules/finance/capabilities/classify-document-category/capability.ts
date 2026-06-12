@@ -27,6 +27,7 @@ import {
 	type IntakeDocumentType
 } from '../../workflows/financial-document-intake/categories';
 import type { FinanceCapability, FinanceCapabilityContext } from '../types';
+import { classifyDocumentCategoryInputSchema } from './schema';
 
 export const CLASSIFY_DOCUMENT_CATEGORY_PROMPT_VERSION = 'classify-category-v1';
 export const CLASSIFY_DOCUMENT_CATEGORY_SCHEMA_VERSION = 'classify-category-v1';
@@ -159,6 +160,7 @@ export const classifyDocumentCategoryCapability: FinanceCapability<
 	id: 'finance.classify-document-category',
 	description: 'Classify a finance/archive document directly into its canonical accounting category.',
 	riskLevel: 'R2',
+	inputSchema: classifyDocumentCategoryInputSchema,
 
 	async execute(input, ctx) {
 		const ctxWithEnv = ctx as CapabilityContextWithEnv;

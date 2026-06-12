@@ -1,4 +1,4 @@
-import { GST_SUPPLY_CODE_RATE, SG_GST_RATE_PERCENT } from '../../rules/gst-constants';
+import { GST_SUPPLY_CODE_RATE, SG_GST_RATE_PERCENT } from '../../domain/gst-constants';
 import type { PeppolInvoiceInput, PeppolInvoiceLine, PeppolParty, PeppolXmlResult } from './types';
 
 const PEPPOL_BIS_PROFILE = 'urn:fdc:peppol.eu:2017:poacc:billing:01:1.0';

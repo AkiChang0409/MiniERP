@@ -1,4 +1,5 @@
 import type { FinanceCapability } from '../types';
+import { suggestNextTaskInputSchema } from './schema';
 import { pickFollowUp, type SuggestedNextTask } from './mock';
 
 export interface SuggestNextTaskInput {
@@ -18,6 +19,7 @@ export const suggestNextFinanceTaskCapability: FinanceCapability<
 	id: 'finance.suggest-next-finance-task',
 	description: 'Suggest the next finance task once the current workflow has completed.',
 	riskLevel: 'R1',
+	inputSchema: suggestNextTaskInputSchema,
 
 	async execute(input) {
 		const task = pickFollowUp({ afterSupplierName: input.afterSupplierName });

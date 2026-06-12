@@ -1,11 +1,11 @@
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { resolveSgdEquivalentForWrite } from '$modules/finance/services/fx/resolve-sgd-equivalent';
-import { parseDocumentMetadata } from '$modules/finance/schemas/document-metadata';
+import { parseDocumentMetadata } from '$modules/finance/domain/document-metadata';
 import { resolveExpenseFilePreview } from '$modules/finance/services/expense-file-preview';
 import type { ModuleContext } from '$platform/modules/types';
 import { AuditService } from '$platform/audit/audit-service';
 import { businessPartners, projects, revenue } from '../../../infrastructure/db/schema';
-import { listFinanceProjectNames } from '../adapters';
+import { listFinanceProjectNames } from '../integrations';
 import { RevenueRepository } from '../repositories';
 
 type FinanceRevenueCreateInput = {
