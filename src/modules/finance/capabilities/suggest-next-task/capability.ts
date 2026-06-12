@@ -1,6 +1,5 @@
-import type { FinanceCapability } from '../types';
+import type { FinanceCapability, SuggestedNextTask } from '../types';
 import { suggestNextTaskInputSchema } from './schema';
-import { pickFollowUp, type SuggestedNextTask } from './mock';
 
 export interface SuggestNextTaskInput {
 	afterWorkflowId?: string;
@@ -9,9 +8,17 @@ export interface SuggestNextTaskInput {
 
 export interface SuggestNextTaskOutput {
 	task: SuggestedNextTask | null;
-	provider: 'mock-v1';
+	/** `service` when the suggest-next-task port served real data; `unavailable`
+	 *  when no port was injected. */
+	provider: 'service' | 'unavailable';
 }
 
+/**
+ * Suggest the next finance task once the current workflow has completed. Thin
+ * agent-facing tool: it forwards to the injected `suggestNextTask` port
+ * (→ `finance-task-service.suggestNextFinanceTask`, the SDK-for-code source of
+ * truth). It computes nothing itself.
+ */
 export const suggestNextFinanceTaskCapability: FinanceCapability<
 	SuggestNextTaskInput,
 	SuggestNextTaskOutput
@@ -21,8 +28,9 @@ export const suggestNextFinanceTaskCapability: FinanceCapability<
 	riskLevel: 'R1',
 	inputSchema: suggestNextTaskInputSchema,
 
-	async execute(input) {
-		const task = pickFollowUp({ afterSupplierName: input.afterSupplierName });
-		return { task, provider: 'mock-v1' };
+	async execute(input, ctx) {
+		const task = await ctx.deps?.suggestNextTask?.(input);
+		if (task === undefined) return { task: null, provider: 'unavailable' };
+		return { task, provider: 'service' };
 	}
 };

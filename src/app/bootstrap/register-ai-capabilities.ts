@@ -6,31 +6,13 @@
  */
 import { classifyDocumentCapability } from '$modules/document-intake/capabilities/classify-document';
 import { financeAgentAllowedCapabilities } from '$modules/finance/agent';
-import {
-	detectDuplicateCapability,
-	extractDocumentFieldsCapability,
-	extractInvoiceFieldsCapability,
-	matchPurchaseOrderCapability,
-	matchSupplierCapability,
-	suggestNextFinanceTaskCapability,
-	validateExpenseDraftCapability
-} from '$modules/finance/capabilities';
+import { financeCapabilities } from '$modules/finance/capabilities';
 import {
 	registerCapabilities,
 	type CapabilityRegistration
 } from '$platform/ai/register-all';
 
 const FINANCE_AGENT_ID = 'finance-agent';
-
-const financeCapabilities = [
-	extractInvoiceFieldsCapability,
-	extractDocumentFieldsCapability,
-	matchSupplierCapability,
-	matchPurchaseOrderCapability,
-	detectDuplicateCapability,
-	validateExpenseDraftCapability,
-	suggestNextFinanceTaskCapability
-];
 
 const registrations: CapabilityRegistration[] = financeCapabilities.map((capability) => {
 	const policyEntry = financeAgentAllowedCapabilities.find((entry) => entry.id === capability.id);

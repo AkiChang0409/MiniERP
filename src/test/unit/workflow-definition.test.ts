@@ -56,10 +56,10 @@ describe('findFinancialDocumentIntakeStep', () => {
 		expect(step.allowedCapabilities).toContain('finance.extract-document-fields');
 	});
 
-	it('matching authorises dedup and supplier-match capabilities', () => {
+	it('matching authorises supplier and purchase-order match capabilities', () => {
 		const step = findFinancialDocumentIntakeStep('matching')!;
-		expect(step.allowedCapabilities).toContain('finance.detect-duplicate');
 		expect(step.allowedCapabilities).toContain('finance.match-supplier');
+		expect(step.allowedCapabilities).toContain('finance.match-purchase-order');
 	});
 
 	it('record_creation is R4 and authorises all three write capabilities', () => {

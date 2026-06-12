@@ -3,7 +3,7 @@ import { appendAgentAuditEntry } from '$platform/audit/audit-log';
 import { hashConfirmationPayload } from '$platform/workflow/payload-hash';
 import { getState, patchState } from '$platform/workflow/workflow-runtime';
 import { financeAgentManifest } from '../agent';
-import { suggestNextFinanceTaskCapability } from '../capabilities/suggest-next-task';
+import { suggestNextFinanceTask } from './finance-task-service';
 import { validateExpenseRecord } from '../domain/rules';
 import { findCategoryById, type CategoryDefinition } from '../workflows/financial-document-intake';
 import {
@@ -378,12 +378,14 @@ export async function confirmFinanceWorkflow(
 		status: 'ok'
 	});
 
-	const suggestion = await suggestNextFinanceTaskCapability.execute(
+	const nextTask = await suggestNextFinanceTask(
+		db,
+		state.tenantId,
 		{
 			afterWorkflowId: state.workflowId,
 			afterSupplierName: body.payload.fields.counterpartyName
 		},
-		{ tenantId: state.tenantId, userId: state.userId, useMock: true }
+		new Date()
 	);
 
 	await patchState(kv, state.id, {
@@ -398,7 +400,7 @@ export async function confirmFinanceWorkflow(
 				persistTarget: category.persistTarget,
 				confirmedAt: Date.now()
 			},
-			nextTask: suggestion.task
+			nextTask
 		}
 	});
 
@@ -409,7 +411,7 @@ export async function confirmFinanceWorkflow(
 			auditRef: audit.auditId,
 			entityRoute,
 			categoryId: category.id,
-			nextTask: suggestion.task
+			nextTask
 		}
 	};
 }

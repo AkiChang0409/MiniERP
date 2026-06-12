@@ -114,7 +114,8 @@
       "Bash(npm run *)",
       "Bash(sed -n '158,172p' \"ref_files/v4/BaseLine/7_未完成工作.md\")",
       "Bash(sed -n '162,172p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")",
-      "Bash(sed -n '535,557p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")"
+      "Bash(sed -n '535,557p' \"ref_files/v4/BaseLine/5_AI workflow 运行时.md\")",
+      "Bash(grep -iE 'service|repositor|$infrastructure|/db')"
     ]
   }
 }

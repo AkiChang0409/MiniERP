@@ -1,2 +1,2 @@
 export { registerProjectHandlers } from './handlers';
-export { PROJECT_EVENT_TYPES, createProjectEvent } from './project-events';
+export { PROJECT_EVENT_TYPES, createProjectEvent } from './publishers';

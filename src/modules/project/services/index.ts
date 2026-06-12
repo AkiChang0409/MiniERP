@@ -1,5 +1,4 @@
-export { createProjectApi } from './api';
-export { createProjectPublicApi, type ProjectApi } from './project-service';
+export { createProjectApi, type ProjectApi } from './api';
 export {
 	ProjectTaskService,
 	type TaskCreateInput,

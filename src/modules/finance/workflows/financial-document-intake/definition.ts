@@ -80,11 +80,7 @@ export const financialDocumentIntakeWorkflow: FinancialDocumentIntakeWorkflowDef
 		},
 		{
 			id: 'matching',
-			allowedCapabilities: [
-				'finance.match-supplier',
-				'finance.match-purchase-order',
-				'finance.detect-duplicate'
-			],
+			allowedCapabilities: ['finance.match-supplier', 'finance.match-purchase-order'],
 			riskLevel: 'R1',
 			requiresUserConfirmation: false,
 			nextSteps: ['project_selection', 'user_confirmation']
@@ -98,7 +94,7 @@ export const financialDocumentIntakeWorkflow: FinancialDocumentIntakeWorkflowDef
 		},
 		{
 			id: 'user_confirmation',
-			allowedCapabilities: ['finance.validate-expense-draft'],
+			allowedCapabilities: [],
 			riskLevel: 'R3',
 			requiresUserConfirmation: true,
 			nextSteps: ['record_creation']

@@ -45,25 +45,21 @@ export const vendorInvoiceIntakeWorkflow: VendorInvoiceIntakeWorkflowDefinition 
 		},
 		{
 			id: 'invoice_field_extraction',
-			allowedCapabilities: ['finance.extract-invoice-fields'],
+			allowedCapabilities: ['finance.extract-document-fields'],
 			riskLevel: 'R2',
 			requiresUserConfirmation: false,
 			nextSteps: ['matching']
 		},
 		{
 			id: 'matching',
-			allowedCapabilities: [
-				'finance.match-supplier',
-				'finance.match-purchase-order',
-				'finance.detect-duplicate'
-			],
+			allowedCapabilities: ['finance.match-supplier', 'finance.match-purchase-order'],
 			riskLevel: 'R1',
 			requiresUserConfirmation: false,
 			nextSteps: ['user_confirmation']
 		},
 		{
 			id: 'user_confirmation',
-			allowedCapabilities: ['finance.validate-expense-draft'],
+			allowedCapabilities: [],
 			riskLevel: 'R3',
 			requiresUserConfirmation: true,
 			nextSteps: ['record_creation']

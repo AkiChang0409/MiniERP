@@ -3,4 +3,4 @@ export {
 	type SuggestNextTaskInput,
 	type SuggestNextTaskOutput
 } from './capability';
-export type { SuggestedNextTask } from './mock';
+export type { SuggestedNextTask } from '../types';

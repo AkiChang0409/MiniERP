@@ -5,11 +5,6 @@ import { financeWorkflows, financeWorkflowIds } from './workflows';
 
 
 export { createFinanceApi, type FinanceApi } from './api';
-export {
-	financeAgentActionSets,
-	financeAllAgentActions,
-	type FinanceAgentActionSets
-} from './capabilities/agent-actions';
 export type { FinanceBillingApi } from './services/billing-service';
 export type { FinanceDocumentsApi } from './services/document-service';
 export type { FinanceExpensesApi } from './services/expense-service';

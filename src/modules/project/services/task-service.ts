@@ -10,10 +10,7 @@ import {
 	ProjectWorkflowStageRepository,
 	ProjectGanttPortfolioRepository
 } from '../repositories';
-import {
-	ProjectPermissionError,
-	ProjectValidationError
-} from './legacy-project-service';
+import { ProjectPermissionError, ProjectValidationError } from '../domain';
 
 /**
  * Phase 1B / Epic 2 — task and Gantt-portfolio orchestration. Permission

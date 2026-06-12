@@ -27,6 +27,27 @@ export function createEmployeeLookupAdapter<TEmployee>(
 	return { getEmployeeById };
 }
 
+/**
+ * Supplier / purchase-order lookup gateways used by the matching capabilities
+ * (`finance.match-supplier` / `finance.match-purchase-order`). Supplier and PO
+ * master data is owned by `procurement`; finance reaches it only through these
+ * ports (wired in the app composition root), never via a direct import. The
+ * concrete result shapes are the capability lookup contracts in
+ * `capabilities/types.ts`.
+ */
+export interface SupplierLookupAdapter<TSupplier = unknown> {
+	listSuppliers(query: { counterpartyName?: string }): Promise<TSupplier[]>;
+}
+
+export interface PurchaseOrderLookupAdapter<TPurchaseOrder = unknown> {
+	listPurchaseOrders(query: {
+		supplierId?: string;
+		supplierName?: string;
+		totalAmount?: number;
+		currency?: string;
+	}): Promise<TPurchaseOrder[]>;
+}
+
 /** Registry-level declaration of finance's outbound (cross-boundary) dependencies. */
 export const financeOutboundContracts: OutboundContract[] = [
 	{
@@ -44,6 +65,24 @@ export const financeOutboundContracts: OutboundContract[] = [
 		providerId: 'person',
 		strength: 'weak',
 		description: 'Employee summary lookup for finance records',
+		failurePolicy: 'degrade',
+		failures: ['not_found', 'unavailable', 'timeout']
+	},
+	{
+		id: 'finance.supplier_lookup',
+		provider: 'module',
+		providerId: 'procurement',
+		strength: 'weak',
+		description: 'Supplier candidate lookup for invoice/supplier matching',
+		failurePolicy: 'degrade',
+		failures: ['not_found', 'unavailable', 'timeout']
+	},
+	{
+		id: 'finance.purchase_order_lookup',
+		provider: 'module',
+		providerId: 'procurement',
+		strength: 'weak',
+		description: 'Purchase order candidate lookup for invoice/PO matching',
 		failurePolicy: 'degrade',
 		failures: ['not_found', 'unavailable', 'timeout']
 	},

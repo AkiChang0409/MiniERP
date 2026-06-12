@@ -22,11 +22,7 @@ import {
 import type { FinanceEvidence } from '../../agent/types';
 import type { FinanceCapability, FinanceCapabilityContext } from '../types';
 import { extractDocumentFieldsInputSchema } from './schema';
-import {
-	buildEvidence,
-	pickFixture,
-	type ExtractionProvider
-} from '../extract-invoice-fields/mock';
+import { buildEvidence, pickFixture, type ExtractionProvider } from './fixtures';
 import {
 	contractSchemaV1,
 	customerInvoiceSchemaV1,

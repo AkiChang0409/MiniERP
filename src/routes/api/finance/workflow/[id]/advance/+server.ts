@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { fail, ok } from '$platform/http';
 import { createModuleContext } from '$platform/modules';
 import { financeAgentManifest } from '$modules/finance';
+import { createFinanceCapabilityDeps } from '$app-layer/bootstrap/finance-capability-deps';
 import { advanceInstance } from '$platform/workflow/workflow-engine';
 
 interface AdvanceBody {
@@ -33,7 +34,8 @@ export const POST: RequestHandler = async (event) => {
 			user: ctx.user,
 			db: ctx.db,
 			env: ctx.env,
-			useMock: true
+			useMock: true,
+			capabilityDeps: createFinanceCapabilityDeps(ctx)
 		}
 	});
 

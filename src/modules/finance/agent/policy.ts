@@ -14,13 +14,13 @@ export interface FinanceCapabilityPolicyEntry {
  */
 export const financeAgentAllowedCapabilities: FinanceCapabilityPolicyEntry[] = [
 	{
-		id: 'finance.extract-invoice-fields',
+		id: 'finance.extract-document-fields',
 		riskLevel: 'R2',
 		requiresConfirmation: false,
 		requiredUserPermissions: ['finance:edit']
 	},
 	{
-		id: 'finance.extract-document-fields',
+		id: 'finance.classify-document-category',
 		riskLevel: 'R2',
 		requiresConfirmation: false,
 		requiredUserPermissions: ['finance:edit']
@@ -38,32 +38,8 @@ export const financeAgentAllowedCapabilities: FinanceCapabilityPolicyEntry[] = [
 		requiredUserPermissions: ['finance:view']
 	},
 	{
-		id: 'finance.detect-duplicate',
-		riskLevel: 'R1',
-		requiresConfirmation: false,
-		requiredUserPermissions: ['finance:view']
-	},
-	{
-		id: 'finance.validate-expense-draft',
-		riskLevel: 'R2',
-		requiresConfirmation: false,
-		requiredUserPermissions: ['finance:edit']
-	},
-	{
-		id: 'finance.create-expense-record',
-		riskLevel: 'R4',
-		requiresConfirmation: true,
-		requiredUserPermissions: ['finance:edit']
-	},
-	{
 		id: 'finance.suggest-next-finance-task',
 		riskLevel: 'R1',
-		requiresConfirmation: false,
-		requiredUserPermissions: ['finance:view']
-	},
-	{
-		id: 'finance.explain-expense-decision',
-		riskLevel: 'R0',
 		requiresConfirmation: false,
 		requiredUserPermissions: ['finance:view']
 	}

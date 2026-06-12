@@ -51,14 +51,14 @@ export const allowanceRecordingWorkflow: AllowanceRecordingWorkflowDefinition = 
 		},
 		{
 			id: 'manual_entry',
-			allowedCapabilities: ['finance.validate-expense-draft'],
+			allowedCapabilities: [],
 			riskLevel: 'R2',
 			requiresUserConfirmation: false,
 			nextSteps: ['user_confirmation']
 		},
 		{
 			id: 'user_confirmation',
-			allowedCapabilities: ['finance.validate-expense-draft'],
+			allowedCapabilities: [],
 			riskLevel: 'R3',
 			requiresUserConfirmation: true,
 			nextSteps: ['record_creation']

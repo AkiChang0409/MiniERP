@@ -1,6 +1,7 @@
 import type { DBClient } from '$infrastructure/db';
 import { DocumentArtifactRepository } from '$modules/document-intake';
 import { financeCapabilities, financeCapabilityIds } from '../capabilities';
+import type { SuggestedNextTask } from '../capabilities/types';
 import { financeWorkflows, financeWorkflowIds } from '../workflows';
 import { GstReturnRepository } from '../repositories/tax-repository';
 
@@ -150,4 +151,55 @@ function buildGreeting(readyCount: number, inFlightCount: number, totalItems: nu
 		return `AI is working on ${inFlightCount} document${inFlightCount === 1 ? '' : 's'}.`;
 	}
 	return `${totalItems} thing${totalItems === 1 ? '' : 's'} need${totalItems === 1 ? 's' : ''} your attention.`;
+}
+
+// ---------------------------------------------------------------------------
+// Next-task suggestion (replaces the former suggest-next-task capability mock)
+// ---------------------------------------------------------------------------
+
+/**
+ * Suggest the next finance task once a workflow completes, from real signals:
+ * documents still waiting in the inbox take priority (carrying the just-recorded
+ * supplier as context), otherwise an open GST quarter. Returns null when there
+ * is nothing pending. This is the SDK-for-code source of truth; the
+ * `finance.suggest-next-finance-task` capability forwards to it via an injected
+ * port.
+ */
+export async function suggestNextFinanceTask(
+	db: DBClient,
+	tenantId: string,
+	input: { afterWorkflowId?: string; afterSupplierName?: string },
+	now: Date
+): Promise<SuggestedNextTask | null> {
+	const artifactRepo = new DocumentArtifactRepository(db);
+	const readyCount = await artifactRepo.countByStatuses(tenantId, ['ready_for_review']);
+
+	if (readyCount > 0) {
+		return {
+			title:
+				readyCount === 1
+					? '1 document waiting for review'
+					: `${readyCount} documents waiting for review`,
+			detail: input.afterSupplierName
+				? `Recorded ${input.afterSupplierName}. ${readyCount} more in the inbox — want to keep going?`
+				: 'AI has pre-filled the fields. Tap to confirm or adjust.',
+			workflowId: 'finance-inbox',
+			count: readyCount
+		};
+	}
+
+	const gstInfo = getNextGstDeadline(now);
+	const gstRepo = new GstReturnRepository(db);
+	const gstReturn = await gstRepo.findByQuarter(gstInfo.year, gstInfo.quarter);
+	const gstFiled = gstReturn?.status === 'filed' || gstReturn?.status === 'submitted';
+	if (!gstFiled) {
+		return {
+			title: `GST Q${gstInfo.quarter} review is open`,
+			detail: "I've tallied input/output tax so far. Want a draft for review?",
+			workflowId: null,
+			count: 1
+		};
+	}
+
+	return null;
 }

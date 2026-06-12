@@ -4,6 +4,13 @@
 export { validateExpenseRecord } from './validate-expense';
 export { validateRevenueRecord } from './validate-revenue';
 export { detectDuplicateFinanceRecord } from './detect-duplicate';
+export type { DuplicateCandidate, DuplicateDetectionResult } from './detect-duplicate';
+export { scoreSupplierNameMatch } from './score-supplier-match';
+export {
+	scorePurchaseOrderMatch,
+	type PurchaseOrderMatchQuery,
+	type PurchaseOrderMatchTarget
+} from './score-purchase-order-match';
 export { estimateSingaporeResidentTax } from './estimate-singapore-resident-tax';
 export {
 	SG_GST_RATE,

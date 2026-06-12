@@ -24,6 +24,13 @@ export interface WorkflowRunIdentity {
 	db: DBClient;
 	env: Env;
 	useMock?: boolean;
+	/**
+	 * Opaque per-request service ports forwarded into each capability's
+	 * execution context (`capabilityCtx.deps`). The engine never interprets
+	 * this — a module composition root (e.g. the finance advance route) supplies
+	 * its own typed deps, keeping the engine domain-agnostic.
+	 */
+	capabilityDeps?: unknown;
 }
 
 export type StartInstanceResult =
@@ -125,7 +132,8 @@ export async function advanceInstance(args: AdvanceInstanceArgs): Promise<Advanc
 		tenantId: state.tenantId,
 		userId: state.userId,
 		useMock: run.useMock ?? true,
-		env: run.env
+		env: run.env,
+		deps: run.capabilityDeps
 	};
 
 	try {
