@@ -3,7 +3,7 @@
 	import PageShell from '$app-layer/components/PageShell.svelte';
 	import StorageTextPreview from '$app-layer/components/StorageTextPreview.svelte';
 	import LineItemsView from '$app-layer/components/finance/LineItemsView.svelte';
-	import { CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS } from '$modules/finance/schemas/expense-upload';
+	import { CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS } from '$modules/finance/domain/expense-upload';
 
 	let { data, form } = $props();
 

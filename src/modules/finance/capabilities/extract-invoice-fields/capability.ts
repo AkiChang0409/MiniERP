@@ -1,6 +1,7 @@
 import type { FinanceEvidence } from '../../agent/types';
 import { runStructuredOutput } from '../../../../platform/ai/ai-runtime';
 import type { FinanceCapability, FinanceCapabilityContext } from '../types';
+import { extractInvoiceFieldsInputSchema } from './schema';
 import { runHeuristicExtraction, type HeuristicResult } from './heuristic';
 import {
 	buildEvidence,
@@ -136,6 +137,7 @@ export const extractInvoiceFieldsCapability: FinanceCapability<
 	id: 'finance.extract-invoice-fields',
 	description: 'Extract invoice fields (number, supplier, amount, GST, dates) from a document.',
 	riskLevel: 'R2',
+	inputSchema: extractInvoiceFieldsInputSchema,
 
 	async execute(input, ctx) {
 		const ctxWithEnv = ctx as CapabilityContextWithEnv;

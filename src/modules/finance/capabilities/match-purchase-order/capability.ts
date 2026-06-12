@@ -1,4 +1,5 @@
 import type { FinanceCapability } from '../types';
+import { matchPurchaseOrderInputSchema } from './schema';
 import {
 	MOCK_PURCHASE_ORDERS,
 	scorePurchaseOrder,
@@ -29,6 +30,7 @@ export const matchPurchaseOrderCapability: FinanceCapability<
 	id: 'finance.match-purchase-order',
 	description: 'Find candidate purchase orders for an invoice based on supplier and amount.',
 	riskLevel: 'R1',
+	inputSchema: matchPurchaseOrderInputSchema,
 
 	async execute(input) {
 		const candidates = MOCK_PURCHASE_ORDERS.map((po) => ({

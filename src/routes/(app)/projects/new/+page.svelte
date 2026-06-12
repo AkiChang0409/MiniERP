@@ -159,7 +159,7 @@
 					knownDeadline: deadline || null
 				})
 			});
-			const body = await res.json();
+			const body: any = await res.json();
 			if (!res.ok) {
 				aiError = body?.error || body?.message || 'Plan generation failed.';
 				return;

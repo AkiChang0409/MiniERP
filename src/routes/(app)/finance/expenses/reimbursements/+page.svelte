@@ -1,6 +1,6 @@
 <script lang="ts">
 	import PageShell from '$app-layer/components/PageShell.svelte';
-	import { CATEGORY_LABELS } from '$modules/finance/schemas/expense-upload';
+	import { CATEGORY_LABELS } from '$modules/finance/domain/expense-upload';
 
 	let { data } = $props();
 

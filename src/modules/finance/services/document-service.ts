@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import {
 	buildDocumentMetadata,
 	parseDocumentMetadata
-} from '$modules/finance/schemas/document-metadata';
+} from '$modules/finance/domain/document-metadata';
 import { r2FileUrls } from '$platform/files/r2-file-urls';
 import type { ModuleContext } from '$platform/modules/types';
 import { auditLogs, contracts, purchaseOrders, quotations } from '../../../infrastructure/db/schema';

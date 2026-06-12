@@ -3,7 +3,7 @@ import { fail } from '@sveltejs/kit';
 
 import { createModuleContext } from '$platform/modules';
 import { createFinanceApi } from '$modules/finance';
-import type { ExpenseType } from '$modules/finance/schemas/expense-upload';
+import type { ExpenseType } from '$modules/finance/domain/expense-upload';
 
 export const load: PageServerLoad = async (event) => {
 	if (!event.platform) {

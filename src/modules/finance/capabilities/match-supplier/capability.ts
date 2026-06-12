@@ -1,4 +1,5 @@
 import type { FinanceCapability } from '../types';
+import { matchSupplierInputSchema } from './schema';
 import { MOCK_SUPPLIER_DIRECTORY, scoreSupplier } from './mock';
 
 export interface MatchSupplierInput {
@@ -21,6 +22,7 @@ export const matchSupplierCapability: FinanceCapability<MatchSupplierInput, Matc
 	id: 'finance.match-supplier',
 	description: 'Find candidate suppliers for an invoice based on extracted counterparty name.',
 	riskLevel: 'R1',
+	inputSchema: matchSupplierInputSchema,
 
 	async execute(input) {
 		const query = input.counterpartyName ?? '';

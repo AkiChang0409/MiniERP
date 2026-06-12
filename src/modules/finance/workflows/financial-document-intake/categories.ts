@@ -6,7 +6,7 @@
  * quotation / purchase_order).
  *
  * This file lifts the scattered constants in
- * `src/modules/finance/schemas/expense-upload.ts` and the chip catalogues in
+ * `src/modules/finance/domain/expense-upload.ts` and the chip catalogues in
  * `src/modules/document-intake/schemas/intake-field-specs.ts` into a
  * single workflow-oriented table that the Finance Agent + capability layer +
  * UI all consume.
@@ -25,7 +25,7 @@ import type {
 	ExpenseCategory,
 	ExpenseDocType,
 	ExpenseType
-} from '$modules/finance/schemas/expense-upload';
+} from '$modules/finance/domain/expense-upload';
 
 export type Bucket = 'expense' | 'revenue' | 'document_only';
 

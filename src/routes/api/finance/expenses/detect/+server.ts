@@ -9,7 +9,7 @@ import {
 	isValidExpenseCategory,
 	type ExpenseCategory,
 	type ExpenseType
-} from '$modules/finance/schemas/expense-upload';
+} from '$modules/finance/domain/expense-upload';
 
 /**
  * POST /api/expenses/detect

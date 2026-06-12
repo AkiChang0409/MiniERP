@@ -114,7 +114,7 @@
 		execError = null;
 		try {
 			const r = await fetch('/api/projects/dashboard/summary');
-			const body = await r.json();
+			const body: any = await r.json();
 			const summary = body?.data?.summary ?? body?.summary;
 			if (!summary) {
 				execError = body?.error ?? 'Summary unavailable.';

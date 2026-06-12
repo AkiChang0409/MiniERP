@@ -1,5 +1,6 @@
-import { detectDuplicateFinanceRecord } from '../../rules/detect-duplicate';
+import { detectDuplicateFinanceRecord } from '../../domain/detect-duplicate';
 import type { FinanceCapability } from '../types';
+import { detectDuplicateInputSchema } from './schema';
 
 export interface DuplicateCandidatePayload {
 	documentNumber?: string | null;
@@ -48,6 +49,7 @@ export const detectDuplicateCapability: FinanceCapability<
 	id: 'finance.detect-duplicate',
 	description: 'Detect whether a candidate finance record duplicates an existing one.',
 	riskLevel: 'R1',
+	inputSchema: detectDuplicateInputSchema,
 
 	async execute(input) {
 		const isDuplicate = detectDuplicateFinanceRecord(input.candidate, input.existing);

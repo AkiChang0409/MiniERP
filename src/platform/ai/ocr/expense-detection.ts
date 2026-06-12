@@ -8,7 +8,7 @@ import {
 	type ExpenseCategory,
 	type ExpenseDocType,
 	type ExpenseType
-} from '$modules/finance/schemas/expense-upload';
+} from '$modules/finance/domain/expense-upload';
 
 type DetectionFieldType = 'text' | 'number' | 'date' | 'boolean';
 type DetectionFieldSource = 'ocr' | 'llm' | 'user';

@@ -3,7 +3,7 @@ import type { ModuleContext } from '$platform/modules/types';
 import { businessPartners, companySettings, projects, revenue } from '../../../infrastructure/db/schema';
 import { generatePeppolUblXml, createAccessPointClient } from './peppol';
 import type { PeppolInvoiceLine } from './peppol';
-import { resolveGstCode, GST_SUPPLY_CODE_RATE } from '../rules/gst-constants';
+import { resolveGstCode, GST_SUPPLY_CODE_RATE } from '../domain/gst-constants';
 
 export function createFinanceEInvoiceApi(ctx: ModuleContext) {
 	const getCompanySettings = async () => {

@@ -3,7 +3,7 @@ import type { ModuleContext } from '$platform/modules/types';
 import { schema } from '$infrastructure/db';
 import { objectExists } from '$infrastructure/storage/r2';
 import type { OcrQueueMessage } from '$platform/ai/ocr/types';
-import { ExpenseService } from '$modules/finance/services/legacy-expense-service';
+import { createFinanceApi } from '$modules/finance';
 
 function fileTypeCategory(mime: string): 'pdf' | 'image' | 'other' {
 	const normalized = mime.toLowerCase();
@@ -548,7 +548,7 @@ export class DocumentIntakeService {
 			}
 		}
 
-		const expenseService = new ExpenseService(this.ctx);
+		const financeApi = createFinanceApi(this.ctx);
 		const now = new Date().toISOString();
 		const uploadedBy = input.uploadedBy || 'system';
 
@@ -562,7 +562,7 @@ export class DocumentIntakeService {
 			const amount = num(fields.totalAmount) ?? 0;
 			const date = str(fields.documentDate) || now.slice(0, 10);
 
-			const revenueRow = await expenseService.createRevenue({
+			const revenueRow = await financeApi.revenue.createRevenue({
 				projectId,
 				invoiceType,
 				invoiceNumber: str(fields.invoiceNumber) || null,
@@ -605,7 +605,7 @@ export class DocumentIntakeService {
 			const amount = num(fields.totalAmount) ?? 0;
 			const date = str(fields.documentDate) || str(fields.dateStart) || now.slice(0, 10);
 
-			const expenseRow = await expenseService.create({
+			const expenseRow = await financeApi.expenses.create({
 				projectId,
 				expenseType,
 				category,
