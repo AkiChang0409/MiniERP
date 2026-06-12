@@ -39,6 +39,8 @@ import {
 
 const LARK_PROVIDER = 'lark';
 const PENDING_TTL_SECONDS = 600;
+/** Inbound-event dedup window (seconds) — must cover Lark's retry schedule. */
+const LARK_EVENT_DEDUP_TTL = 300;
 /** Below this LLM confidence we fall back to the deterministic rule-based parser. */
 const LLM_MIN_CONFIDENCE = 0.6;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -86,6 +88,20 @@ function timingSafeEqual(a: string, b: string): boolean {
 	let mismatch = 0;
 	for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
 	return mismatch === 0;
+}
+
+/**
+ * Stable id for inbound-event dedup. Lark reuses `header.event_id` across the
+ * retries of one delivery, so it's the primary key; `message.message_id` is the
+ * fallback for legacy payloads.
+ */
+function eventDedupId(body: Record<string, unknown>): string | undefined {
+	const header = body.header as Record<string, unknown> | undefined;
+	const fromHeader = asString(header?.event_id);
+	if (fromHeader) return fromHeader;
+	const ev = body.event as Record<string, unknown> | undefined;
+	const msg = ev?.message as Record<string, unknown> | undefined;
+	return asString(msg?.message_id);
 }
 
 /** Today in Asia/Singapore (UTC+8, no DST) — anchors relative-date parsing. */
@@ -278,6 +294,9 @@ async function handleLarkMessage(event: RequestEvent, body: Record<string, unkno
 			await send(`确认码不正确，未执行。请回复「确认 ${expectedCode}」。`);
 			return;
 		}
+		// Consume the pending action FIRST so a duplicate/retried "确认" can't
+		// double-execute the write (a later confirm finds no pending → no-op).
+		await env.KV.delete(pendingKey(openId));
 		const res = await runCapability(
 			mc,
 			resolved,
@@ -285,7 +304,6 @@ async function handleLarkMessage(event: RequestEvent, body: Record<string, unkno
 			pending.input,
 			pending.confirmationRef
 		);
-		await env.KV.delete(pendingKey(openId));
 		await send(await replyForResult(env, pending.capabilityId, res, pending.summary));
 		return;
 	}
@@ -439,7 +457,25 @@ export const POST: RequestHandler = async (event) => {
 	const eventType = asString(header?.event_type) ?? 'unknown';
 
 	if (eventType === 'im.message.receive_v1' && event.platform?.env) {
-		// ACK fast; do the work (identity resolve, capability, reply) after responding.
+		const kvEnv = event.platform.env;
+
+		// Inbound dedup: Lark re-delivers the same event on retry (same event_id).
+		// Mark-as-seen SYNCHRONOUSLY before scheduling work so a sequential retry —
+		// even one that arrives while the first is still processing — is skipped.
+		// One event_id ⇒ one business run ⇒ one reply.
+		const dedupId = eventDedupId(body);
+		if (dedupId) {
+			const seenKey = `lark:seen:${dedupId}`;
+			if (await kvEnv.KV.get(seenKey)) {
+				console.log(`[lark] duplicate event ${dedupId} — already processed, skipping`);
+				return json({ ok: true });
+			}
+			await kvEnv.KV.put(seenKey, '1', { expirationTtl: LARK_EVENT_DEDUP_TTL });
+		}
+
+		console.log(`[lark] handling event ${dedupId ?? '(no id)'}`);
+		// ACK fast; do the work (identity resolve, classify, capability, reply) after
+		// responding. waitUntil keeps the isolate alive for the async work.
 		const work = handleLarkMessage(event, body).catch((err) =>
 			console.error('[lark] handler error:', err)
 		);
