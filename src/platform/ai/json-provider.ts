@@ -166,46 +166,75 @@ async function callExternalApiJson(env: Env, input: AiJsonCallInput): Promise<un
 
 	const promptVersion = input.promptVersion || readEnv(env, 'OCR_PROMPT_VERSION') || 'v1';
 	const systemFull = `${input.system}\nPrompt version: ${promptVersion}`;
-	const openAiModel = readEnv(env, 'OPENAI_MODEL') || 'gpt-4o-mini';
+	const model = readEnv(env, 'OPENAI_MODEL') || readEnv(env, 'LLM_MODEL') || 'gpt-4o-mini';
 	const isOpenAiChatEndpoint = /api\.openai\.com\/v1\/chat\/completions/i.test(apiUrl);
+	const isAnthropicEndpoint = /api\.anthropic\.com/i.test(apiUrl);
 
-	const response = await fetch(
-		apiUrl,
-		isOpenAiChatEndpoint
-			? {
-					method: 'POST',
-					headers: {
-						'content-type': 'application/json',
-						...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
-					},
-					body: JSON.stringify({
-						model: openAiModel,
-						temperature: 0,
-						response_format: { type: 'json_object' },
-						messages: [
-							{ role: 'system', content: systemFull },
-							{ role: 'user', content: input.user }
-						]
-					})
-				}
-			: {
-					method: 'POST',
-					headers: {
-						'content-type': 'application/json',
-						...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
-					},
-					body: JSON.stringify({
-						promptVersion,
-						system: systemFull,
-						input: input.user
-					})
-				}
-	);
-	if (!response.ok) return null;
+	let init: RequestInit;
+	if (isAnthropicEndpoint) {
+		// Anthropic Messages API: x-api-key + anthropic-version headers, max_tokens
+		// is required, `system` is a top-level field, one user turn. No sampling
+		// params / thinking so the request shape stays valid across Sonnet/Opus
+		// tiers (Opus 4.7+ reject temperature/top_p).
+		init = {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'anthropic-version': '2023-06-01',
+				...(apiKey ? { 'x-api-key': apiKey } : {})
+			},
+			body: JSON.stringify({
+				model,
+				max_tokens: 2048,
+				system: systemFull,
+				messages: [{ role: 'user', content: input.user }]
+			})
+		};
+	} else if (isOpenAiChatEndpoint) {
+		init = {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
+			},
+			body: JSON.stringify({
+				model,
+				temperature: 0,
+				response_format: { type: 'json_object' },
+				messages: [
+					{ role: 'system', content: systemFull },
+					{ role: 'user', content: input.user }
+				]
+			})
+		};
+	} else {
+		init = {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
+			},
+			body: JSON.stringify({ promptVersion, system: systemFull, input: input.user })
+		};
+	}
+
+	const response = await fetch(apiUrl, init);
+	if (!response.ok) {
+		// Surface auth/format errors in the wrangler log instead of silently
+		// falling through to heuristics/rule-based.
+		console.error(`[llm] external API returned ${response.status} from ${apiUrl}`);
+		return null;
+	}
 
 	const raw = await response.text();
 	try {
 		const json = JSON.parse(raw) as Record<string, unknown>;
+		if (isAnthropicEndpoint) {
+			// Messages API → { content: [{ type: 'text', text: '...' }, ...] }
+			const blocks = json.content as Array<{ type?: string; text?: string }> | undefined;
+			const text = blocks?.find((b) => b.type === 'text')?.text;
+			return typeof text === 'string' ? parseLooseModelJson(text) : null;
+		}
 		if (isOpenAiChatEndpoint) {
 			const choices = json.choices as Array<{ message?: { content?: string } }> | undefined;
 			const content = choices?.[0]?.message?.content;

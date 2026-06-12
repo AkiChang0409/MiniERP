@@ -12,27 +12,45 @@ import {
 } from '$platform/ai/execute-capability';
 import { hashConfirmationPayload } from '$platform/workflow/payload-hash';
 import { sendTextMessage } from '$platform/integrations/lark/client';
-import { parseLarkCommand } from '$platform/integrations/lark/commands';
-import { createLeaveApi, hrAgentManifest } from '$modules/hr';
+import { parseLarkCommand, type LarkCommand } from '$platform/integrations/lark/commands';
+import {
+	createLeaveApi,
+	hrAgentManifest,
+	hrAgentAllowedCapabilities,
+	classifyHrIntentLlm,
+	summarizeHrResult,
+	resolveLeaveType,
+	type HrLlmIntent
+} from '$modules/hr';
 
 /**
- * Lark (Feishu) event webhook — Phase 3B/3C: 3 HR leave commands, minimal loop.
+ * Lark (Feishu) event webhook — HR leave assistant.
  *
- *   查看待审批请假                                 → hr.list-pending-leave (read)
- *   提交请假 <类型> <开始> <结束> [原因]            → hr.submit-leave-request (write)
- *   批准请假 <leaveRequestId> [备注]               → hr.approve-leave-request (write)
+ * Flow: text → resolve identity → tool-aware LLM intent (fallback rule-based) →
+ * dispatcher (validate capability allow-list, backend leave-type resolver) →
+ * read executes now / write goes through a text confirmation loop → result is
+ * summarized by the LLM (fallback fixed template) → reply.
  *
- * Writes use a text confirmation loop: the first command stores a pending action
- * in KV and replies with a confirm code; the user must reply `确认 <code>` to
- * execute (`取消` to drop it). The code is derived from the confirmationRef, so a
- * wrong/missing code never reaches the service. All dispatch goes through
- * `executeGuardedCapability` (policy + audit); the actor is the MiniERP user
- * resolved from the Lark open_id via `external_identity_links`. No service/repo/
- * db access, no `fetch('/api/...')` — capabilities call the HR facade.
+ * The LLM only proposes structure; it never executes, never decides identity
+ * (no personId/userId field), and never bypasses confirmation or tool-policy.
+ * Execution always goes through executeGuardedCapability with the MiniERP user
+ * resolved from the Lark open_id. Capabilities call the HR facade only.
  */
 
 const LARK_PROVIDER = 'lark';
 const PENDING_TTL_SECONDS = 600;
+/** Below this LLM confidence we fall back to the deterministic rule-based parser. */
+const LLM_MIN_CONFIDENCE = 0.6;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** System-authoritative allow-list (LLM-proposed ids are validated against this). */
+const ALLOWED_CAPABILITY_IDS = new Set(hrAgentAllowedCapabilities.map((e) => e.id));
+
+const FINAL_ACTION: Record<string, string> = {
+	'hr.list-pending-leave': 'hr.leave.listed',
+	'hr.submit-leave-request': 'leave.submitted',
+	'hr.approve-leave-request': 'leave.approved'
+};
 
 function pendingKey(openId: string): string {
 	return `lark:pending:${openId}`;
@@ -45,11 +63,18 @@ interface PendingAction {
 	summary: string;
 }
 
-const FINAL_ACTION: Record<string, string> = {
-	'hr.list-pending-leave': 'hr.leave.listed',
-	'hr.submit-leave-request': 'leave.submitted',
-	'hr.approve-leave-request': 'leave.approved'
-};
+interface Dispatch {
+	capabilityId: string | null;
+	input: {
+		leaveTypeRef?: string;
+		startDate?: string;
+		endDate?: string;
+		reason?: string;
+		leaveRequestId?: string;
+		comment?: string;
+	};
+	missingFields: string[];
+}
 
 function asString(value: unknown): string | undefined {
 	return typeof value === 'string' ? value : undefined;
@@ -61,6 +86,54 @@ function timingSafeEqual(a: string, b: string): boolean {
 	let mismatch = 0;
 	for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
 	return mismatch === 0;
+}
+
+/** Today in Asia/Singapore (UTC+8, no DST) — anchors relative-date parsing. */
+function currentDateInfo(): { currentDate: string; timezone: string } {
+	const sg = new Date(Date.now() + 8 * 60 * 60 * 1000);
+	return { currentDate: sg.toISOString().slice(0, 10), timezone: 'Asia/Singapore (UTC+8)' };
+}
+
+function llmToDispatch(llm: HrLlmIntent): Dispatch {
+	return {
+		capabilityId: llm.capabilityId,
+		input: {
+			leaveTypeRef: llm.input.leaveTypeRef ?? undefined,
+			startDate: llm.input.startDate ?? undefined,
+			endDate: llm.input.endDate ?? undefined,
+			reason: llm.input.reason ?? undefined,
+			leaveRequestId: llm.input.leaveRequestId ?? undefined,
+			comment: llm.input.comment ?? undefined
+		},
+		missingFields: llm.missingFields ?? []
+	};
+}
+
+/** Rule-based fallback → dispatch (confirm/cancel are handled before this). */
+function commandToDispatch(cmd: LarkCommand): Dispatch | null {
+	switch (cmd.kind) {
+		case 'list_pending':
+			return { capabilityId: 'hr.list-pending-leave', input: {}, missingFields: [] };
+		case 'submit':
+			return {
+				capabilityId: 'hr.submit-leave-request',
+				input: {
+					leaveTypeRef: cmd.leaveTypeRef,
+					startDate: cmd.startDate,
+					endDate: cmd.endDate,
+					reason: cmd.reason
+				},
+				missingFields: []
+			};
+		case 'approve':
+			return {
+				capabilityId: 'hr.approve-leave-request',
+				input: { leaveRequestId: cmd.leaveRequestId, comment: cmd.comment },
+				missingFields: []
+			};
+		default:
+			return null;
+	}
 }
 
 async function runCapability(
@@ -83,6 +156,7 @@ async function runCapability(
 	});
 }
 
+/** Fixed-template rendering — used for non-ok results and as the summarizer fallback. */
 function formatResult(capabilityId: string, res: GuardedCapabilityResult): string {
 	if (res.status === 'denied') {
 		const missing = res.decision.missingUserPermissions;
@@ -112,11 +186,28 @@ function formatResult(capabilityId: string, res: GuardedCapabilityResult): strin
 	return '完成。';
 }
 
+/**
+ * Reply for an executed result: ok → LLM summary (grounded on result) with a
+ * fixed-template fallback; denied / failed / validation → always fixed template.
+ */
+async function replyForResult(
+	env: Env,
+	capabilityId: string,
+	res: GuardedCapabilityResult,
+	userText: string
+): Promise<string> {
+	if (res.status !== 'ok') return formatResult(capabilityId, res);
+	const summary = await summarizeHrResult(env, { capabilityId, result: res.output, userText }).catch(
+		() => null
+	);
+	return summary ?? formatResult(capabilityId, res);
+}
+
 const HELP_TEXT = [
-	'可用命令：',
+	'我可以帮你处理请假：',
 	'• 查看待审批请假',
-	'• 提交请假 <类型> <开始日期> <结束日期> [原因]   (例: 提交请假 年假 2026-07-01 2026-07-03 家庭事务)',
-	'• 批准请假 <leaveRequestId> [备注]'
+	'• 提交请假（说明类型/开始/结束日期，例如：我要请年假 2026-07-20 到 2026-07-22）',
+	'• 批准请假 <leaveRequestId>'
 ].join('\n');
 
 /** Handle one im.message.receive_v1 event. Sends all replies via the Lark API. */
@@ -167,110 +258,136 @@ async function handleLarkMessage(event: RequestEvent, body: Record<string, unkno
 	}
 	const mc: ModuleContext = { ...ctx, user: resolved };
 
-	const cmd = parseLarkCommand(userText);
-
-	switch (cmd.kind) {
-		case 'list_pending': {
-			const res = await runCapability(mc, resolved, 'hr.list-pending-leave', {}, undefined);
-			await send(formatResult('hr.list-pending-leave', res));
-			return;
-		}
-
-		case 'cancel': {
-			await env.KV.delete(pendingKey(openId));
-			await send('已取消待确认的操作。');
-			return;
-		}
-
-		case 'confirm': {
-			const raw = await env.KV.get(pendingKey(openId));
-			if (!raw) {
-				await send('没有待确认的操作。');
-				return;
-			}
-			const pending = JSON.parse(raw) as PendingAction;
-			const expectedCode = pending.confirmationRef.slice(0, 6);
-			if (!cmd.code || cmd.code.toLowerCase() !== expectedCode.toLowerCase()) {
-				// Wrong/missing token → never reaches the service.
-				await send(`确认码不正确，未执行。请回复「确认 ${expectedCode}」。`);
-				return;
-			}
-			const res = await runCapability(
-				mc,
-				resolved,
-				pending.capabilityId,
-				pending.input,
-				pending.confirmationRef
-			);
-			await env.KV.delete(pendingKey(openId));
-			await send(formatResult(pending.capabilityId, res));
-			return;
-		}
-
-		case 'submit': {
-			// Resolve the leave-type ref (name / code / id) → id via the HR facade.
-			const types = await createLeaveApi(mc).listLeaveTypes();
-			const ref = cmd.leaveTypeRef;
-			const match = types.find(
-				(t) =>
-					t.id === ref ||
-					t.code.toLowerCase() === ref.toLowerCase() ||
-					t.name.toLowerCase() === ref.toLowerCase()
-			);
-			if (!match) {
-				await send(
-					`未找到请假类型「${ref}」。可用：${types.map((t) => `${t.name}(${t.code})`).join('、')}`
-				);
-				return;
-			}
-			const input: Record<string, unknown> = {
-				leaveTypeId: match.id,
-				startDate: cmd.startDate,
-				endDate: cmd.endDate,
-				reason: cmd.reason
-			};
-			const confirmationRef = await hashConfirmationPayload(input);
-			const summary = `提交请假：${match.name} ${cmd.startDate}~${cmd.endDate}${
-				cmd.reason ? ` 原因:${cmd.reason}` : ''
-			}`;
-			const pending: PendingAction = {
-				capabilityId: 'hr.submit-leave-request',
-				input,
-				confirmationRef,
-				summary
-			};
-			await env.KV.put(pendingKey(openId), JSON.stringify(pending), {
-				expirationTtl: PENDING_TTL_SECONDS
-			});
-			await send(`${summary}\n回复「确认 ${confirmationRef.slice(0, 6)}」执行，或「取消」放弃。`);
-			return;
-		}
-
-		case 'approve': {
-			const input: Record<string, unknown> = {
-				leaveRequestId: cmd.leaveRequestId,
-				comment: cmd.comment
-			};
-			const confirmationRef = await hashConfirmationPayload(input);
-			const summary = `批准请假：${cmd.leaveRequestId}${cmd.comment ? ` 备注:${cmd.comment}` : ''}`;
-			const pending: PendingAction = {
-				capabilityId: 'hr.approve-leave-request',
-				input,
-				confirmationRef,
-				summary
-			};
-			await env.KV.put(pendingKey(openId), JSON.stringify(pending), {
-				expirationTtl: PENDING_TTL_SECONDS
-			});
-			await send(`${summary}\n回复「确认 ${confirmationRef.slice(0, 6)}」执行，或「取消」放弃。`);
-			return;
-		}
-
-		default: {
-			await send(HELP_TEXT);
-			return;
-		}
+	// --- Deterministic confirm / cancel (never via LLM; fixed templates) ---
+	const quick = parseLarkCommand(userText);
+	if (quick.kind === 'cancel') {
+		await env.KV.delete(pendingKey(openId));
+		await send('已取消待确认的操作。');
+		return;
 	}
+	if (quick.kind === 'confirm') {
+		const raw = await env.KV.get(pendingKey(openId));
+		if (!raw) {
+			await send('没有待确认的操作。');
+			return;
+		}
+		const pending = JSON.parse(raw) as PendingAction;
+		const expectedCode = pending.confirmationRef.slice(0, 6);
+		if (!quick.code || quick.code.toLowerCase() !== expectedCode.toLowerCase()) {
+			// Wrong/missing token → never reaches the service.
+			await send(`确认码不正确，未执行。请回复「确认 ${expectedCode}」。`);
+			return;
+		}
+		const res = await runCapability(
+			mc,
+			resolved,
+			pending.capabilityId,
+			pending.input,
+			pending.confirmationRef
+		);
+		await env.KV.delete(pendingKey(openId));
+		await send(await replyForResult(env, pending.capabilityId, res, pending.summary));
+		return;
+	}
+
+	// --- Tool-aware intent (LLM first, rule-based fallback) ---
+	const leaveTypes = await createLeaveApi(mc).listLeaveTypes();
+	const { currentDate, timezone } = currentDateInfo();
+	const llm = await classifyHrIntentLlm(env, userText, {
+		leaveTypes: leaveTypes.map((t) => ({ code: t.code, name: t.name })),
+		currentDate,
+		timezone
+	});
+
+	let dispatch: Dispatch | null;
+	if (llm && llm.confidence >= LLM_MIN_CONFIDENCE && llm.capabilityId) {
+		dispatch = llmToDispatch(llm);
+		console.log(
+			`[lark] LLM cap=${llm.capabilityId} conf=${llm.confidence} missing=[${llm.missingFields.join(',')}]`
+		);
+	} else {
+		dispatch = commandToDispatch(parseLarkCommand(userText));
+		console.log(
+			`[lark] rule-based fallback cap=${dispatch?.capabilityId ?? 'none'} (llm=${llm ? `${llm.intent}/${llm.confidence}` : 'null'})`
+		);
+	}
+
+	if (!dispatch?.capabilityId || !ALLOWED_CAPABILITY_IDS.has(dispatch.capabilityId)) {
+		await send(`暂不支持该操作。\n${HELP_TEXT}`);
+		return;
+	}
+
+	// Missing required fields (LLM-reported) → ask, do not execute.
+	if (dispatch.missingFields.length > 0) {
+		await send(`还需要补充：${dispatch.missingFields.join('、')}。请补充后再说一次。`);
+		return;
+	}
+
+	// --- list (read): execute now, summarize the result ---
+	if (dispatch.capabilityId === 'hr.list-pending-leave') {
+		const res = await runCapability(mc, resolved, 'hr.list-pending-leave', {}, undefined);
+		await send(await replyForResult(env, 'hr.list-pending-leave', res, userText));
+		return;
+	}
+
+	// --- submit (write): backend-resolve leave type, then confirmation loop ---
+	if (dispatch.capabilityId === 'hr.submit-leave-request') {
+		const ref = dispatch.input.leaveTypeRef ?? '';
+		const match = resolveLeaveType(leaveTypes, ref);
+		if (!match) {
+			await send(
+				`未找到请假类型「${ref || '(未提供)'}」。可用：${leaveTypes.map((t) => `${t.name}(${t.code})`).join('、')}`
+			);
+			return;
+		}
+		const start = dispatch.input.startDate ?? '';
+		const end = dispatch.input.endDate ?? '';
+		if (!ISO_DATE.test(start) || !ISO_DATE.test(end)) {
+			await send('提交请假需要开始/结束日期(YYYY-MM-DD)。例如：我要请年假 2026-07-20 到 2026-07-22');
+			return;
+		}
+		const input: Record<string, unknown> = {
+			leaveTypeId: match.id,
+			startDate: start,
+			endDate: end,
+			reason: dispatch.input.reason
+		};
+		const confirmationRef = await hashConfirmationPayload(input);
+		const summary = `提交请假：${match.name} ${start}~${end}${
+			dispatch.input.reason ? ` 原因:${dispatch.input.reason}` : ''
+		}`;
+		await env.KV.put(
+			pendingKey(openId),
+			JSON.stringify({ capabilityId: 'hr.submit-leave-request', input, confirmationRef, summary }),
+			{ expirationTtl: PENDING_TTL_SECONDS }
+		);
+		await send(`${summary}\n回复「确认 ${confirmationRef.slice(0, 6)}」执行，或「取消」放弃。`);
+		return;
+	}
+
+	// --- approve (write): confirmation loop ---
+	if (dispatch.capabilityId === 'hr.approve-leave-request') {
+		const leaveRequestId = (dispatch.input.leaveRequestId ?? '').trim();
+		if (!leaveRequestId) {
+			await send('请提供请假单号。例如：批准请假 lr-xxxxxx');
+			return;
+		}
+		const input: Record<string, unknown> = {
+			leaveRequestId,
+			comment: dispatch.input.comment
+		};
+		const confirmationRef = await hashConfirmationPayload(input);
+		const summary = `批准请假：${leaveRequestId}${dispatch.input.comment ? ` 备注:${dispatch.input.comment}` : ''}`;
+		await env.KV.put(
+			pendingKey(openId),
+			JSON.stringify({ capabilityId: 'hr.approve-leave-request', input, confirmationRef, summary }),
+			{ expirationTtl: PENDING_TTL_SECONDS }
+		);
+		await send(`${summary}\n回复「确认 ${confirmationRef.slice(0, 6)}」执行，或「取消」放弃。`);
+		return;
+	}
+
+	await send(`暂不支持该操作。\n${HELP_TEXT}`);
 }
 
 export const POST: RequestHandler = async (event) => {
@@ -296,12 +413,6 @@ export const POST: RequestHandler = async (event) => {
 			501
 		);
 	}
-
-	// --- Signature verification skeleton (only relevant once Encrypt Key is on) ---
-	// When an Encrypt Key is configured, Lark signs each request:
-	//   X-Lark-Signature = sha256(timestamp + nonce + encryptKey + rawBody)
-	// With no Encrypt Key, Lark does not sign; we authenticate via the verification
-	// token below.
 
 	// --- 1) URL verification handshake ---
 	if (asString(body.type) === 'url_verification') {

@@ -58,7 +58,17 @@ export {
 	findHrCapabilityPolicy,
 	type HrCapabilityPolicyEntry,
 	classifyHrIntent,
-	type HrIntentResult
+	type HrIntentResult,
+	classifyHrIntentLlm,
+	hrLlmIntentSchema,
+	HR_CAPABILITY_SPECS,
+	type HrLlmIntent,
+	type HrIntentContext,
+	type HrCapabilitySpec,
+	summarizeHrResult,
+	resolveLeaveType,
+	LEAVE_TYPE_ALIASES,
+	type LeaveTypeLike
 } from './agent';
 
 export const employeeActions: AgentAction[] = [
