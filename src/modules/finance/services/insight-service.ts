@@ -24,6 +24,7 @@ import {
 	staffCostPayoutJoinConditions,
 	staffCostSumExpr
 } from '../repositories';
+import { getTodayBriefItems } from './finance-task-service';
 
 export interface DashboardOverviewRangeInput {
 	from?: string | null;
@@ -1325,6 +1326,10 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 		};
 	};
 
+	// Today Brief — thin forward to the finance-task-service source of truth.
+	// tenant is fixed to 'default', mirroring the prior route behavior.
+	const getTodayBrief = (now: Date = new Date()) => getTodayBriefItems(ctx.db, 'default', now);
+
 	return {
 		getCompanyFinancialOverview,
 		getDashboardCharts,
@@ -1334,7 +1339,8 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 		getProjectDocumentsSummary,
 		getCategoryBreakdown,
 		getProfitAndLossReport,
-		getTrialBalance
+		getTrialBalance,
+		getTodayBrief
 	};
 }
 

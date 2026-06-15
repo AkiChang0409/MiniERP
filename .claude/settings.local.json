@@ -119,7 +119,13 @@
       "Bash(xargs cat)",
       "Bash(grep -ni \"LARK\" .dev.vars.example)",
       "Bash(grep -rni \"LARK\" wrangler*.jsonc wrangler*.toml)",
-      "Bash(grep -ni \"LARK\" src/app.d.ts)"
+      "Bash(grep -ni \"LARK\" src/app.d.ts)",
+      "Bash(grep -vE 'from '\\\\''$modules/[a-z-]+/\\(domain|services\\).*'\\\\'';.*//.*same.*module')",
+      "Read(//tmp/**)",
+      "Bash(npm.cmd run *)",
+      "Bash(git -C \"C:\\\\Users\\\\akiwc\\\\Documents\\\\Axiom\\\\MiniERP\" --no-pager diff --stat)",
+      "Bash(git -C \"C:\\\\Users\\\\akiwc\\\\Documents\\\\Axiom\\\\MiniERP\" --no-pager diff)",
+      "Bash(git -C \"C:\\\\Users\\\\akiwc\\\\Documents\\\\Axiom\\\\MiniERP\" --no-pager diff -- src/modules/finance/index.ts src/modules/finance/services/insight-service.ts \"src/routes/api/finance/today-brief/+server.ts\")"
     ]
   }
 }

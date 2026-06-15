@@ -13,6 +13,7 @@ export const load: PageServerLoad = async (event) => {
 	if (!event.platform) {
 		return {
 			projectId: event.params.id,
+			project: null as any,
 			tasks: [],
 			dependencies: [],
 			stages: [],
@@ -32,7 +33,8 @@ export const load: PageServerLoad = async (event) => {
 	const projectId = event.params.id;
 
 	try {
-		const [roster, sched, stages, users, subProjects] = await Promise.all([
+		const [project, roster, sched, stages, users, subProjects] = await Promise.all([
+			api.getById(projectId),
 			svc.list(projectId),
 			svc.schedule(projectId),
 			svc.listStages(projectId),
@@ -44,6 +46,7 @@ export const load: PageServerLoad = async (event) => {
 		);
 		return {
 			projectId,
+			project,
 			tasks: roster.tasks,
 			dependencies: roster.dependencies,
 			stages,
@@ -60,6 +63,7 @@ export const load: PageServerLoad = async (event) => {
 		if (/no such table|project_tasks/i.test(msg)) {
 			return {
 				projectId,
+				project: null as any,
 				tasks: [],
 				dependencies: [],
 				stages: [],

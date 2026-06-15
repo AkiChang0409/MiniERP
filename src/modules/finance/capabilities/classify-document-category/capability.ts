@@ -39,11 +39,7 @@ interface CapabilityContextWithEnv extends FinanceCapabilityContext {
 	env?: Env;
 }
 
-export interface ClassifyDocumentCategoryInput {
-	documentId: string;
-	fileName?: string;
-	text?: string;
-}
+export type ClassifyDocumentCategoryInput = z.infer<typeof classifyDocumentCategoryInputSchema>;
 
 export interface ClassifyDocumentCategoryOutput {
 	/** Chosen finance category id, or null when the LLM could not decide / no text. */

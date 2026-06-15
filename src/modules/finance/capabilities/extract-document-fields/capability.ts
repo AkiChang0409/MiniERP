@@ -11,7 +11,7 @@
  * `tracking_number`, etc.). Legacy workflow callers can request the old
  * common field projection via `outputShape: 'legacy'`.
  */
-import type { ZodType } from 'zod';
+import type { ZodType, z } from 'zod';
 import { runStructuredOutput } from '../../../../platform/ai/ai-runtime';
 import { normalizeDocumentText, smartTruncate } from '../../../../platform/ai/text-preprocessing';
 import {
@@ -71,17 +71,7 @@ interface CapabilityContextWithEnv extends FinanceCapabilityContext {
 	env?: Env;
 }
 
-export interface ExtractDocumentFieldsInput {
-	documentId: string;
-	fileName?: string;
-	text?: string;
-	artifactConfidence?: number;
-	/** Category id from the workflow state, e.g. `expense.sales_cost.invoice`.
-	 *  When absent the capability defaults to invoice extraction (Phase 2 behavior). */
-	categoryId?: string;
-	/** Legacy finance workflow still expects documentNumber/counterpartyName. Inbox leaves this unset. */
-	outputShape?: 'category' | 'legacy';
-}
+export type ExtractDocumentFieldsInput = z.infer<typeof extractDocumentFieldsInputSchema>;
 
 export interface ExtractDocumentFieldsOutput {
 	fields: Record<string, unknown>;

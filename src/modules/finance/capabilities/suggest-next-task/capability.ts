@@ -1,10 +1,8 @@
+import type { z } from 'zod';
 import type { FinanceCapability, SuggestedNextTask } from '../types';
 import { suggestNextTaskInputSchema } from './schema';
 
-export interface SuggestNextTaskInput {
-	afterWorkflowId?: string;
-	afterSupplierName?: string;
-}
+export type SuggestNextTaskInput = z.infer<typeof suggestNextTaskInputSchema>;
 
 export interface SuggestNextTaskOutput {
 	task: SuggestedNextTask | null;

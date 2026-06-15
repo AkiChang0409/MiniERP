@@ -1,13 +1,9 @@
+import type { z } from 'zod';
 import { scorePurchaseOrderMatch } from '../../domain/rules';
 import type { FinanceCapability } from '../types';
 import { matchPurchaseOrderInputSchema } from './schema';
 
-export interface MatchPurchaseOrderInput {
-	supplierId?: string;
-	supplierName?: string;
-	totalAmount?: number;
-	currency?: string;
-}
+export type MatchPurchaseOrderInput = z.infer<typeof matchPurchaseOrderInputSchema>;
 
 export interface PurchaseOrderCandidate {
 	id: string;

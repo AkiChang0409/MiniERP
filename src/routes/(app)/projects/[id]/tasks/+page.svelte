@@ -1,5 +1,17 @@
 <script lang="ts">
+	import { computeUrgency } from '$modules/project';
+
 	let { data } = $props();
+
+	type Project = {
+		id: string;
+		name: string;
+		status: string;
+		startDate: string | null;
+		endDate: string | null;
+		deadline: string | null;
+		createdAt: string;
+	};
 
 	// ----------------------------------------------------------------- types
 	type Task = {
@@ -44,6 +56,8 @@
 		| { type: 'resource'; assigneeId: string; assigneeName: string | null; taskIds: string[]; message: string };
 
 	const projectId = data.projectId;
+	const project = $derived(data.project as Project | null);
+	let projectExpanded = $state(true);
 
 	// Local mutable state (optimistic). Re-hydrated from the server via refresh().
 	let tasks = $state<Task[]>((data.tasks as Task[]) ?? []);
@@ -143,6 +157,18 @@
 	const windowMs = $derived.by(() => {
 		let lo = Infinity;
 		let hi = -Infinity;
+		// Anchor on the project's own window first so the chart frame is visible
+		// even before any tasks exist.
+		if (project) {
+			for (const v of [project.startDate, project.createdAt]) {
+				const p = parse(v);
+				if (p != null) lo = Math.min(lo, p);
+			}
+			for (const v of [project.deadline, project.endDate]) {
+				const p = parse(v);
+				if (p != null) hi = Math.max(hi, p);
+			}
+		}
 		for (const t of tasks) {
 			for (const v of [t.startDate, t.baselineStart, t.actualStart]) {
 				const p = parse(v);
@@ -246,8 +272,10 @@
 		for (const s of [...stages].sort((a, b) => a.orderIndex - b.orderIndex)) {
 			out.push({ id: s.id, name: s.name, color: s.color, tasks: sortTasks(byStage.get(s.id) ?? []) });
 		}
+		// Backlog lane is always present so unstaged tasks have a home and you can
+		// add one even on a brand-new project.
 		out.push({ id: '__backlog__', name: 'Backlog (no stage)', color: null, tasks: sortTasks(backlog) });
-		return out.filter((l) => l.id !== '__backlog__' || l.tasks.length > 0);
+		return out;
 	});
 
 	// Flat row geometry: a lane-header row, then its task rows (unless collapsed).

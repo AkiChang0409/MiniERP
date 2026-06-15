@@ -1,8 +1,8 @@
 import type { RequestHandler } from './$types';
 
 import { fail, ok } from '$platform/http';
-import { getDb } from '../../../../infrastructure/db';
-import { getTodayBriefItems } from '$modules/finance';
+import { createModuleContext } from '$platform/modules';
+import { createFinanceApi } from '$modules/finance';
 
 /**
  * GET /api/finance/today-brief
@@ -23,10 +23,9 @@ export const GET: RequestHandler = async (event) => {
 	const user = event.locals.user;
 	if (!user) return fail('Unauthorized', 401);
 
-	const db = getDb(event.platform.env);
-	const tenantId = 'default';
-
-	const data = await getTodayBriefItems(db, tenantId, new Date());
+	const ctx = await createModuleContext(event);
+	const { insights } = createFinanceApi(ctx);
+	const data = await insights.getTodayBrief();
 
 	return ok(data);
 };

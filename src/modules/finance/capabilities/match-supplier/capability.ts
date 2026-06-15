@@ -1,10 +1,9 @@
+import type { z } from 'zod';
 import { scoreSupplierNameMatch } from '../../domain/rules';
 import type { FinanceCapability } from '../types';
 import { matchSupplierInputSchema } from './schema';
 
-export interface MatchSupplierInput {
-	counterpartyName?: string;
-}
+export type MatchSupplierInput = z.infer<typeof matchSupplierInputSchema>;
 
 export interface SupplierCandidate {
 	id: string;

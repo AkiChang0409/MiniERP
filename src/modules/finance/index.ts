@@ -42,13 +42,6 @@ export {
 	FINANCE_CATEGORY_CATALOG
 } from './workflows/financial-document-intake/categories';
 export type { CategoryDefinition, IntakeDocumentType } from './workflows/financial-document-intake/categories';
-export {
-	createFinanceTaskService,
-	type FinanceTaskService,
-	getTodayBriefItems,
-	type TodayBriefItem,
-	type TodayBriefData
-} from './services/finance-task-service';
 export { financeModule, financeManifestV2 };
 export {
 	financeAgentManifest,
@@ -81,7 +74,6 @@ export type {
 	FinanceUserDecisionRequest,
 	FinanceValidationIssue
 } from './agent';
-export { generatePeppolUblXml, createAccessPointClient } from './services/peppol';
 export type {
 	PeppolInvoiceLine,
 	PeppolInvoiceInput,
