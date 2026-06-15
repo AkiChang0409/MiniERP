@@ -38,7 +38,8 @@ describe('capability registry → tool specs', () => {
 		requiredUserPermissions: ['finance:view'],
 		requiresConfirmation: false,
 		auditRequired: true,
-		enabled: true
+		enabled: true,
+		sideEffect: 'read'
 	};
 
 	it('serializes a registered capability into a tool spec with JSON-Schema parameters', () => {

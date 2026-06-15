@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 import type { ModuleContext } from '../modules/types';
 
 export type PlatformRiskLevel = 'R0' | 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
@@ -39,7 +39,7 @@ export interface PlatformCapability<TInput, TOutput> {
 	 * capability via function-calling. Optional at the platform layer so legacy
 	 * capabilities still register; standard modules (finance) require it.
 	 */
-	inputSchema?: z.ZodType<TInput>;
+	inputSchema?: ZodType<TInput>;
 	execute(input: TInput, ctx: PlatformCapabilityContext): Promise<TOutput>;
 }
 

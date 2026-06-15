@@ -52,7 +52,8 @@ describe('finance financial-document-intake on the generic engine', () => {
 				requiredUserPermissions: [],
 				requiresConfirmation: false,
 				auditRequired: false,
-				enabled: true
+				enabled: true,
+				sideEffect: 'read'
 			};
 			registerCapability(manifest, capability as PlatformCapability<unknown, unknown>);
 		}

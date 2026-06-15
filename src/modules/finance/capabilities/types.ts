@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { PlatformCapabilityContext } from '$platform/ai/capability-registry';
 import type { FinanceRiskLevel } from '../agent/types';
 
 /** A suggested follow-up finance task surfaced after a workflow completes. */
@@ -51,17 +52,14 @@ export interface FinanceCapabilityDeps {
 	}): Promise<PurchaseOrderLookupResult[]>;
 }
 
-export interface FinanceCapabilityContext {
-	tenantId?: string;
-	userId?: string;
-	useMock?: boolean;
-	/**
-	 * Optional Cloudflare Workers env. Capabilities that call Workers AI
-	 * (extract-document-fields LLM fallback, etc.) read `env.AI` here.
-	 * Callers running in routes / workers populate it; mock-only callers can
-	 * omit. The capability internally guards on presence.
-	 */
-	env?: Env;
+/**
+ * Finance capability execution context. Extends the platform context (which
+ * carries `tenantId` / `userId` / `useMock` / `env` / `moduleContext`) so it
+ * automatically tracks any future platform additions instead of drifting from a
+ * hand-copied field list. Finance capabilities read `env` (Workers AI) and the
+ * forwarding ones read `deps`; they do not use `moduleContext`.
+ */
+export interface FinanceCapabilityContext extends PlatformCapabilityContext {
 	/**
 	 * Optional service ports for forwarding capabilities (match-*, suggest-next).
 	 * Injected per-request by the composition root; absent in unit/demo calls.

@@ -50,7 +50,8 @@ const echoManifest: ToolManifest = {
 	requiredUserPermissions: [],
 	requiresConfirmation: false,
 	auditRequired: false, // keep audit off so no DB is needed in the unit test
-	enabled: true
+	enabled: true,
+	sideEffect: 'read'
 };
 
 const testWorkflow: WorkflowDefinition = {

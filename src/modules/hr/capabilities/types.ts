@@ -20,7 +20,7 @@ export type { PlatformCapabilityContext };
  *     login user, never read from `input`.
  */
 export interface HrCapability<TInput, TOutput> extends PlatformCapability<TInput, TOutput> {
-	inputSchema: ZodType<unknown>;
+	inputSchema: ZodType<TInput>;
 	outputSchema: ZodType<unknown>;
 	idempotencyKey?: (input: unknown) => string;
 }
