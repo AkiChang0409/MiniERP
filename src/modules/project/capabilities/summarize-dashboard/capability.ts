@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import type { ProjectCapability } from '../types';
+import { SummarizeDashboardInputSchema } from './schema';
 
 /**
  * Epic 9 — AI Dashboards. Given the same numbers the dashboard already
@@ -77,3 +79,25 @@ Respond with JSON only.`
 	}
 	return { summary: result.result.value, status: 'success' };
 }
+
+/** Registered (SDK-for-agent) wrapper — forwards to `summarizeDashboard`. */
+export const summarizeDashboardCapability: ProjectCapability<
+	SummarizeDashboardInput,
+	DashboardSummary
+> = {
+	id: 'project.summarize-dashboard',
+	description:
+		'Summarise project portfolio health (status counts, upcoming and overdue) into an executive brief plus risk flags.',
+	riskLevel: 'R0',
+	inputSchema: SummarizeDashboardInputSchema,
+	outputSchema: DashboardSummarySchema,
+
+	async execute(input, ctx) {
+		if (!ctx.env) throw new Error('project.summarize-dashboard requires Workers AI env');
+		const run = await summarizeDashboard(input, ctx.env);
+		if (run.status !== 'success' || !run.summary) {
+			throw new Error(run.errorMessage ?? `Dashboard summary failed (${run.status}).`);
+		}
+		return run.summary;
+	}
+};

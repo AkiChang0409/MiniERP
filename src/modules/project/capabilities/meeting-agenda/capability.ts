@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import type { ProjectCapability } from '../types';
+import { DraftAgendaInputSchema } from './schema';
 
 /**
  * Epic 6 — Meeting Assistant.
@@ -81,3 +83,22 @@ Return JSON with title, objective, suggestedAttendees, totalMinutes, items[].`
 	}
 	return { agenda: result.result.value, status: 'success' };
 }
+
+/** Registered (SDK-for-agent) wrapper — forwards to `draftMeetingAgenda`. */
+export const draftMeetingAgendaCapability: ProjectCapability<DraftAgendaInput, MeetingAgenda> = {
+	id: 'project.draft-meeting-agenda',
+	description:
+		'Draft a focused, time-boxed meeting agenda from a project objective, open tasks and recent discussion. Suggestive only — does not send invites.',
+	riskLevel: 'R0',
+	inputSchema: DraftAgendaInputSchema,
+	outputSchema: MeetingAgendaSchema,
+
+	async execute(input, ctx) {
+		if (!ctx.env) throw new Error('project.draft-meeting-agenda requires Workers AI env');
+		const run = await draftMeetingAgenda(input, ctx.env);
+		if (run.status !== 'success' || !run.agenda) {
+			throw new Error(`Agenda generation failed (${run.status}).`);
+		}
+		return run.agenda;
+	}
+};

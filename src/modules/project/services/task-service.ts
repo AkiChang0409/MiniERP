@@ -8,9 +8,16 @@ import {
 	ProjectTaskRepository,
 	ProjectTaskDependencyRepository,
 	ProjectWorkflowStageRepository,
-	ProjectGanttPortfolioRepository
+	ProjectGanttPortfolioRepository,
+	ProjectScheduleChangeRepository
 } from '../repositories';
 import { ProjectPermissionError, ProjectValidationError } from '../domain';
+import {
+	computeSchedule,
+	detectConflicts,
+	type SchedTask,
+	type SchedDep
+} from './scheduling';
 
 /**
  * Phase 1B / Epic 2 — task and Gantt-portfolio orchestration. Permission
@@ -20,6 +27,9 @@ import { ProjectPermissionError, ProjectValidationError } from '../domain';
 
 const TASK_STATUSES = ['unassigned', 'ongoing', 'under_review', 'completed', 'blocked'] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
+
+const TASK_KINDS = ['task', 'milestone', 'buffer'] as const;
+type TaskKind = (typeof TASK_KINDS)[number];
 
 export interface TaskCreateInput {
 	projectId: string;
@@ -34,6 +44,17 @@ export interface TaskCreateInput {
 	isMilestone?: boolean;
 	workflowStageId?: string | null;
 	status?: TaskStatus;
+	// Gantt optimization P0
+	kind?: TaskKind;
+	progressPct?: number | null;
+	bufferDays?: number | null;
+	blockedReason?: string | null;
+	outsourcedPartnerId?: string | null;
+	subProjectId?: string | null;
+	/** Override the frozen baseline; defaults to start/endDate at create time. */
+	baselineStart?: string | null;
+	baselineEnd?: string | null;
+	actualStart?: string | null;
 }
 
 export interface TaskUpdateInput {
@@ -49,6 +70,18 @@ export interface TaskUpdateInput {
 	workflowStageId?: string | null;
 	status?: TaskStatus;
 	completedAt?: string | null;
+	// Gantt optimization P0
+	kind?: TaskKind;
+	progressPct?: number | null;
+	bufferDays?: number | null;
+	blockedReason?: string | null;
+	outsourcedPartnerId?: string | null;
+	subProjectId?: string | null;
+	baselineStart?: string | null;
+	baselineEnd?: string | null;
+	actualStart?: string | null;
+	/** Not a column — captured into the schedule-change log when dates move. */
+	rescheduleReason?: string | null;
 }
 
 export interface TaskDependencyInput {
@@ -71,6 +104,7 @@ export class ProjectTaskService {
 	private depRepo: ProjectTaskDependencyRepository;
 	private stageRepo: ProjectWorkflowStageRepository;
 	private portfolioRepo: ProjectGanttPortfolioRepository;
+	private scheduleChangeRepo: ProjectScheduleChangeRepository;
 
 	constructor(private ctx: ModuleContext) {
 		this.projectRepo = new ProjectRepository(ctx.db);
@@ -79,6 +113,7 @@ export class ProjectTaskService {
 		this.depRepo = new ProjectTaskDependencyRepository(ctx.db);
 		this.stageRepo = new ProjectWorkflowStageRepository(ctx.db);
 		this.portfolioRepo = new ProjectGanttPortfolioRepository(ctx.db);
+		this.scheduleChangeRepo = new ProjectScheduleChangeRepository(ctx.db);
 	}
 
 	private async assertCanEdit(projectId: string, requireCrucial = false) {
@@ -136,6 +171,11 @@ export class ProjectTaskService {
 			orderIndex = Number(n ?? 0);
 		}
 
+		// `kind` and the legacy `isMilestone` boolean are kept consistent so old
+		// readers and the new vocabulary agree.
+		const kind: TaskKind = input.kind ?? (input.isMilestone ? 'milestone' : 'task');
+		const isMilestone = kind === 'milestone' || (input.isMilestone ?? false);
+
 		const id = crypto.randomUUID();
 		await this.taskRepo.create({
 			id,
@@ -149,8 +189,19 @@ export class ProjectTaskService {
 			assigneeId: input.assigneeId ?? null,
 			estimatedHours: input.estimatedHours ?? null,
 			orderIndex,
-			isMilestone: input.isMilestone ?? false,
-			workflowStageId: input.workflowStageId ?? null
+			isMilestone,
+			workflowStageId: input.workflowStageId ?? null,
+			// Gantt P0: freeze the baseline from the initial plan unless the caller
+			// passes one explicitly. This is the "ghost bar" drift reference.
+			kind,
+			baselineStart: input.baselineStart ?? input.startDate ?? null,
+			baselineEnd: input.baselineEnd ?? input.endDate ?? null,
+			actualStart: input.actualStart ?? null,
+			progressPct: input.progressPct ?? null,
+			bufferDays: input.bufferDays ?? 0,
+			blockedReason: input.blockedReason ?? null,
+			outsourcedPartnerId: input.outsourcedPartnerId ?? null,
+			subProjectId: input.subProjectId ?? null
 		});
 		return { id };
 	}
@@ -161,15 +212,68 @@ export class ProjectTaskService {
 		if (!existing) throw new NotFoundError('Task', taskId);
 
 		const update: Record<string, unknown> = { ...patch };
+		// `rescheduleReason` is an input, not a column — pull it out before the
+		// row update and fold it into the schedule-change log below.
+		const rescheduleReason = patch.rescheduleReason ?? null;
+		delete (update as { rescheduleReason?: unknown }).rescheduleReason;
 		if (typeof update.name === 'string') update.name = update.name.trim();
+
+		// Keep `kind` and the legacy `isMilestone` boolean mutually consistent.
+		if (patch.kind !== undefined) {
+			update.isMilestone = patch.kind === 'milestone';
+		} else if (patch.isMilestone !== undefined) {
+			update.kind = patch.isMilestone ? 'milestone' : 'task';
+		}
+
+		const nowIso = new Date().toISOString();
+		// Auto-stamp the actual start the first time work begins.
+		if (
+			patch.status &&
+			patch.status !== 'unassigned' &&
+			patch.status !== 'completed' &&
+			!existing.actualStart &&
+			patch.actualStart === undefined
+		) {
+			update.actualStart = nowIso.slice(0, 10);
+		}
 		if (update.status === 'completed' && !existing.completedAt) {
-			update.completedAt = new Date().toISOString();
+			update.completedAt = nowIso;
+			if (patch.progressPct === undefined) update.progressPct = 100;
 		}
 		if (update.status && update.status !== 'completed' && existing.completedAt) {
 			update.completedAt = null;
 		}
 		await this.taskRepo.update(taskId, update);
+
+		// Audit any date move into the schedule-change log (drives "this task
+		// slipped N times / why" + the task history timeline). Only when a date
+		// actually changed.
+		const startChanged =
+			patch.startDate !== undefined && (patch.startDate ?? null) !== (existing.startDate ?? null);
+		const endChanged =
+			patch.endDate !== undefined && (patch.endDate ?? null) !== (existing.endDate ?? null);
+		if (startChanged || endChanged) {
+			await this.scheduleChangeRepo.create({
+				id: crypto.randomUUID(),
+				projectId,
+				taskId,
+				eventType: 'rescheduled',
+				oldStart: existing.startDate ?? null,
+				oldEnd: existing.endDate ?? null,
+				newStart: (patch.startDate ?? existing.startDate) ?? null,
+				newEnd: (patch.endDate ?? existing.endDate) ?? null,
+				reason: rescheduleReason,
+				triggeredBy: this.ctx.user?.id ?? null
+			});
+		}
 		return { id: taskId };
+	}
+
+	/** Reschedule / delay history for a single task (newest first). */
+	async listTaskHistory(projectId: string, taskId: string) {
+		const existing = await this.taskRepo.findInProject(projectId, taskId);
+		if (!existing) throw new NotFoundError('Task', taskId);
+		return this.scheduleChangeRepo.listForTask(taskId);
 	}
 
 	async remove(taskId: string, projectId: string) {
@@ -224,13 +328,35 @@ export class ProjectTaskService {
 	}
 
 	// -----------------------------------------------------------------------
-	// Critical path (Epic 2C)
+	// Scheduling — CPM + conflict detection (Epic 2C / Gantt P2)
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Returns the ordered task IDs on the longest path from any start node
-	 * (no incoming dep) to any end node (no outgoing dep). Pure topological
-	 * traversal — no AI involved, just plain DAG math.
+	 * Full schedule: per-task CPM float (total/free slack), the critical path,
+	 * and the conflict list (dependency violations + resource over-allocation).
+	 * Pure math lives in `scheduling.ts`; this just loads the data. Honours all
+	 * four dependency kinds and per-edge lag. Manual dates are never mutated.
+	 */
+	async schedule(projectId: string) {
+		const [tasks, deps] = await Promise.all([
+			this.taskRepo.listForProject(projectId),
+			this.depRepo.listForProject(projectId)
+		]);
+		const sched = computeSchedule(tasks as SchedTask[], deps as SchedDep[]);
+		const conflicts = detectConflicts(tasks as SchedTask[], deps as SchedDep[]);
+		return {
+			tasks: tasks.map((t) => ({ ...t, schedule: sched.bySchedule[t.id] ?? null })),
+			criticalPath: sched.criticalPath,
+			projectDurationDays: sched.projectDurationDays,
+			conflicts
+		};
+	}
+
+	/**
+	 * Backwards-compatible critical-path endpoint — now derived from the full
+	 * CPM pass (zero-total-float tasks) rather than a finish-to-start-only
+	 * longest path. Returns the same `{ taskIds, durationDays }` shape callers
+	 * already consume.
 	 */
 	async criticalPath(projectId: string): Promise<{ taskIds: string[]; durationDays: number }> {
 		const [tasks, deps] = await Promise.all([
@@ -238,83 +364,8 @@ export class ProjectTaskService {
 			this.depRepo.listForProject(projectId)
 		]);
 		if (tasks.length === 0) return { taskIds: [], durationDays: 0 };
-
-		// Build adjacency (only finish_to_start is treated as a hard predecessor
-		// for this v1 calculation; the other kinds are scaffolded but ignored).
-		const incoming = new Map<string, string[]>();
-		const outgoing = new Map<string, string[]>();
-		for (const t of tasks) {
-			incoming.set(t.id, []);
-			outgoing.set(t.id, []);
-		}
-		for (const dep of deps) {
-			if (dep.kind !== 'finish_to_start') continue;
-			(incoming.get(dep.toTaskId) ?? []).push(dep.fromTaskId);
-			(outgoing.get(dep.fromTaskId) ?? []).push(dep.toTaskId);
-		}
-
-		const durationOf = (t: (typeof tasks)[number]) => {
-			if (!t.startDate || !t.endDate) return 1;
-			const s = Date.parse(t.startDate);
-			const e = Date.parse(t.endDate);
-			if (Number.isNaN(s) || Number.isNaN(e)) return 1;
-			return Math.max(1, Math.round((e - s) / 86_400_000) + 1);
-		};
-
-		// Memoized longest path to end (`dp[id] = { length, next | null }`).
-		const dp = new Map<string, { length: number; next: string | null }>();
-		const taskById = new Map(tasks.map((t) => [t.id, t]));
-		const visiting = new Set<string>();
-
-		const longest = (id: string): { length: number; next: string | null } => {
-			const cached = dp.get(id);
-			if (cached) return cached;
-			if (visiting.has(id)) {
-				// Cycle — bail with zero rather than infinite-looping. Front-end
-				// validation should keep this from happening.
-				return { length: 0, next: null };
-			}
-			visiting.add(id);
-			const node = taskById.get(id);
-			if (!node) {
-				visiting.delete(id);
-				return { length: 0, next: null };
-			}
-			const successors = outgoing.get(id) ?? [];
-			if (successors.length === 0) {
-				const res = { length: durationOf(node), next: null };
-				dp.set(id, res);
-				visiting.delete(id);
-				return res;
-			}
-			let best = { length: -1, next: null as string | null };
-			for (const s of successors) {
-				const sub = longest(s);
-				if (sub.length > best.length) best = { length: sub.length, next: s };
-			}
-			const res = { length: durationOf(node) + best.length, next: best.next };
-			dp.set(id, res);
-			visiting.delete(id);
-			return res;
-		};
-
-		const startNodes = tasks.filter((t) => (incoming.get(t.id) ?? []).length === 0);
-		let head: string | null = null;
-		let headLen = -1;
-		for (const t of startNodes) {
-			const sub = longest(t.id);
-			if (sub.length > headLen) {
-				headLen = sub.length;
-				head = t.id;
-			}
-		}
-		const taskIds: string[] = [];
-		while (head) {
-			taskIds.push(head);
-			const next = dp.get(head)?.next ?? null;
-			head = next;
-		}
-		return { taskIds, durationDays: headLen };
+		const sched = computeSchedule(tasks as SchedTask[], deps as SchedDep[]);
+		return { taskIds: sched.criticalPath, durationDays: sched.projectDurationDays };
 	}
 
 	// -----------------------------------------------------------------------
@@ -374,29 +425,68 @@ export class ProjectTaskService {
 	async setStages(
 		projectId: string,
 		stages: Array<{
+			id?: string;
 			name: string;
 			kind?: 'task_group' | 'approval' | 'budget_gate' | 'manual';
 			conditionExpression?: string | null;
+			planStart?: string | null;
+			planEnd?: string | null;
+			color?: string | null;
 		}>
 	) {
 		await this.assertCanEdit(projectId, true);
-		// Wipe + recreate keeps the editor simple; rules are recomputed on next
-		// auto-advance pass.
+
+		// Upsert by id (NOT wipe-recreate): a stage keeps its identity across
+		// edits so `task.workflowStageId` links, auto-advance progress, and the
+		// stage's own actual dates all survive a reorder/rename. Only stages the
+		// editor actually dropped get soft-deleted.
 		const existing = await this.stageRepo.listForProject(projectId);
-		for (const stage of existing) {
-			await this.stageRepo.softDelete(stage.id);
-		}
+		const existingById = new Map(existing.map((s) => [s.id, s]));
+		const keepIds = new Set<string>();
+
 		for (let i = 0; i < stages.length; i++) {
-			const id = crypto.randomUUID();
-			await this.stageRepo.create({
-				id,
-				projectId,
-				name: stages[i].name,
-				orderIndex: i,
-				kind: stages[i].kind ?? 'task_group',
-				status: i === 0 ? 'in_progress' : 'pending',
-				conditionExpression: stages[i].conditionExpression ?? null
-			});
+			const input = stages[i];
+			const matched = input.id ? existingById.get(input.id) : undefined;
+			if (matched) {
+				keepIds.add(matched.id);
+				await this.stageRepo.update(matched.id, {
+					name: input.name,
+					orderIndex: i,
+					kind: input.kind ?? matched.kind,
+					conditionExpression: input.conditionExpression ?? null,
+					planStart: input.planStart ?? null,
+					planEnd: input.planEnd ?? null,
+					color: input.color ?? null
+				});
+			} else {
+				const id = crypto.randomUUID();
+				keepIds.add(id);
+				await this.stageRepo.create({
+					id,
+					projectId,
+					name: input.name,
+					orderIndex: i,
+					kind: input.kind ?? 'task_group',
+					status: 'pending',
+					conditionExpression: input.conditionExpression ?? null,
+					planStart: input.planStart ?? null,
+					planEnd: input.planEnd ?? null,
+					color: input.color ?? null
+				});
+			}
+		}
+
+		for (const stage of existing) {
+			if (!keepIds.has(stage.id)) {
+				await this.stageRepo.softDelete(stage.id);
+			}
+		}
+
+		// Guarantee exactly one active stage. If none is in_progress (first-ever
+		// setup, or the active stage was just removed), start the earliest one.
+		const after = await this.stageRepo.listForProject(projectId);
+		if (after.length > 0 && !after.some((s) => s.status === 'in_progress')) {
+			await this.stageRepo.update(after[0].id, { status: 'in_progress' });
 		}
 	}
 

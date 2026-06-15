@@ -192,6 +192,7 @@
 
 	// Active nav item within project workspace
 	const isDashboard = $derived(path === base);
+	const isTasks = $derived(path.startsWith(`${base}/tasks`));
 	const isDocuments = $derived(path.startsWith(`${base}/documents`));
 	const isExpenses = $derived(path.startsWith(`${base}/expenses`));
 	const isRevenue = $derived(path.startsWith(`${base}/revenue`));
@@ -208,6 +209,7 @@
 
 	const navItems = $derived<NavItem[]>([
 		{ href: base, label: 'Dashboard', icon: '-', active: isDashboard },
+		{ href: `${base}/tasks`, label: 'Tasks & Gantt', icon: '-', active: isTasks },
 		{
 			href: `${base}/documents`,
 			label: 'Documents',

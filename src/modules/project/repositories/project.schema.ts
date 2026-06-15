@@ -40,6 +40,15 @@ export const projects = sqliteTable('projects', {
 	startDate: text('start_date'),
 	endDate: text('end_date'),
 	deadline: text('deadline'),
+	// Reality window — when the project actually started / finished, distinct
+	// from the planned start/endDate. Powers baseline-vs-actual drift.
+	actualStart: text('actual_start'),
+	actualEnd: text('actual_end'),
+	// Controls whether external partners (on outsourced sub-projects) can see
+	// this project. Defaults to internal-only.
+	visibility: text('visibility', { enum: ['internal', 'partner_visible'] })
+		.notNull()
+		.default('internal'),
 	description: text('description'),
 	notes: text('notes'),
 	priority: integer('priority').notNull().default(5),
@@ -193,6 +202,33 @@ export const projectTasks = sqliteTable('project_tasks', {
 	// so a task always knows which stage progression it advances. Nullable
 	// because workflows are an opt-in per project.
 	workflowStageId: text('workflow_stage_id'),
+
+	// --- Gantt optimization P0 (2026-06) ----------------------------------
+	// `kind` supersedes the `isMilestone` boolean with a richer vocabulary so
+	// the timeline can draw diamonds (milestone) and hatched reserve blocks
+	// (buffer). `isMilestone` is kept in sync for back-compat reads.
+	kind: text('kind', { enum: ['task', 'milestone', 'buffer'] })
+		.notNull()
+		.default('task'),
+	// Frozen original plan — set once at create time from start/endDate. Lets
+	// the UI draw a "ghost" baseline bar under the live (planned) bar so drift
+	// is visible at a glance, and powers delay analysis.
+	baselineStart: text('baseline_start'),
+	baselineEnd: text('baseline_end'),
+	// Reality: when work actually began. `completedAt` already records the end.
+	actualStart: text('actual_start'),
+	// Manual progress 0-100. Falls back to a status-derived estimate when null.
+	progressPct: integer('progress_pct'),
+	// Explicit reserve appended after the task ("预留空间"); complements the
+	// computed CPM slack the scheduler derives in P2.
+	bufferDays: integer('buffer_days').notNull().default(0),
+	// Why a task sits in `blocked` status — surfaced in the Gantt tooltip.
+	blockedReason: text('blocked_reason'),
+	// Outsourcing: the whole task is delegated to an external business partner
+	// (reuses sales-crm `businessPartners`; no separate partner master data),
+	// or links to a child project that delivers this slice of work.
+	outsourcedPartnerId: text('outsourced_partner_id').references(() => businessPartners.id),
+	subProjectId: text('sub_project_id').references((): AnySQLiteColumn => projects.id),
 	...timeFields
 });
 
@@ -221,6 +257,9 @@ export const projectTaskDependencies = sqliteTable('project_task_dependencies', 
 		.notNull()
 		.default('finish_to_start'),
 	lagDays: integer('lag_days').notNull().default(0),
+	// Hard blocker (predecessor must finish before successor can start) vs a
+	// soft, advisory link that only drives ordering hints / reminders.
+	isBlocking: integer('is_blocking', { mode: 'boolean' }).notNull().default(true),
 	...timeFields
 });
 
@@ -254,6 +293,14 @@ export const projectWorkflowStages = sqliteTable('project_workflow_stages', {
 		.default('pending'),
 	conditionExpression: text('condition_expression'),
 	completedAt: text('completed_at'),
+	// --- Gantt optimization P0 (2026-06) ----------------------------------
+	// Stages double as Gantt swimlanes; they carry their own planned/actual
+	// window (independent of the tasks inside) plus a display colour.
+	planStart: text('plan_start'),
+	planEnd: text('plan_end'),
+	actualStart: text('actual_start'),
+	actualEnd: text('actual_end'),
+	color: text('color'),
 	...timeFields
 });
 
@@ -280,5 +327,60 @@ export const projectCalendarIntegrations = sqliteTable('project_calendar_integra
 	status: text('status', { enum: ['active', 'expired', 'revoked'] })
 		.notNull()
 		.default('active'),
+	...timeFields
+});
+
+// ---------------------------------------------------------------------------
+// Task schedule changes (Gantt P3 — delay/reschedule audit)
+// ---------------------------------------------------------------------------
+// Append-only-ish log of every date change on a task. Distinct from the generic
+// platform audit log because the Gantt needs to query "how many times did this
+// slip / by how many days / why" structurally (old/new dates are real columns).
+//   - eventType: created | rescheduled | overdue | completed | status_changed
+//   - reason   : free text captured from the editor ("client delay", …) or null
+//   - triggeredBy: user who made the change (null for system-detected overdue)
+// ---------------------------------------------------------------------------
+
+export const projectTaskScheduleChanges = sqliteTable('project_task_schedule_changes', {
+	id: text('id').primaryKey(),
+	projectId: text('project_id')
+		.notNull()
+		.references(() => projects.id),
+	taskId: text('task_id')
+		.notNull()
+		.references((): AnySQLiteColumn => projectTasks.id),
+	eventType: text('event_type', {
+		enum: ['created', 'rescheduled', 'overdue', 'completed', 'status_changed']
+	}).notNull(),
+	oldStart: text('old_start'),
+	oldEnd: text('old_end'),
+	newStart: text('new_start'),
+	newEnd: text('new_end'),
+	reason: text('reason'),
+	triggeredBy: text('triggered_by').references(() => users.id),
+	...timeFields
+});
+
+// ---------------------------------------------------------------------------
+// Notifications (Gantt P3 — in-app delivery)
+// ---------------------------------------------------------------------------
+// Net-new, project-scoped notification feed (no platform-wide notification
+// system existed). Overdue notifications are produced lazily when a user reads
+// their feed (no cron infra yet); `dedupeKey` keeps that idempotent.
+//   - kind     : overdue | reschedule | assigned
+//   - dedupeKey: e.g. `overdue:<taskId>:<endDate>` so re-syncs don't duplicate
+// ---------------------------------------------------------------------------
+
+export const projectNotifications = sqliteTable('project_notifications', {
+	id: text('id').primaryKey(),
+	recipientId: text('recipient_id')
+		.notNull()
+		.references(() => users.id),
+	projectId: text('project_id').references(() => projects.id),
+	taskId: text('task_id').references((): AnySQLiteColumn => projectTasks.id),
+	kind: text('kind', { enum: ['overdue', 'reschedule', 'assigned'] }).notNull(),
+	message: text('message').notNull(),
+	isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
+	dedupeKey: text('dedupe_key'),
 	...timeFields
 });

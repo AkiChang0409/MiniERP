@@ -4,6 +4,7 @@
 	import { authClient } from '$platform/auth/client';
 	import WorkflowPanel from '$app-layer/ai-panel/components/workflow-panel/WorkflowPanel.svelte';
 	import PanelTrigger from '$app-layer/ai-panel/components/workflow-panel/PanelTrigger.svelte';
+	import NotificationBell from '$lib/components/NotificationBell.svelte';
 
 	type Primary =
 		| 'finance'
@@ -406,6 +407,7 @@
 						<span class="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">{data.user.email}</span>
 						<span class="rounded-full bg-[var(--sf-green-soft)] px-2.5 py-1 font-medium text-[var(--sf-green)]">{data.user.roles.join(', ')}</span>
 					</div>
+					<NotificationBell />
 					<button
 						type="button"
 						class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50"

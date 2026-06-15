@@ -29,7 +29,18 @@ export const PATCH: RequestHandler = async (event) => {
 			'isMilestone',
 			'workflowStageId',
 			'status',
-			'completedAt'
+			'completedAt',
+			// Gantt optimization P0
+			'kind',
+			'progressPct',
+			'bufferDays',
+			'blockedReason',
+			'outsourcedPartnerId',
+			'subProjectId',
+			'baselineStart',
+			'baselineEnd',
+			'actualStart',
+			'rescheduleReason'
 		];
 		const patch: Record<string, unknown> = {};
 		for (const k of allowed) {

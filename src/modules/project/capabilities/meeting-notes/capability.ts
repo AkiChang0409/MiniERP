@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import type { ProjectCapability } from '../types';
+import { ProcessMeetingNotesInputSchema } from './schema';
 
 /**
  * Epic 8 — Meeting Notetaker (file-upload path).
@@ -89,3 +91,25 @@ ${text}
 	}
 	return { notes: result.result.value, status: 'success' };
 }
+
+/** Registered (SDK-for-agent) wrapper — forwards to `processMeetingTranscript`. */
+export const processMeetingNotesCapability: ProjectCapability<
+	ProcessMeetingNotesInput,
+	MeetingNotes
+> = {
+	id: 'project.process-meeting-notes',
+	description:
+		'Turn a meeting transcript into a summary, decisions, action items (with owners/dates) and risks. Suggestive only — actions become tasks after user review.',
+	riskLevel: 'R1',
+	inputSchema: ProcessMeetingNotesInputSchema,
+	outputSchema: MeetingNotesSchema,
+
+	async execute(input, ctx) {
+		if (!ctx.env) throw new Error('project.process-meeting-notes requires Workers AI env');
+		const run = await processMeetingTranscript(input, ctx.env);
+		if (run.status !== 'success' || !run.notes) {
+			throw new Error(`Meeting-notes processing failed (${run.status}).`);
+		}
+		return run.notes;
+	}
+};

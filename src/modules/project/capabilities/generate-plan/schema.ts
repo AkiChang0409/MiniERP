@@ -30,3 +30,18 @@ export const GeneratedPlanSchema = z.object({
 
 export type GeneratedPlan = z.infer<typeof GeneratedPlanSchema>;
 export type PlanTask = z.infer<typeof PlanTaskSchema>;
+
+/** Agent-facing input contract for `project.generate-plan`. */
+export const GeneratePlanInputSchema = z.object({
+	prompt: z.string().min(1),
+	knownStartDate: z.string().nullable().optional(),
+	knownDeadline: z.string().nullable().optional(),
+	historicalDurations: z
+		.array(
+			z.object({
+				projectName: z.string(),
+				durationDays: z.number()
+			})
+		)
+		.optional()
+});

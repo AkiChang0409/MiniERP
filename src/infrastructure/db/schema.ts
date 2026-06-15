@@ -71,7 +71,9 @@ export {
 	projectTasks,
 	projectTaskDependencies,
 	projectWorkflowStages,
-	projectCalendarIntegrations
+	projectCalendarIntegrations,
+	projectTaskScheduleChanges,
+	projectNotifications
 } from '$modules/project/repositories/project.schema';
 
 // Project archive documents (contracts / quotations / POs)

@@ -14,6 +14,8 @@ import {
 	submitLeaveRequestCapability,
 	type HrCapability
 } from '$modules/hr/capabilities';
+import { PROJECT_AGENT_ID, projectAgentAllowedCapabilities } from '$modules/project/agent';
+import { projectCapabilities, type ProjectCapability } from '$modules/project/capabilities';
 import {
 	registerCapabilities,
 	type CapabilityRegistration
@@ -80,6 +82,37 @@ for (const capability of hrCapabilities) {
 			outputSchema: capability.outputSchema,
 			persistTarget: policyEntry.persistTarget,
 			idempotencyKey: capability.idempotencyKey
+		},
+		capability
+	});
+}
+
+// Project Agent: the module's suggestive AI helpers (plan / dashboard summary /
+// project Q&A / task extraction / meeting agenda + notes). Each manifest lifts
+// the capability's Zod input/output schemas + the policy entry's risk /
+// permission / sideEffect. All are read-only, so the write⇒requiresConfirmation
+// invariant holds trivially.
+for (const capability of projectCapabilities as readonly ProjectCapability<unknown, unknown>[]) {
+	const policyEntry = projectAgentAllowedCapabilities.find((entry) => entry.id === capability.id);
+	if (!policyEntry) {
+		throw new Error(
+			`No policy entry for project capability ${capability.id}. Update project/agent/policy.ts.`
+		);
+	}
+	registrations.push({
+		manifest: {
+			id: capability.id,
+			ownerModule: 'project',
+			description: capability.description,
+			riskLevel: policyEntry.riskLevel,
+			allowedAgents: [PROJECT_AGENT_ID],
+			requiredUserPermissions: policyEntry.requiredUserPermissions,
+			requiresConfirmation: policyEntry.requiresConfirmation,
+			auditRequired: true,
+			enabled: true,
+			sideEffect: policyEntry.sideEffect,
+			inputSchema: capability.inputSchema,
+			outputSchema: capability.outputSchema
 		},
 		capability
 	});

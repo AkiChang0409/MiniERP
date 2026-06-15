@@ -9,11 +9,12 @@ import { fail, ok } from '$platform/http';
 
 /**
  * GET  /api/projects/[id]/stages
- * PUT  /api/projects/[id]/stages   body: { stages: [{ name, kind?, conditionExpression? }] }
+ * PUT  /api/projects/[id]/stages   body: { stages: [{ id?, name, kind?, conditionExpression?, planStart?, planEnd?, color? }] }
  * POST /api/projects/[id]/stages/advance — runs the auto-advance check
  *
- * Epic 3 — workflow stages. PUT replaces the full ordered list, which keeps
- * the editor trivial.
+ * Epic 3 — workflow stages. PUT submits the full ordered list; the service
+ * upserts by id (stages keep their identity, task links, and progress across
+ * edits) and soft-deletes only the ones dropped from the list.
  */
 export const GET: RequestHandler = async (event) => {
 	try {
@@ -33,9 +34,13 @@ export const PUT: RequestHandler = async (event) => {
 		const svc = new ProjectTaskService(ctx);
 		const body = (await event.request.json()) as {
 			stages?: Array<{
+				id?: string;
 				name: string;
 				kind?: 'task_group' | 'approval' | 'budget_gate' | 'manual';
 				conditionExpression?: string | null;
+				planStart?: string | null;
+				planEnd?: string | null;
+				color?: string | null;
 			}>;
 		};
 		const stages = body.stages ?? [];

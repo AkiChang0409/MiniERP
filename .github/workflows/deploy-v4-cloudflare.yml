@@ -92,6 +92,26 @@ jobs:
             printf '%s' "$OCR_SPACE_API_KEY" | npx wrangler secret put OCR_SPACE_API_KEY
             printf '%s' "$OCR_SPACE_API_KEY" | npx wrangler secret put OCR_SPACE_API_KEY --config workers/wrangler.document-processor.jsonc
           fi
+
+          # Lark (Feishu) integration (optional). Only the app worker serves the
+          # /api/integrations/lark/webhook route, so these are app-worker only.
+          # VERIFICATION_TOKEN gates the webhook (url_verification + event auth);
+          # APP_ID/APP_SECRET let the bot reply via the Lark API. Skipped silently
+          # until the secrets are configured in GitHub.
+          if [ -n "${LARK_VERIFICATION_TOKEN:-}" ]; then
+            printf '%s' "$LARK_VERIFICATION_TOKEN" | npx wrangler secret put LARK_VERIFICATION_TOKEN
+          fi
+          if [ -n "${LARK_APP_ID:-}" ]; then
+            printf '%s' "$LARK_APP_ID" | npx wrangler secret put LARK_APP_ID
+          fi
+          if [ -n "${LARK_APP_SECRET:-}" ]; then
+            printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET
+          fi
+          # Optional API base — set only for international Lark (open.larksuite.com);
+          # leave unset to default to open.feishu.cn.
+          if [ -n "${LARK_BASE_URL:-}" ]; then
+            printf '%s' "$LARK_BASE_URL" | npx wrangler secret put LARK_BASE_URL
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -100,6 +120,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OCR_SPACE_API_KEY: ${{ secrets.OCR_SPACE_API_KEY }}
+          LARK_VERIFICATION_TOKEN: ${{ secrets.LARK_VERIFICATION_TOKEN }}
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          LARK_BASE_URL: ${{ secrets.LARK_BASE_URL }}
 
       # ── 7. D1 Migrations ──────────────────────────────────────────────────
       - name: Run personal v4 migrations

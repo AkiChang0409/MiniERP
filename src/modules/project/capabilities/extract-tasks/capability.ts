@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import type { ProjectCapability } from '../types';
+import { ExtractTasksInputSchema } from './schema';
 
 /**
  * Epic 10 — Docs Assistant. Given raw text extracted from a contract, MoM,
@@ -91,3 +93,22 @@ Respond with JSON only.`
 	}
 	return { bundle: result.result.value, status: 'success' };
 }
+
+/** Registered (SDK-for-agent) wrapper — forwards to `extractTasksFromText`. */
+export const extractTasksCapability: ProjectCapability<ExtractTasksInput, ExtractedTaskBundle> = {
+	id: 'project.extract-tasks',
+	description:
+		'Extract suggested action items, decisions and a short summary from document text (contract / MoM / SoW). Suggestive only — the user reviews before tasks are created.',
+	riskLevel: 'R1',
+	inputSchema: ExtractTasksInputSchema,
+	outputSchema: ExtractedTasksSchema,
+
+	async execute(input, ctx) {
+		if (!ctx.env) throw new Error('project.extract-tasks requires Workers AI env');
+		const run = await extractTasksFromText(input, ctx.env);
+		if (run.status !== 'success' || !run.bundle) {
+			throw new Error(`Task extraction failed (${run.status}).`);
+		}
+		return run.bundle;
+	}
+};

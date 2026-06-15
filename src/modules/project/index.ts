@@ -21,6 +21,7 @@ export {
 	type TaskUpdateInput,
 	type TaskDependencyInput
 } from './services/task-service';
+export { ProjectNotificationService } from './services/notification-service';
 export {
 	ProjectAutoAssignService,
 	type AutoAssignInput,
@@ -62,6 +63,18 @@ export {
 	type ProcessMeetingNotesInput
 } from './capabilities/meeting-notes';
 export { projectActions };
+export {
+	projectAgentManifest,
+	classifyProjectIntent,
+	resolveCapabilityForIntent,
+	PROJECT_AGENT_ID,
+	projectAgentAllowedCapabilities,
+	findProjectCapabilityPolicy,
+	type ProjectAgentManifest,
+	type ProjectIntent,
+	type ProjectIntentResult,
+	type ProjectCapabilityPolicyEntry
+} from './agent';
 export type { ProjectInboundContract, ProjectPublicGroup } from './integrations/contracts';
 export { PROJECT_PUBLIC_GROUPS } from './integrations/contracts';
 export { projectAppSurface };

@@ -45,7 +45,19 @@ export const POST: RequestHandler = async (event) => {
 			parentTaskId: body.parentTaskId == null ? null : String(body.parentTaskId),
 			isMilestone: Boolean(body.isMilestone),
 			workflowStageId: body.workflowStageId == null ? null : String(body.workflowStageId),
-			status: (body.status as undefined) ?? undefined
+			status: (body.status as undefined) ?? undefined,
+			// Gantt optimization P0
+			kind: body.kind == null ? undefined : (String(body.kind) as 'task' | 'milestone' | 'buffer'),
+			progressPct:
+				body.progressPct == null ? null : Number(body.progressPct),
+			bufferDays: body.bufferDays == null ? null : Number(body.bufferDays),
+			blockedReason: body.blockedReason == null ? null : String(body.blockedReason),
+			outsourcedPartnerId:
+				body.outsourcedPartnerId == null ? null : String(body.outsourcedPartnerId),
+			subProjectId: body.subProjectId == null ? null : String(body.subProjectId),
+			baselineStart: body.baselineStart == null ? null : String(body.baselineStart),
+			baselineEnd: body.baselineEnd == null ? null : String(body.baselineEnd),
+			actualStart: body.actualStart == null ? null : String(body.actualStart)
 		});
 		return ok(result, 201);
 	} catch (e) {

@@ -1,6 +1,8 @@
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import type { ProjectCapability } from '../types';
 import {
 	GeneratedPlanSchema,
+	GeneratePlanInputSchema,
 	type GeneratedPlan
 } from './schema';
 
@@ -102,3 +104,27 @@ export async function generateProjectPlan(
 
 	return { plan: result.result.value, status: 'success' };
 }
+
+/**
+ * Registered (SDK-for-agent) wrapper. Thin: forwards to `generateProjectPlan`
+ * using the Workers AI env from the capability context and throws on failure so
+ * the governed executor can surface the error. The route layer keeps calling
+ * `generateProjectPlan` directly for its richer status-code handling.
+ */
+export const generatePlanCapability: ProjectCapability<GeneratePlanInput, GeneratedPlan> = {
+	id: 'project.generate-plan',
+	description:
+		'Turn a free-form project description into an editable plan (tasks, durations, optional stages and dependencies). Suggestive only — not persisted.',
+	riskLevel: 'R1',
+	inputSchema: GeneratePlanInputSchema,
+	outputSchema: GeneratedPlanSchema,
+
+	async execute(input, ctx) {
+		if (!ctx.env) throw new Error('project.generate-plan requires Workers AI env');
+		const run = await generateProjectPlan(input, ctx.env);
+		if (run.status !== 'success' || !run.plan) {
+			throw new Error(run.errorMessage ?? `Plan generation failed (${run.status}).`);
+		}
+		return run.plan;
+	}
+};

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import type { ProjectCapability } from '../types';
+import { AnswerQuestionInputSchema } from './schema';
 
 /**
  * Epic 7 — AI Chat for natural-language Q&A about a single project.
@@ -82,3 +84,22 @@ Answer in JSON.`
 	}
 	return { answer: result.result.value, status: 'success' };
 }
+
+/** Registered (SDK-for-agent) wrapper — forwards to `answerProjectQuestion`. */
+export const answerQuestionCapability: ProjectCapability<AnswerQuestionInput, ProjectAnswer> = {
+	id: 'project.answer-question',
+	description:
+		'Answer a factual question about a single project, grounded only in the supplied context bundle (header, tasks, comments, attachments).',
+	riskLevel: 'R0',
+	inputSchema: AnswerQuestionInputSchema,
+	outputSchema: AnswerSchema,
+
+	async execute(input, ctx) {
+		if (!ctx.env) throw new Error('project.answer-question requires Workers AI env');
+		const run = await answerProjectQuestion(input, ctx.env);
+		if (run.status !== 'success' || !run.answer) {
+			throw new Error(`Answer generation failed (${run.status}).`);
+		}
+		return run.answer;
+	}
+};
