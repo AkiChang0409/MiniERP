@@ -278,24 +278,47 @@
 		return out;
 	});
 
-	// Flat row geometry: a lane-header row, then its task rows (unless collapsed).
+	// Flat row geometry: the project summary row, then (when expanded) each stage
+	// swimlane header and its task rows.
 	type Row =
+		| { kind: 'project'; y: number }
 		| { kind: 'lane'; y: number; lane: Lane }
 		| { kind: 'task'; y: number; lane: Lane; task: Task };
 	const rows = $derived.by<Row[]>(() => {
 		const out: Row[] = [];
 		let y = TICK_HEIGHT;
-		for (const lane of lanes) {
-			out.push({ kind: 'lane', y, lane });
-			y += ROW_HEIGHT;
-			if (!collapsed.has(lane.id)) {
-				for (const task of lane.tasks) {
-					out.push({ kind: 'task', y, lane, task });
-					y += ROW_HEIGHT;
+		out.push({ kind: 'project', y });
+		y += ROW_HEIGHT;
+		if (projectExpanded) {
+			for (const lane of lanes) {
+				out.push({ kind: 'lane', y, lane });
+				y += ROW_HEIGHT;
+				if (!collapsed.has(lane.id)) {
+					for (const task of lane.tasks) {
+						out.push({ kind: 'task', y, lane, task });
+						y += ROW_HEIGHT;
+					}
 				}
 			}
 		}
 		return out;
+	});
+
+	// Project summary bar geometry + overall completion.
+	const projectBar = $derived.by(() => {
+		if (!project) return null;
+		const startDay = dayOffset(project.startDate ?? project.createdAt);
+		const endDay = dayOffset(project.deadline ?? project.endDate);
+		const urg = computeUrgency({
+			status: project.status,
+			startDate: project.startDate,
+			deadline: project.deadline,
+			createdAt: project.createdAt
+		});
+		const total = tasks.length;
+		const done = tasks.filter((t) => t.status === 'completed').length;
+		const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+		return { startDay, endDay, urg, pct, total, done };
 	});
 	const chartHeight = $derived(
 		rows.length === 0 ? TICK_HEIGHT + ROW_HEIGHT : rows[rows.length - 1].y + ROW_HEIGHT
@@ -446,6 +469,7 @@
 	});
 	let editor = $state<Editor | null>(null);
 	let saving = $state(false);
+	let editorError = $state<string | null>(null);
 	let taskHistory = $state<HistoryRow[]>([]);
 
 	// Outsourcing pickers (P4): partners loaded lazily, sub-projects from loader.
@@ -476,6 +500,7 @@
 
 	function openCreate(stageId?: string) {
 		editor = blankEditor({ workflowStageId: stageId && stageId !== '__backlog__' ? stageId : '' });
+		editorError = null;
 		taskHistory = [];
 		ensurePartners();
 	}
@@ -500,11 +525,13 @@
 			outsourcedPartnerId: t.outsourcedPartnerId ?? '',
 			subProjectId: t.subProjectId ?? ''
 		});
+		editorError = null;
 		ensurePartners();
 		loadHistory(t.id);
 	}
 	function closeEditor() {
 		editor = null;
+		editorError = null;
 		taskHistory = [];
 	}
 
@@ -531,25 +558,39 @@
 	}
 	async function saveEditor() {
 		if (!editor) return;
-		if (!editor.name.trim()) return;
+		editorError = null;
+		if (!editor.name.trim()) {
+			editorError = 'Task name is required.';
+			return;
+		}
 		saving = true;
 		try {
 			const payload = editorPayload(editor);
-			if (editor.mode === 'create') {
-				await fetch(`/api/projects/${projectId}/tasks`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(payload)
-				});
-			} else if (editor.id) {
-				await fetch(`/api/projects/${projectId}/tasks/${editor.id}`, {
-					method: 'PATCH',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(payload)
-				});
+			const url =
+				editor.mode === 'create'
+					? `/api/projects/${projectId}/tasks`
+					: `/api/projects/${projectId}/tasks/${editor.id}`;
+			const method = editor.mode === 'create' ? 'POST' : 'PATCH';
+			const res = await fetch(url, {
+				method,
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload)
+			});
+			if (!res.ok) {
+				let msg = `Save failed (HTTP ${res.status}).`;
+				try {
+					const body: any = await res.json();
+					if (body?.error) msg = body.error;
+				} catch {
+					/* non-JSON error body */
+				}
+				editorError = msg;
+				return; // keep the modal open so the user can fix / retry
 			}
 			await refresh();
 			editor = null;
+		} catch (e) {
+			editorError = `Network error: ${(e as Error).message}`;
 		} finally {
 			saving = false;
 		}
@@ -706,26 +747,32 @@
 	</div>
 
 	{#if tasks.length === 0}
-		<div class="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
-			<p class="text-sm text-slate-500">No tasks yet.</p>
-			<button
-				type="button"
-				onclick={() => openCreate()}
-				class="mt-3 rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#2f5e2c]"
-			>
-				+ Add the first task
-			</button>
-		</div>
-	{:else}
-		<section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+		<p class="text-xs text-slate-500">
+			No tasks yet — expand the project below and use a stage's <span class="font-medium">+</span> (or the
+			<span class="font-medium">+ Add task</span> button) to create the first one.
+		</p>
+	{/if}
+
+	<section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
 			<div class="flex">
 				<!-- Left: task list -->
 				<div class="w-72 shrink-0 border-r border-slate-200 bg-slate-50/50">
 					<div class="flex h-9 items-center border-b border-slate-200 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-						Task
+						Project · Stage · Task
 					</div>
-					{#each rows as row (row.kind === 'lane' ? `l:${row.lane.id}` : `t:${row.task.id}`)}
-						{#if row.kind === 'lane'}
+					{#each rows as row (row.kind === 'project' ? 'project' : row.kind === 'lane' ? `l:${row.lane.id}` : `t:${row.task.id}`)}
+						{#if row.kind === 'project'}
+							<button
+								type="button"
+								class="flex w-full items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2 text-left text-xs font-semibold text-slate-800 hover:bg-slate-100"
+								style={`height:${ROW_HEIGHT}px`}
+								onclick={() => (projectExpanded = !projectExpanded)}
+							>
+								<span class="text-slate-400">{projectExpanded ? '▼' : '▶'}</span>
+								<span class="truncate">{project?.name ?? 'Project'}</span>
+								{#if projectBar}<span class="ml-auto shrink-0 text-[10px] font-normal text-slate-400">{projectBar.done}/{projectBar.total}</span>{/if}
+							</button>
+						{:else if row.kind === 'lane'}
 							<div
 								class="flex items-center gap-1.5 border-b border-slate-100 bg-slate-100/70 px-2 text-[11px] font-semibold text-slate-600"
 								style={`height:${ROW_HEIGHT}px`}
@@ -738,14 +785,12 @@
 								{/if}
 								<span class="truncate">{row.lane.name}</span>
 								<span class="ml-auto rounded-full bg-white px-1.5 text-[10px] text-slate-500">{row.lane.tasks.length}</span>
-								{#if row.lane.id !== '__backlog__'}
-									<button
-										type="button"
-										class="text-slate-400 hover:text-[var(--sf-green)]"
-										title="Add task to this stage"
-										onclick={() => openCreate(row.lane.id)}
-									>+</button>
-								{/if}
+								<button
+									type="button"
+									class="text-sm text-slate-400 hover:text-[var(--sf-green)]"
+									title="Add task to this stage"
+									onclick={() => openCreate(row.lane.id)}
+								>+</button>
 							</div>
 						{:else}
 							{@const t = row.task}
@@ -792,9 +837,28 @@
 						{/if}
 
 						<!-- rows -->
-						{#each rows as row (row.kind === 'lane' ? `l:${row.lane.id}` : `t:${row.task.id}`)}
-							{#if row.kind === 'lane'}
+						{#each rows as row (row.kind === 'project' ? 'project' : row.kind === 'lane' ? `l:${row.lane.id}` : `t:${row.task.id}`)}
+							{#if row.kind === 'project'}
+								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#f8fafc"></rect>
+								{#if projectBar}
+									{@const px = Math.max(0, projectBar.startDay * pxPerDay)}
+									{@const pw = Math.max(8, (projectBar.endDay - projectBar.startDay) * pxPerDay)}
+									{@const py = row.y + (ROW_HEIGHT - 20) / 2}
+									<rect x={px} y={py} width={pw} height="20" rx="5" fill={projectBar.urg.soft} stroke={projectBar.urg.border} stroke-width="1"></rect>
+									<rect x={px} y={py} width={Math.max(0, (pw * projectBar.pct) / 100)} height="20" rx="5" fill={projectBar.urg.fill} fill-opacity="0.8"></rect>
+									<text x={px + 7} y={row.y + ROW_HEIGHT / 2 + 4} font-size="11" font-weight="600" fill={projectBar.urg.text}>{project?.name ?? ''} · {projectBar.pct}%</text>
+								{/if}
+							{:else if row.kind === 'lane'}
+								{@const laneTasks = row.lane.tasks}
+								{@const laneStart = Math.min(...laneTasks.map((t) => dayOffset(t.startDate)).filter((n) => !Number.isNaN(n)), Infinity)}
+								{@const laneEnd = Math.max(...laneTasks.map((t) => dayOffset(t.endDate)).filter((n) => !Number.isNaN(n)), -Infinity)}
 								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#f1f5f9"></rect>
+								{#if laneTasks.length > 0 && Number.isFinite(laneStart) && Number.isFinite(laneEnd) && collapsed.has(row.lane.id)}
+									<!-- collapsed stage: show a rolled-up span bar so the lane still reads on the timeline -->
+									{@const lx = Math.max(0, laneStart * pxPerDay)}
+									{@const lw = Math.max(8, (laneEnd - laneStart) * pxPerDay)}
+									<rect x={lx} y={row.y + (ROW_HEIGHT - 8) / 2} width={lw} height="8" rx="4" fill={row.lane.color ?? '#94a3b8'} fill-opacity="0.45"></rect>
+								{/if}
 							{:else}
 								{@const t = row.task}
 								{@const c = statusColor(t)}
@@ -916,7 +980,6 @@
 				</div>
 			</section>
 		{/if}
-	{/if}
 </div>
 
 <!-- Task editor modal -->
@@ -1074,13 +1137,16 @@
 					{/if}
 				{/if}
 			</div>
+			{#if editorError}
+				<div class="mx-5 mb-1 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{editorError}</div>
+			{/if}
 			<div class="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
 				{#if editor.mode === 'edit' && editor.id}
 					<button type="button" class="text-xs font-medium text-rose-600 hover:underline" onclick={() => deleteTask(editor!.id!)}>Delete</button>
 				{:else}<span></span>{/if}
 				<div class="flex items-center gap-2">
 					<button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white" onclick={closeEditor}>Cancel</button>
-					<button type="button" class="rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2f5e2c] disabled:opacity-60" disabled={saving || !editor.name.trim()} onclick={saveEditor}>{saving ? 'Saving…' : 'Save'}</button>
+					<button type="button" class="rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2f5e2c] disabled:opacity-60" disabled={saving} onclick={saveEditor}>{saving ? 'Saving…' : 'Save'}</button>
 				</div>
 			</div>
 		</div>

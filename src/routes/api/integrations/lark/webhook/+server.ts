@@ -14,6 +14,13 @@ import { hashConfirmationPayload } from '$platform/workflow/payload-hash';
 import { sendTextMessage } from '$platform/integrations/lark/client';
 import { parseLarkCommand, type LarkCommand } from '$platform/integrations/lark/commands';
 import {
+	asString,
+	handleUrlVerification,
+	rejectEncryptedCallback,
+	resolveVerificationToken,
+	verifyCallbackToken
+} from '$platform/integrations/lark/verify';
+import {
 	createLeaveApi,
 	hrAgentManifest,
 	hrAgentAllowedCapabilities,
@@ -76,18 +83,6 @@ interface Dispatch {
 		comment?: string;
 	};
 	missingFields: string[];
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === 'string' ? value : undefined;
-}
-
-/** Length-safe constant-time string compare (avoids token-length/timing leaks). */
-function timingSafeEqual(a: string, b: string): boolean {
-	if (a.length !== b.length) return false;
-	let mismatch = 0;
-	for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-	return mismatch === 0;
 }
 
 /**
@@ -409,12 +404,9 @@ async function handleLarkMessage(event: RequestEvent, body: Record<string, unkno
 }
 
 export const POST: RequestHandler = async (event) => {
-	const expectedToken = event.platform?.env?.LARK_VERIFICATION_TOKEN;
-	if (!expectedToken) {
-		// Server misconfiguration — surface it rather than silently 200.
-		// (Run `npm run dev:cf` so `.dev.vars` is injected into the Worker env.)
-		return fail('LARK_VERIFICATION_TOKEN is not configured on the server', 500);
-	}
+	const tokenResult = resolveVerificationToken(event.platform?.env);
+	if ('response' in tokenResult) return tokenResult.response;
+	const expectedToken = tokenResult.token;
 
 	const rawBody = await event.request.text();
 	let body: Record<string, unknown>;
@@ -425,35 +417,20 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	// --- Encrypted mode (LARK_ENCRYPT_KEY) — not supported yet ---
-	if ('encrypt' in body) {
-		return fail(
-			'Encrypted Lark callbacks are not supported yet. Leave the Encrypt Key unset in the Lark console, or implement AES-256-CBC decrypt + set LARK_ENCRYPT_KEY.',
-			501
-		);
-	}
+	const encrypted = rejectEncryptedCallback(body);
+	if (encrypted) return encrypted;
 
 	// --- 1) URL verification handshake ---
-	if (asString(body.type) === 'url_verification') {
-		const token = asString(body.token);
-		if (!token || !timingSafeEqual(token, expectedToken)) {
-			return fail('Invalid verification token', 401);
-		}
-		const challenge = asString(body.challenge);
-		if (!challenge) {
-			return fail('Missing challenge', 400);
-		}
-		// Lark expects exactly { "challenge": "<value>" } — not the app's ok() envelope.
-		return json({ challenge });
-	}
+	const handshake = handleUrlVerification(body, expectedToken);
+	if (handshake) return handshake;
 
 	// --- 2) Event callback — verify token, then handle ---
 	// schema 2.0 → header.token; legacy v1 → top-level token.
-	const header = body.header as Record<string, unknown> | undefined;
-	const token = asString(header?.token) ?? asString(body.token);
-	if (!token || !timingSafeEqual(token, expectedToken)) {
+	if (!verifyCallbackToken(body, expectedToken)) {
 		return fail('Invalid verification token', 401);
 	}
 
+	const header = body.header as Record<string, unknown> | undefined;
 	const eventType = asString(header?.event_type) ?? 'unknown';
 
 	if (eventType === 'im.message.receive_v1' && event.platform?.env) {

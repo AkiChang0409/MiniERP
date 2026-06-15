@@ -60,7 +60,10 @@ function isPublicAuthApi(pathname: string) {
 // handler (e.g. Lark's LARK_VERIFICATION_TOKEN), not a user session, so they
 // must bypass the app's API auth gate.
 function isPublicWebhook(pathname: string) {
-	return pathname === '/api/integrations/lark/webhook';
+	return (
+		pathname === '/api/integrations/lark/webhook' ||
+		pathname === '/api/integrations/lark/card-callback'
+	);
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
