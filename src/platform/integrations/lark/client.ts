@@ -51,28 +51,32 @@ interface SendMessageResponse {
 	data?: { message_id?: string };
 }
 
+export type LarkReceiveIdType = 'chat_id' | 'open_id' | 'user_id' | 'union_id' | 'email';
+
 /**
- * Send a plain-text message to a chat.
- * Docs: POST /open-apis/im/v1/messages?receive_id_type=chat_id
+ * Low-level send. Posts an already-encoded `content` string (Lark message
+ * content is itself a JSON string) to a receiver of the given id type.
+ * Docs: POST /open-apis/im/v1/messages?receive_id_type=<type>
  * Requires the `im:message:send_as_bot` scope (see README / setup notes).
  */
-export async function sendTextMessage(
+async function sendMessage(
 	env: Env,
-	chatId: string,
-	text: string
+	args: { receiveId: string; receiveIdType: LarkReceiveIdType; msgType: string; content: string }
 ): Promise<{ messageId?: string }> {
 	const token = await getTenantAccessToken(env);
-	const res = await fetch(`${larkBaseUrl(env)}/open-apis/im/v1/messages?receive_id_type=chat_id`, {
+	const url = `${larkBaseUrl(env)}/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(
+		args.receiveIdType
+	)}`;
+	const res = await fetch(url, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json; charset=utf-8',
 			Authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
-			receive_id: chatId,
-			msg_type: 'text',
-			// Lark message content is itself a JSON string.
-			content: JSON.stringify({ text })
+			receive_id: args.receiveId,
+			msg_type: args.msgType,
+			content: args.content
 		})
 	});
 	const data = (await res.json()) as SendMessageResponse;
@@ -80,4 +84,38 @@ export async function sendTextMessage(
 		throw new Error(`Lark send message failed: code=${data.code} msg=${data.msg ?? 'unknown'}`);
 	}
 	return { messageId: data.data?.message_id };
+}
+
+/** Send a plain-text message to a chat (chat_id). */
+export async function sendTextMessage(
+	env: Env,
+	chatId: string,
+	text: string
+): Promise<{ messageId?: string }> {
+	return sendMessage(env, {
+		receiveId: chatId,
+		receiveIdType: 'chat_id',
+		msgType: 'text',
+		content: JSON.stringify({ text })
+	});
+}
+
+/**
+ * Send an interactive card (msg_type `interactive`) to a receiver. Used to push
+ * a document review card to a user's DM (`receive_id_type=open_id`). The `card`
+ * object is the Lark card JSON (e.g. `{ config, header, elements }` or a
+ * `{ type: 'template', data }` wrapper); it is JSON-stringified into `content`.
+ */
+export async function sendInteractiveCard(
+	env: Env,
+	receiveId: string,
+	receiveIdType: LarkReceiveIdType,
+	card: Record<string, unknown>
+): Promise<{ messageId?: string }> {
+	return sendMessage(env, {
+		receiveId,
+		receiveIdType,
+		msgType: 'interactive',
+		content: JSON.stringify(card)
+	});
 }

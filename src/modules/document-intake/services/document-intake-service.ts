@@ -8,6 +8,7 @@ import {
 } from '../../../platform/files/file-service';
 import { extractTextFromBlob } from '../../../platform/ai/text-extraction';
 import { classifyDocumentCapability } from '../capabilities/classify-document';
+import { notifyLarkReviewCard } from './lark-review-notifier';
 import { DocumentArtifactRepository } from '../repositories/document-artifact-repository';
 import type { DocumentArtifactLibraryFilters } from '../repositories/document-artifact-repository';
 import type {
@@ -704,6 +705,9 @@ export function createDocumentIntakeService(
 			await setStatusOrAbort('ready_for_review');
 			const ready = await repo.findById(artifact.id, tenantId);
 			await audit(ready!, 'document.ready_for_review');
+			// Best-effort: push a Lark review card to the uploader (no-op without
+			// Lark creds / an active binding). Never throws — cannot fail intake.
+			await notifyLarkReviewCard({ db: ctx.db, env: ctx.env }, ready!);
 			return ready!;
 		} catch (err) {
 			if (err instanceof AbortedByUser) {
