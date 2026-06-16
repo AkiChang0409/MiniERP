@@ -125,7 +125,16 @@
       "Bash(npm.cmd run *)",
       "Bash(git -C \"C:\\\\Users\\\\akiwc\\\\Documents\\\\Axiom\\\\MiniERP\" --no-pager diff --stat)",
       "Bash(git -C \"C:\\\\Users\\\\akiwc\\\\Documents\\\\Axiom\\\\MiniERP\" --no-pager diff)",
-      "Bash(git -C \"C:\\\\Users\\\\akiwc\\\\Documents\\\\Axiom\\\\MiniERP\" --no-pager diff -- src/modules/finance/index.ts src/modules/finance/services/insight-service.ts \"src/routes/api/finance/today-brief/+server.ts\")"
+      "Bash(git -C \"C:\\\\Users\\\\akiwc\\\\Documents\\\\Axiom\\\\MiniERP\" --no-pager diff -- src/modules/finance/index.ts src/modules/finance/services/insight-service.ts \"src/routes/api/finance/today-brief/+server.ts\")",
+      "Bash(git --no-pager show --stat f862cec)",
+      "Bash(git --no-pager show f862cec -- src/modules/finance/capabilities/classify-document-category/capability.ts src/modules/finance/capabilities/extract-document-fields/capability.ts)",
+      "Bash(git --no-pager log --oneline -8 -- src/modules/finance/capabilities/classify-document-category/)",
+      "Bash(git --no-pager log --oneline -8 -- src/modules/document-intake/capabilities/classify-document/)",
+      "Bash(git --no-pager log --oneline -8 -- src/platform/ai/json-provider.ts)",
+      "Bash(git --no-pager log --oneline -8 -- src/platform/ai/ai-runtime.ts)",
+      "Bash(git --no-pager show e464c85 -- src/modules/finance/capabilities/classify-document-category/capability.ts)",
+      "Bash(grep -vE '^\\\\s*#|^\\\\s*$')",
+      "Bash(grep -viE '^\\\\s*#|^\\\\s*$')"
     ]
   }
 }

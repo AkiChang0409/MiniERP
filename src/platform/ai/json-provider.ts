@@ -120,14 +120,22 @@ async function callWorkersAiJson(env: Env, input: AiJsonCallInput): Promise<unkn
 		return env.AI!.run(modelKey, opts as Parameters<NonNullable<Env['AI']>['run']>[1]);
 	};
 
+	// Diagnostic: env.AI.run errors were previously swallowed, surfacing only as a
+	// generic "no_provider". Log the underlying Workers AI failure (model + message)
+	// so tail shows the real cause (model unavailable / context length / rate limit).
+	const aiErr = (label: string, err: unknown) =>
+		console.error(`[workers-ai] ${label} (model=${model}, jsonMode=${jsonModePreferred}):`, err instanceof Error ? err.message : err);
+
 	let raw: unknown;
 	try {
 		raw = await run(input.user, jsonModePreferred);
-	} catch {
+	} catch (err) {
+		aiErr('run failed', err);
 		if (!jsonModePreferred) return null;
 		try {
 			raw = await run(input.user, false);
-		} catch {
+		} catch (err2) {
+			aiErr('run failed (no-json retry)', err2);
 			return null;
 		}
 	}
@@ -139,14 +147,19 @@ async function callWorkersAiJson(env: Env, input: AiJsonCallInput): Promise<unkn
 		'\n\nYou must reply with one JSON object only. No markdown code fences, no explanation text before or after.';
 	try {
 		raw = await run(input.user + retryHint, jsonModePreferred);
-	} catch {
+	} catch (err) {
+		aiErr('retry run failed', err);
 		try {
 			raw = await run(input.user + retryHint, false);
-		} catch {
+		} catch (err2) {
+			aiErr('retry run failed (no-json)', err2);
 			return null;
 		}
 	}
 	parsed = pickJsonFromUnknown(raw);
+	if (parsed === null) {
+		console.error(`[workers-ai] model returned unparseable output (model=${model}); rawType=${typeof raw}`);
+	}
 	return parsed;
 }
 
