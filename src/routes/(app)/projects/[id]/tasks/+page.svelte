@@ -237,7 +237,12 @@
 		return out;
 	});
 
-	// --------------------------------------------------------------- swimlanes
+	// --------------------------------------------------------------- views
+	// Two ways to read the same data: group rows by stage (schedule view, keeps
+	// dependencies + critical path) or by assignee (resource view, shows who is
+	// doing what and who is over-allocated).
+	let viewMode = $state<'stage' | 'assignee'>('stage');
+
 	let collapsed = $state<Set<string>>(new Set());
 	function toggleLane(id: string) {
 		const next = new Set(collapsed);
@@ -246,14 +251,41 @@
 		collapsed = next;
 	}
 
-	type Lane = { id: string; name: string; color: string | null; tasks: Task[] };
-	const lanes = $derived.by<Lane[]>(() => {
+	const sortTasks = (arr: Task[]) =>
+		[...arr].sort(
+			(a, b) =>
+				a.orderIndex - b.orderIndex || (parse(a.startDate) ?? 0) - (parse(b.startDate) ?? 0)
+		);
+
+	type Group = { id: string; label: string; color: string | null; tasks: Task[] };
+	const groups = $derived.by<Group[]>(() => {
+		if (viewMode === 'assignee') {
+			const byUser = new Map<string, Task[]>();
+			const unassigned: Task[] = [];
+			for (const t of tasks) {
+				if (t.assigneeId) {
+					const arr = byUser.get(t.assigneeId) ?? [];
+					arr.push(t);
+					byUser.set(t.assigneeId, arr);
+				} else {
+					unassigned.push(t);
+				}
+			}
+			const out: Group[] = [...byUser.entries()].map(([uid, ts]) => ({
+				id: `u:${uid}`,
+				label: ts[0].assigneeName ?? ts[0].assigneeEmail ?? uid,
+				color: null,
+				tasks: sortTasks(ts)
+			}));
+			out.sort((a, b) => a.label.localeCompare(b.label));
+			out.push({ id: '__unassigned__', label: 'Unassigned', color: null, tasks: sortTasks(unassigned) });
+			return out;
+		}
+		// stage mode
 		const stageIds = new Set(stages.map((s) => s.id));
 		const byStage = new Map<string, Task[]>();
 		const backlog: Task[] = [];
 		for (const t of tasks) {
-			// Orphaned tasks (stage was deleted) fall back to Backlog so they
-			// never silently disappear from the chart.
 			if (t.workflowStageId && stageIds.has(t.workflowStageId)) {
 				const arr = byStage.get(t.workflowStageId) ?? [];
 				arr.push(t);
@@ -262,40 +294,63 @@
 				backlog.push(t);
 			}
 		}
-		const sortTasks = (arr: Task[]) =>
-			arr.sort(
-				(a, b) =>
-					a.orderIndex - b.orderIndex ||
-					(parse(a.startDate) ?? 0) - (parse(b.startDate) ?? 0)
-			);
-		const out: Lane[] = [];
+		const out: Group[] = [];
 		for (const s of [...stages].sort((a, b) => a.orderIndex - b.orderIndex)) {
-			out.push({ id: s.id, name: s.name, color: s.color, tasks: sortTasks(byStage.get(s.id) ?? []) });
+			out.push({ id: s.id, label: s.name, color: s.color, tasks: sortTasks(byStage.get(s.id) ?? []) });
 		}
-		// Backlog lane is always present so unstaged tasks have a home and you can
-		// add one even on a brand-new project.
-		out.push({ id: '__backlog__', name: 'Backlog (no stage)', color: null, tasks: sortTasks(backlog) });
+		out.push({ id: '__backlog__', label: 'Backlog (no stage)', color: null, tasks: sortTasks(backlog) });
 		return out;
 	});
 
-	// Flat row geometry: the project summary row, then (when expanded) each stage
-	// swimlane header and its task rows.
+	// Greedy interval packing: non-overlapping tasks share one track row; an
+	// overlap forces a new sub-row (so resource over-allocation is visible).
+	function packTracks(ts: Task[]): Task[][] {
+		const sorted = sortTasks(ts);
+		const trackEnds: number[] = [];
+		const trackTasks: Task[][] = [];
+		for (const t of sorted) {
+			const s = parse(t.startDate) ?? 0;
+			const e = parse(t.endDate) ?? s;
+			let placed = false;
+			for (let i = 0; i < trackTasks.length; i++) {
+				if (s > trackEnds[i]) {
+					trackTasks[i].push(t);
+					trackEnds[i] = e;
+					placed = true;
+					break;
+				}
+			}
+			if (!placed) {
+				trackTasks.push([t]);
+				trackEnds.push(e);
+			}
+		}
+		return trackTasks;
+	}
+
+	// Flat row geometry: project summary → group headers → track rows. A track
+	// holds 1 task in stage view, or 1+ packed tasks in assignee view.
 	type Row =
 		| { kind: 'project'; y: number }
-		| { kind: 'lane'; y: number; lane: Lane }
-		| { kind: 'task'; y: number; lane: Lane; task: Task };
+		| { kind: 'group'; y: number; group: Group }
+		| { kind: 'track'; y: number; group: Group; tasks: Task[]; single: Task | null };
 	const rows = $derived.by<Row[]>(() => {
 		const out: Row[] = [];
 		let y = TICK_HEIGHT;
 		out.push({ kind: 'project', y });
 		y += ROW_HEIGHT;
 		if (projectExpanded) {
-			for (const lane of lanes) {
-				out.push({ kind: 'lane', y, lane });
+			for (const group of groups) {
+				out.push({ kind: 'group', y, group });
 				y += ROW_HEIGHT;
-				if (!collapsed.has(lane.id)) {
-					for (const task of lane.tasks) {
-						out.push({ kind: 'task', y, lane, task });
+				if (!collapsed.has(group.id)) {
+					const tracks =
+						viewMode === 'assignee' ? packTracks(group.tasks) : group.tasks.map((t) => [t]);
+					// Always keep one (possibly empty) track row so the lane has a
+					// draggable empty strip for drag-to-create.
+					const list = tracks.length ? tracks : [[] as Task[]];
+					for (const tt of list) {
+						out.push({ kind: 'track', y, group, tasks: tt, single: tt.length === 1 ? tt[0] : null });
 						y += ROW_HEIGHT;
 					}
 				}
@@ -325,7 +380,7 @@
 	);
 	const taskY = $derived.by<Record<string, number>>(() => {
 		const m: Record<string, number> = {};
-		for (const r of rows) if (r.kind === 'task') m[r.task.id] = r.y;
+		for (const r of rows) if (r.kind === 'track') for (const t of r.tasks) m[t.id] = r.y;
 		return m;
 	});
 
@@ -378,17 +433,8 @@
 		};
 		dragDeltaDays = 0;
 	}
-	function onPointerMove(e: PointerEvent) {
-		if (!drag) return;
-		dragDeltaDays = Math.round((e.clientX - drag.startX) / pxPerDay);
-	}
-	async function onPointerUp() {
-		if (!drag) return;
-		const days = dragDeltaDays;
-		const d = drag;
-		drag = null;
-		dragDeltaDays = 0;
-		if (days === 0) return;
+	// Resolved start/end while dragging a bar (also feeds the live tooltip).
+	function dragDates(d: NonNullable<DragState>, days: number) {
 		let ns = d.originalStart;
 		let ne = d.originalEnd;
 		if (d.mode === 'move') {
@@ -401,6 +447,75 @@
 			ne += days * ONE_DAY;
 			if (ne <= ns) ne = ns + ONE_DAY;
 		}
+		return { ns, ne };
+	}
+	const dragPreview = $derived.by(() => {
+		if (!drag) return null;
+		const { ns, ne } = dragDates(drag, dragDeltaDays);
+		return {
+			start: new Date(ns).toISOString().slice(0, 10),
+			end: new Date(ne).toISOString().slice(0, 10),
+			dur: Math.round((ne - ns) / ONE_DAY) + 1
+		};
+	});
+
+	// Drag-to-create on an empty timeline strip.
+	type CreateDrag = { group: Group; y: number; originLeft: number; startDay: number; curDay: number } | null;
+	let createDrag = $state<CreateDrag>(null);
+	function beginCreateDrag(e: PointerEvent, group: Group, rowY: number) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		const rect = (e.currentTarget as Element).getBoundingClientRect();
+		(e.currentTarget as Element & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(
+			e.pointerId
+		);
+		const day = Math.floor((e.clientX - rect.left) / pxPerDay);
+		createDrag = { group, y: rowY, originLeft: rect.left, startDay: day, curDay: day };
+	}
+
+	function onPointerMove(e: PointerEvent) {
+		if (drag) {
+			dragDeltaDays = Math.round((e.clientX - drag.startX) / pxPerDay);
+		} else if (createDrag) {
+			createDrag = {
+				...createDrag,
+				curDay: Math.floor((e.clientX - createDrag.originLeft) / pxPerDay)
+			};
+		}
+	}
+	async function onPointerUp() {
+		if (createDrag) {
+			const cd = createDrag;
+			createDrag = null;
+			const lo = Math.min(cd.startDay, cd.curDay);
+			const hi = Math.max(cd.startDay, cd.curDay);
+			if (hi > lo) {
+				const startIso = new Date(windowMs.from + lo * ONE_DAY).toISOString().slice(0, 10);
+				const endIso = new Date(windowMs.from + hi * ONE_DAY).toISOString().slice(0, 10);
+				const preset: Partial<Editor> = { startDate: startIso, endDate: endIso };
+				if (viewMode === 'assignee') {
+					if (cd.group.id.startsWith('u:')) preset.assigneeId = cd.group.id.slice(2);
+				} else if (cd.group.id !== '__backlog__') {
+					preset.workflowStageId = cd.group.id;
+				}
+				openCreatePreset(preset);
+			}
+			return;
+		}
+		if (!drag) return;
+		const days = dragDeltaDays;
+		const d = drag;
+		drag = null;
+		dragDeltaDays = 0;
+		// A pointerup with no movement on the bar body = a click → open editor.
+		if (days === 0) {
+			if (d.mode === 'move') {
+				const t = tasks.find((x) => x.id === d.taskId);
+				if (t) openEdit(t);
+			}
+			return;
+		}
+		const { ns, ne } = dragDates(d, days);
 		const startIso = new Date(ns).toISOString().slice(0, 10);
 		const endIso = new Date(ne).toISOString().slice(0, 10);
 		// optimistic
@@ -498,11 +613,25 @@
 		}
 	}
 
-	function openCreate(stageId?: string) {
-		editor = blankEditor({ workflowStageId: stageId && stageId !== '__backlog__' ? stageId : '' });
+	function openCreatePreset(preset: Partial<Editor>) {
+		editor = blankEditor(preset);
 		editorError = null;
 		taskHistory = [];
 		ensurePartners();
+	}
+	function openCreate(stageId?: string) {
+		openCreatePreset({ workflowStageId: stageId && stageId !== '__backlog__' ? stageId : '' });
+	}
+	// Prefill a new task with the right stage/assignee for the lane the user
+	// clicked "+" on (works in both view modes).
+	function addToGroup(group: Group) {
+		const preset: Partial<Editor> = {};
+		if (viewMode === 'assignee') {
+			if (group.id.startsWith('u:')) preset.assigneeId = group.id.slice(2);
+		} else if (group.id !== '__backlog__') {
+			preset.workflowStageId = group.id;
+		}
+		openCreatePreset(preset);
 	}
 	function openEdit(t: Task) {
 		editor = blankEditor({
@@ -680,16 +809,83 @@
 
 <svelte:window onpointermove={onPointerMove} onpointerup={onPointerUp} />
 
+{#snippet taskBar(t: Task, rowY: number)}
+	{@const c = statusColor(t)}
+	{@const isCp = criticalPath.has(t.id)}
+	{@const conflicted = conflictedTaskIds.has(t.id)}
+	{@const sched = scheduleById[t.id]}
+	{@const barStroke = conflicted ? '#f43f5e' : isCp ? '#f59e0b' : c.border}
+	{@const barStrokeW = conflicted || isCp ? 1.5 : 1}
+	{@const dragSelf = drag && drag.taskId === t.id}
+	{@const pv = dragSelf ? dragDeltaDays : 0}
+	{@const mv = dragSelf && drag?.mode === 'move' ? pv : 0}
+	{@const lf = dragSelf && drag?.mode === 'resize-left' ? pv : 0}
+	{@const rt = dragSelf && drag?.mode === 'resize-right' ? pv : 0}
+	{@const sDay = dayOffset(t.startDate)}
+	{@const eDay = dayOffset(t.endDate)}
+	{@const bx = dayOffset(t.baselineStart) * pxPerDay}
+	{@const bw = Math.max(2, (dayOffset(t.baselineEnd) - dayOffset(t.baselineStart)) * pxPerDay)}
+	{@const tx = (sDay + mv + lf) * pxPerDay}
+	{@const tw = Math.max(6, (eDay - sDay + rt - lf) * pxPerDay)}
+	{@const bufW = (t.bufferDays ?? 0) * pxPerDay}
+	{#if t.baselineStart && t.baselineEnd}
+		<rect x={bx} y={rowY + ROW_HEIGHT / 2 + 5} width={bw} height="4" rx="2" fill="#cbd5e1" fill-opacity="0.7"></rect>
+	{/if}
+	{#if t.kind === 'milestone' && t.startDate}
+		{@const myc = rowY + ROW_HEIGHT / 2}
+		<g style="cursor:grab" onpointerdown={(e) => beginDrag(e, 'move', t)} role="presentation">
+			<path d={`M ${tx} ${myc - 8} L ${tx + 8} ${myc} L ${tx} ${myc + 8} L ${tx - 8} ${myc} Z`} fill={isCp ? '#f59e0b' : c.fill} stroke={conflicted ? '#f43f5e' : isCp ? '#b45309' : c.border} stroke-width={conflicted ? 2 : 1}></path>
+			<text x={tx + 12} y={myc + 4} font-size="10" fill="#475569">{t.name}</text>
+		</g>
+	{:else if t.startDate && t.endDate}
+		<g style="cursor:grab">
+			{#if (t.bufferDays ?? 0) > 0}
+				<rect x={tx + tw} y={rowY + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={bufW} height={BAR_HEIGHT} rx="2" fill="url(#bufferHatch)"></rect>
+			{/if}
+			{#if t.kind !== 'buffer' && sched && sched.freeSlack > 0 && !isCp}
+				<rect x={tx + tw + bufW} y={rowY + ROW_HEIGHT / 2 - 1.5} width={sched.freeSlack * pxPerDay} height="3" rx="1.5" fill="#a7f3d0"></rect>
+			{/if}
+			<rect x={tx} y={rowY + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={tw} height={BAR_HEIGHT} rx="3" fill={t.kind === 'buffer' ? 'url(#bufferHatch)' : c.bar} stroke={barStroke} stroke-width={barStrokeW} onpointerdown={(e) => beginDrag(e, 'move', t)}></rect>
+			{#if t.kind !== 'buffer'}
+				<rect x={tx} y={rowY + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={Math.max(0, (tw * progressOf(t)) / 100)} height={BAR_HEIGHT} rx="3" fill={c.fill} fill-opacity="0.85" pointer-events="none"></rect>
+			{/if}
+			<rect x={tx} y={rowY + (ROW_HEIGHT - BAR_HEIGHT) / 2} width="4" height={BAR_HEIGHT} fill="transparent" style="cursor:ew-resize" onpointerdown={(e) => beginDrag(e, 'resize-left', t)}></rect>
+			<rect x={tx + tw - 4} y={rowY + (ROW_HEIGHT - BAR_HEIGHT) / 2} width="4" height={BAR_HEIGHT} fill="transparent" style="cursor:ew-resize" onpointerdown={(e) => beginDrag(e, 'resize-right', t)}></rect>
+			<text x={tx + 5} y={rowY + ROW_HEIGHT / 2 + 4} font-size="10" fill={c.text} pointer-events="none">{t.name}</text>
+			{#if dragSelf && dragPreview}
+				<rect x={tx} y={rowY + 1} width="118" height="12" rx="2" fill="#0f172a" fill-opacity="0.85"></rect>
+				<text x={tx + 4} y={rowY + 10} font-size="9" font-weight="600" fill="#ffffff">{dragPreview.start} → {dragPreview.end} ({dragPreview.dur}d)</text>
+			{/if}
+		</g>
+	{:else}
+		<text x={4} y={rowY + ROW_HEIGHT / 2 + 4} font-size="10" fill="#94a3b8" font-style="italic">{t.name} (no dates)</text>
+	{/if}
+{/snippet}
+
 <div class="space-y-4">
 	<header class="flex flex-wrap items-start justify-between gap-3">
 		<div>
 			<h1 class="text-lg font-medium text-slate-900">Tasks &amp; Gantt</h1>
 			<p class="mt-0.5 text-[13px] text-slate-600">
-				Swimlanes by stage. Solid bar = planned, ghost bar = baseline (drift), fill = progress.
-				Yellow outline marks the critical path.
+				Switch <span class="font-medium">By stage</span> / <span class="font-medium">By assignee</span>.
+				Drag a bar to move it, drag its edges to resize, click it to edit, or drag on an empty row to
+				create a task. Ghost bar = baseline drift; yellow = critical path.
 			</p>
 		</div>
 		<div class="flex shrink-0 items-center gap-2">
+			<div class="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+				{#each [['stage', 'By stage'], ['assignee', 'By assignee']] as const as [v, label]}
+					<button
+						type="button"
+						class={`rounded-md px-2.5 py-1 text-[13px] font-medium transition ${
+							viewMode === v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+						}`}
+						onclick={() => (viewMode = v as 'stage' | 'assignee')}
+					>
+						{label}
+					</button>
+				{/each}
+			</div>
 			<button
 				type="button"
 				onclick={openStageMgr}
@@ -764,9 +960,9 @@
 				<!-- Left: task list -->
 				<div class="w-72 shrink-0 border-r border-slate-200 bg-slate-50/50">
 					<div class="flex h-9 items-center border-b border-slate-200 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-						Project · Stage · Task
+						{viewMode === 'assignee' ? 'Project · Assignee' : 'Project · Stage · Task'}
 					</div>
-					{#each rows as row (row.kind === 'project' ? 'project' : row.kind === 'lane' ? `l:${row.lane.id}` : `t:${row.task.id}`)}
+					{#each rows as row (row.kind === 'project' ? 'project' : row.kind === 'group' ? `g:${row.group.id}` : `tr:${row.group.id}:${row.y}`)}
 						{#if row.kind === 'project'}
 							<button
 								type="button"
@@ -778,28 +974,28 @@
 								<span class="truncate">{project?.name ?? 'Project'}</span>
 								{#if projectBar}<span class="ml-auto shrink-0 text-[10px] font-normal text-slate-400">{projectBar.done}/{projectBar.total}</span>{/if}
 							</button>
-						{:else if row.kind === 'lane'}
+						{:else if row.kind === 'group'}
 							<div
 								class="flex items-center gap-1.5 border-b border-slate-100 bg-slate-100/70 px-2 text-[11px] font-semibold text-slate-600"
 								style={`height:${ROW_HEIGHT}px`}
 							>
-								<button type="button" class="text-slate-400" onclick={() => toggleLane(row.lane.id)}>
-									{collapsed.has(row.lane.id) ? '▶' : '▼'}
+								<button type="button" class="text-slate-400" onclick={() => toggleLane(row.group.id)}>
+									{collapsed.has(row.group.id) ? '▶' : '▼'}
 								</button>
-								{#if row.lane.color}
-									<span class="h-2 w-2 rounded-full" style={`background:${row.lane.color}`}></span>
+								{#if row.group.color}
+									<span class="h-2 w-2 rounded-full" style={`background:${row.group.color}`}></span>
 								{/if}
-								<span class="truncate">{row.lane.name}</span>
-								<span class="ml-auto rounded-full bg-white px-1.5 text-[10px] text-slate-500">{row.lane.tasks.length}</span>
+								<span class="truncate">{row.group.label}</span>
+								<span class="ml-auto rounded-full bg-white px-1.5 text-[10px] text-slate-500">{row.group.tasks.length}</span>
 								<button
 									type="button"
 									class="text-sm text-slate-400 hover:text-[var(--sf-green)]"
-									title="Add task to this stage"
-									onclick={() => openCreate(row.lane.id)}
+									title="Add task to this lane"
+									onclick={() => addToGroup(row.group)}
 								>+</button>
 							</div>
-						{:else}
-							{@const t = row.task}
+						{:else if row.single}
+							{@const t = row.single}
 							<button
 								type="button"
 								class="block w-full border-b border-slate-100 px-3 pl-7 text-left hover:bg-slate-100"
@@ -814,9 +1010,15 @@
 									{#if conflictedTaskIds.has(t.id)}<span class="ml-auto shrink-0 text-rose-500" title="Has a conflict">⚠</span>{/if}
 								</div>
 								<p class="truncate text-[10px] text-slate-400">
-									{t.assigneeName ?? t.assigneeEmail ?? '— unassigned —'}{t.estimatedHours ? ` · ${t.estimatedHours}h` : ''}
+									{viewMode === 'assignee'
+										? (t.startDate ?? '') + (t.endDate ? ` → ${t.endDate}` : '')
+										: (t.assigneeName ?? t.assigneeEmail ?? '— unassigned —')}{t.estimatedHours ? ` · ${t.estimatedHours}h` : ''}
 								</p>
 							</button>
+						{:else}
+							<div class="flex items-center border-b border-slate-100 px-3 pl-7 text-[10px] text-slate-300" style={`height:${ROW_HEIGHT}px`}>
+								{row.tasks.length === 0 ? 'drag on the timeline to add →' : `${row.tasks.length} tasks`}
+							</div>
 						{/if}
 					{/each}
 				</div>
@@ -843,7 +1045,7 @@
 						{/if}
 
 						<!-- rows -->
-						{#each rows as row (row.kind === 'project' ? 'project' : row.kind === 'lane' ? `l:${row.lane.id}` : `t:${row.task.id}`)}
+						{#each rows as row (row.kind === 'project' ? 'project' : row.kind === 'group' ? `g:${row.group.id}` : `tr:${row.group.id}:${row.y}`)}
 							{#if row.kind === 'project'}
 								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#f8fafc"></rect>
 								{#if projectBar}
@@ -854,111 +1056,59 @@
 									<rect x={px} y={py} width={Math.max(0, (pw * projectBar.pct) / 100)} height="20" rx="5" fill={projectBar.urg.fill} fill-opacity="0.8"></rect>
 									<text x={px + 7} y={row.y + ROW_HEIGHT / 2 + 4} font-size="11" font-weight="600" fill={projectBar.urg.text}>{project?.name ?? ''} · {projectBar.pct}%</text>
 								{/if}
-							{:else if row.kind === 'lane'}
-								{@const laneTasks = row.lane.tasks}
-								{@const laneStart = Math.min(...laneTasks.map((t) => dayOffset(t.startDate)).filter((n) => !Number.isNaN(n)), Infinity)}
-								{@const laneEnd = Math.max(...laneTasks.map((t) => dayOffset(t.endDate)).filter((n) => !Number.isNaN(n)), -Infinity)}
+							{:else if row.kind === 'group'}
+								{@const gt = row.group.tasks}
+								{@const gStart = Math.min(...gt.map((t) => dayOffset(t.startDate)).filter((n) => !Number.isNaN(n)), Infinity)}
+								{@const gEnd = Math.max(...gt.map((t) => dayOffset(t.endDate)).filter((n) => !Number.isNaN(n)), -Infinity)}
 								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#f1f5f9"></rect>
-								{#if laneTasks.length > 0 && Number.isFinite(laneStart) && Number.isFinite(laneEnd) && collapsed.has(row.lane.id)}
-									<!-- collapsed stage: show a rolled-up span bar so the lane still reads on the timeline -->
-									{@const lx = Math.max(0, laneStart * pxPerDay)}
-									{@const lw = Math.max(8, (laneEnd - laneStart) * pxPerDay)}
-									<rect x={lx} y={row.y + (ROW_HEIGHT - 8) / 2} width={lw} height="8" rx="4" fill={row.lane.color ?? '#94a3b8'} fill-opacity="0.45"></rect>
+								{#if gt.length > 0 && Number.isFinite(gStart) && Number.isFinite(gEnd) && collapsed.has(row.group.id)}
+									{@const lx = Math.max(0, gStart * pxPerDay)}
+									{@const lw = Math.max(8, (gEnd - gStart) * pxPerDay)}
+									<rect x={lx} y={row.y + (ROW_HEIGHT - 8) / 2} width={lw} height="8" rx="4" fill={row.group.color ?? '#94a3b8'} fill-opacity="0.45"></rect>
 								{/if}
 							{:else}
-								{@const t = row.task}
-								{@const c = statusColor(t)}
-								{@const isCp = criticalPath.has(t.id)}
-								{@const conflicted = conflictedTaskIds.has(t.id)}
-								{@const sched = scheduleById[t.id]}
-								{@const barStroke = conflicted ? '#f43f5e' : isCp ? '#f59e0b' : c.border}
-								{@const barStrokeW = conflicted || isCp ? 1.5 : 1}
-								{@const dragSelf = drag && drag.taskId === t.id}
-								{@const pv = dragSelf ? dragDeltaDays : 0}
-								{@const mv = dragSelf && drag?.mode === 'move' ? pv : 0}
-								{@const lf = dragSelf && drag?.mode === 'resize-left' ? pv : 0}
-								{@const rt = dragSelf && drag?.mode === 'resize-right' ? pv : 0}
-								{@const sDay = dayOffset(t.startDate)}
-								{@const eDay = dayOffset(t.endDate)}
-								{@const bx = (dayOffset(t.baselineStart) ) * pxPerDay}
-								{@const bw = Math.max(2, (dayOffset(t.baselineEnd) - dayOffset(t.baselineStart)) * pxPerDay)}
-								{@const tx = (sDay + mv + lf) * pxPerDay}
-								{@const tw = Math.max(6, (eDay - sDay + rt - lf) * pxPerDay)}
-								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#ffffff"></rect>
-
-								<!-- baseline ghost -->
-								{#if t.baselineStart && t.baselineEnd}
-									<rect x={bx} y={row.y + ROW_HEIGHT / 2 + 5} width={bw} height="4" rx="2" fill="#cbd5e1" fill-opacity="0.7"></rect>
-								{/if}
-
-								{#if t.kind === 'milestone' && t.startDate}
-									<!-- milestone diamond at start -->
-									{@const mxc = tx}
-									{@const myc = row.y + ROW_HEIGHT / 2}
-									<g style="cursor:grab" onpointerdown={(e) => beginDrag(e, 'move', t)} role="presentation">
-										<path
-											d={`M ${mxc} ${myc - 8} L ${mxc + 8} ${myc} L ${mxc} ${myc + 8} L ${mxc - 8} ${myc} Z`}
-											fill={isCp ? '#f59e0b' : c.fill}
-											stroke={conflicted ? '#f43f5e' : isCp ? '#b45309' : c.border}
-											stroke-width={conflicted ? 2 : 1}
-										></path>
-										<text x={mxc + 12} y={myc + 4} font-size="10" fill="#475569">{t.name}</text>
-									</g>
-								{:else if t.startDate && t.endDate}
-									{@const bufW = (t.bufferDays ?? 0) * pxPerDay}
-									<g style="cursor:grab">
-										<!-- buffer block appended after the bar (explicit reserve) -->
-										{#if (t.bufferDays ?? 0) > 0}
-											<rect x={tx + tw} y={row.y + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={bufW} height={BAR_HEIGHT} rx="2" fill="url(#bufferHatch)"></rect>
-										{/if}
-										<!-- free-slack tail (computed CPM float) after the bar + buffer -->
-										{#if t.kind !== 'buffer' && sched && sched.freeSlack > 0 && !isCp}
-											<rect x={tx + tw + bufW} y={row.y + ROW_HEIGHT / 2 - 1.5} width={sched.freeSlack * pxPerDay} height="3" rx="1.5" fill="#a7f3d0"></rect>
-											<line x1={tx + tw + bufW + sched.freeSlack * pxPerDay} x2={tx + tw + bufW + sched.freeSlack * pxPerDay} y1={row.y + ROW_HEIGHT / 2 - 4} y2={row.y + ROW_HEIGHT / 2 + 4} stroke="#6ee7b7" stroke-width="1"></line>
-										{/if}
-										<!-- planned bar -->
-										<rect
-											x={tx}
-											y={row.y + (ROW_HEIGHT - BAR_HEIGHT) / 2}
-											width={tw}
-											height={BAR_HEIGHT}
-											rx="3"
-											fill={t.kind === 'buffer' ? 'url(#bufferHatch)' : c.bar}
-											stroke={barStroke}
-											stroke-width={barStrokeW}
-											onpointerdown={(e) => beginDrag(e, 'move', t)}
-										></rect>
-										<!-- progress fill -->
-										{#if t.kind !== 'buffer'}
-											<rect x={tx} y={row.y + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={Math.max(0, (tw * progressOf(t)) / 100)} height={BAR_HEIGHT} rx="3" fill={c.fill} fill-opacity="0.85" pointer-events="none"></rect>
-										{/if}
-										<!-- resize handles -->
-										<rect x={tx} y={row.y + (ROW_HEIGHT - BAR_HEIGHT) / 2} width="4" height={BAR_HEIGHT} fill="transparent" style="cursor:ew-resize" onpointerdown={(e) => beginDrag(e, 'resize-left', t)}></rect>
-										<rect x={tx + tw - 4} y={row.y + (ROW_HEIGHT - BAR_HEIGHT) / 2} width="4" height={BAR_HEIGHT} fill="transparent" style="cursor:ew-resize" onpointerdown={(e) => beginDrag(e, 'resize-right', t)}></rect>
-										<text x={tx + 5} y={row.y + ROW_HEIGHT / 2 + 4} font-size="10" fill={c.text} pointer-events="none">{t.name}</text>
-									</g>
-								{:else}
-									<text x={4} y={row.y + ROW_HEIGHT / 2 + 4} font-size="10" fill="#94a3b8" font-style="italic">{t.name} (no dates)</text>
-								{/if}
-
-								<!-- dependency arrows into this task -->
-								{#each deps.filter((d) => d.toTaskId === t.id) as dep}
-									{@const from = tasks.find((x) => x.id === dep.fromTaskId)}
-									{@const fy = taskY[dep.fromTaskId]}
-									{#if from && from.endDate && t.startDate && fy != null}
-										{@const fx = (dayOffset(from.endDate) + 1) * pxPerDay}
-										<path
-											d={`M ${fx} ${fy + ROW_HEIGHT / 2} L ${fx + 6} ${fy + ROW_HEIGHT / 2} L ${fx + 6} ${row.y + ROW_HEIGHT / 2} L ${tx} ${row.y + ROW_HEIGHT / 2}`}
-											fill="none"
-											stroke={dep.isBlocking ? '#94a3b8' : '#cbd5e1'}
-											stroke-width="1"
-											stroke-dasharray={dep.isBlocking ? '0' : '2 2'}
-											marker-end="url(#arrow)"
-										></path>
-									{/if}
+								<!-- track row: empty background is the drag-to-create surface; bars sit on top -->
+								<rect
+									x="0"
+									y={row.y}
+									width={chartWidth}
+									height={ROW_HEIGHT}
+									fill="#ffffff"
+									style="cursor:crosshair"
+									role="presentation"
+									onpointerdown={(e) => beginCreateDrag(e, row.group, row.y)}
+								></rect>
+								{#each row.tasks as t (t.id)}
+									{@render taskBar(t, row.y)}
 								{/each}
+								{#if viewMode === 'stage' && row.single}
+									{@const tt = row.single}
+									{@const ttx = dayOffset(tt.startDate) * pxPerDay}
+									{#each deps.filter((d) => d.toTaskId === tt.id) as dep}
+										{@const from = tasks.find((x) => x.id === dep.fromTaskId)}
+										{@const fy = taskY[dep.fromTaskId]}
+										{#if from && from.endDate && tt.startDate && fy != null}
+											{@const fx = (dayOffset(from.endDate) + 1) * pxPerDay}
+											<path
+												d={`M ${fx} ${fy + ROW_HEIGHT / 2} L ${fx + 6} ${fy + ROW_HEIGHT / 2} L ${fx + 6} ${row.y + ROW_HEIGHT / 2} L ${ttx} ${row.y + ROW_HEIGHT / 2}`}
+												fill="none"
+												stroke={dep.isBlocking ? '#94a3b8' : '#cbd5e1'}
+												stroke-width="1"
+												stroke-dasharray={dep.isBlocking ? '0' : '2 2'}
+												marker-end="url(#arrow)"
+											></path>
+										{/if}
+									{/each}
+								{/if}
 							{/if}
 						{/each}
+
+						<!-- drag-to-create preview -->
+						{#if createDrag}
+							{@const lo = Math.min(createDrag.startDay, createDrag.curDay)}
+							{@const hi = Math.max(createDrag.startDay, createDrag.curDay)}
+							<rect x={lo * pxPerDay} y={createDrag.y + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={Math.max(2, (hi - lo) * pxPerDay)} height={BAR_HEIGHT} rx="3" fill="#86efac" fill-opacity="0.5" stroke="#16a34a" stroke-dasharray="3 2"></rect>
+						{/if}
 						<defs>
 							<marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
 								<path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"></path>

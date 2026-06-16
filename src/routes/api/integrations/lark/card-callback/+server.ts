@@ -62,6 +62,13 @@ function readOpenId(body: Record<string, unknown>): string | undefined {
 	return asString(operator?.open_id) ?? asString(body.open_id);
 }
 
+/**
+ * Liveness probe. Lark posts callbacks, but a GET (browser check / health ping)
+ * must still return JSON — a bare 405 has no body and trips Lark's "返回数据不是
+ * 合法的 JSON 格式" check during URL setup.
+ */
+export const GET: RequestHandler = async () => json({ ok: true, endpoint: 'lark-card-callback' });
+
 export const POST: RequestHandler = async (event) => {
 	const tokenResult = resolveVerificationToken(event.platform?.env);
 	if ('response' in tokenResult) return tokenResult.response;
@@ -69,6 +76,9 @@ export const POST: RequestHandler = async (event) => {
 	const env = event.platform!.env;
 
 	const rawBody = await event.request.text();
+	// Log the raw inbound request so the exact Lark verification/callback shape
+	// is visible in `wrangler tail` / Cloudflare logs when diagnosing setup.
+	console.log(`[lark] card-callback POST body=${rawBody.slice(0, 400)}`);
 	let body: Record<string, unknown>;
 	try {
 		body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
