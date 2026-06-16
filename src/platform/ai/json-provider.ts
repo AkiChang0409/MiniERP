@@ -97,7 +97,7 @@ function pickJsonFromUnknown(input: unknown): unknown | null {
 
 async function callWorkersAiJson(env: Env, input: AiJsonCallInput): Promise<unknown> {
 	if (!env.AI) return null;
-	const model = readEnv(env, 'WORKERS_AI_MODEL') || '@cf/meta/llama-3.1-8b-instruct';
+	const model = readEnv(env, 'WORKERS_AI_MODEL') || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 	const modelKey = model as Parameters<NonNullable<Env['AI']>['run']>[0];
 	const systemFull = input.promptVersion
 		? `${input.system}\nPrompt version: ${input.promptVersion}`

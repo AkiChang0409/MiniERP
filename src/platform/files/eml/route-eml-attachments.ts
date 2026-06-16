@@ -13,7 +13,7 @@
 
 import type { EmlStructuredResult } from './parse-eml';
 
-const ROUTING_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const ROUTING_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 const SYSTEM_PROMPT = `You are a document routing assistant for a financial management system.
 Given an email and its list of attachments, identify which attachments are financially relevant documents.
