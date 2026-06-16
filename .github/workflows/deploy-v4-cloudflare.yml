@@ -101,16 +101,23 @@ jobs:
           if [ -n "${LARK_VERIFICATION_TOKEN:-}" ]; then
             printf '%s' "$LARK_VERIFICATION_TOKEN" | npx wrangler secret put LARK_VERIFICATION_TOKEN
           fi
+          # APP_ID / APP_SECRET mint the tenant token used to SEND messages/cards.
+          # They must be set on BOTH workers: the app worker (webhook + card-callback)
+          # AND the document-processor worker, because the ready_for_review review
+          # card is pushed from inside the queue consumer's processDocument run.
           if [ -n "${LARK_APP_ID:-}" ]; then
             printf '%s' "$LARK_APP_ID" | npx wrangler secret put LARK_APP_ID
+            printf '%s' "$LARK_APP_ID" | npx wrangler secret put LARK_APP_ID --config workers/wrangler.document-processor.jsonc
           fi
           if [ -n "${LARK_APP_SECRET:-}" ]; then
             printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET
+            printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET --config workers/wrangler.document-processor.jsonc
           fi
           # Optional API base — set only for international Lark (open.larksuite.com);
           # leave unset to default to open.feishu.cn.
           if [ -n "${LARK_BASE_URL:-}" ]; then
             printf '%s' "$LARK_BASE_URL" | npx wrangler secret put LARK_BASE_URL
+            printf '%s' "$LARK_BASE_URL" | npx wrangler secret put LARK_BASE_URL --config workers/wrangler.document-processor.jsonc
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -47,6 +47,9 @@
 
   "vars": {
     "APP_ENV": "personal-v4",
+    // Used by the Lark review-card notifier (pushed from this worker at
+    // ready_for_review) to build the "open in app" link.
+    "BETTER_AUTH_URL": "https://smartfin-v4.aki-wang.workers.dev",
     "LLM_PROVIDER": "heuristic",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",

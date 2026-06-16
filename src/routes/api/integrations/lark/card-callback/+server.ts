@@ -9,12 +9,10 @@ import {
 } from '$platform/integrations/lark/verify';
 import { resolveUserByExternalIdentity } from '$platform/auth/resolve-external-identity';
 import { createWorkerContext } from '$platform/context';
-import { sendInteractiveCard } from '$platform/integrations/lark/client';
 import {
-	buildEditableReviewCard,
-	buildNoticeCard
-} from '$platform/integrations/lark/cards/finance-intake-cards';
-import { createDocumentIntakeService } from '$modules/document-intake';
+	createDocumentIntakeService,
+	type DocumentProcessorMessage
+} from '$modules/document-intake';
 import { findCategoryById } from '$modules/finance';
 import { confirmInbox } from '$app-layer/finance-intake/confirm-inbox';
 import { processIntakeDocument } from '$app-layer/finance-intake/process-intake';
@@ -156,49 +154,39 @@ export const POST: RequestHandler = async (event) => {
 	}
 	await env.KV.put(dedupKey, '1', { expirationTtl: ACTION_DEDUP_TTL });
 
-	// --- Conversational flow: project picked → run OCR/extract, push editable card ---
+	// --- Conversational flow: project picked → process, then push editable card ---
 	if (kind === 'pick_project') {
 		const projectId = readSelectedOption(body);
 		if (!projectId) return toast('error', '未获取到所选项目，请重新选择。');
 
-		// OCR + 2 LLM calls far exceed Lark's 3s ACK window → ACK now, process in
-		// the background, then push the editable review card to the user's DM.
-		const work = (async () => {
-			try {
-				const artifact = await processIntakeDocument(ctx, documentId);
-				if (!artifact.suggestedCategoryId) {
-					await sendInteractiveCard(
-						env,
-						openId,
-						'open_id',
-						buildNoticeCard('无法自动分类', '未能识别文档类别，请在 App 中处理。', 'red')
-					);
-					return;
-				}
-				const card = buildEditableReviewCard({
-					documentId,
-					categoryId: artifact.suggestedCategoryId,
-					fileName: artifact.originalFile.fileName,
-					documentType: artifact.documentType,
-					fields: (artifact.suggestedFields?.fields ?? {}) as Record<string, unknown>,
-					confidence: artifact.suggestedFields?.confidence,
-					projectId
-				});
-				await sendInteractiveCard(env, openId, 'open_id', card);
-			} catch (err) {
-				console.error('[lark] pick_project processing failed:', err);
-				await sendInteractiveCard(
-					env,
-					openId,
-					'open_id',
-					buildNoticeCard('识别失败', '处理文档时出错，请重试或在 App 中处理。', 'red')
-				).catch(() => {});
-			}
-		})();
-		const exec = event.platform?.ctx;
-		if (exec?.waitUntil) exec.waitUntil(work);
-		else await work;
-		return toast('info', '正在识别单据，请稍候…');
+		// Remember the picked project so the ready_for_review notifier can embed it
+		// in the editable review card it pushes once processing completes.
+		await env.KV.put(`lark:fin-project:${documentId}`, projectId, { expirationTtl: 3600 });
+
+		// The pipeline (OCR + 2 LLM calls) must NOT run in this HTTP worker's
+		// waitUntil — it gets evicted mid-run and strands the artifact in
+		// 'processing'. Route it through the same async queue the App upload uses;
+		// the queue worker completes it and the notifier pushes the editable card.
+		if (env.DOCUMENT_QUEUE) {
+			await env.DOCUMENT_QUEUE.send({
+				v: 1,
+				documentId,
+				tenantId: 'default',
+				userId: resolved.id,
+				userEmail: resolved.email,
+				ocrStrategy: 'ocr_api'
+			} satisfies DocumentProcessorMessage);
+		} else {
+			// Dev / no queue binding: process inline (localhost budget is generous).
+			// The notifier still sends the card at ready_for_review.
+			const work = processIntakeDocument(ctx, documentId).catch((err) =>
+				console.error('[lark] inline pick_project processing failed:', err)
+			);
+			const exec = event.platform?.ctx;
+			if (exec?.waitUntil) exec.waitUntil(work);
+			else await work;
+		}
+		return toast('info', '已收到，正在识别单据，稍后会推送可编辑的字段卡片…');
 	}
 
 	// --- Conversational flow: editable card submitted → persist edited fields ---

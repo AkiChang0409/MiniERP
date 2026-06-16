@@ -134,7 +134,8 @@
       "Bash(git --no-pager log --oneline -8 -- src/platform/ai/ai-runtime.ts)",
       "Bash(git --no-pager show e464c85 -- src/modules/finance/capabilities/classify-document-category/capability.ts)",
       "Bash(grep -vE '^\\\\s*#|^\\\\s*$')",
-      "Bash(grep -viE '^\\\\s*#|^\\\\s*$')"
+      "Bash(grep -viE '^\\\\s*#|^\\\\s*$')",
+      "Bash(grep -E \"\\\\.\\(ts|sql\\)$\")"
     ]
   }
 }
