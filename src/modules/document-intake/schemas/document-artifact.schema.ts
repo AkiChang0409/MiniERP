@@ -117,7 +117,7 @@ export const documentSourceMetadataSchema = z
 		manualUpload: z
 			.object({
 				uploadedBy: z.string(),
-				uploadedFrom: z.enum(['ai_panel', 'finance_workspace', 'task_mode'])
+				uploadedFrom: z.enum(['ai_panel', 'finance_workspace', 'task_mode', 'lark'])
 			})
 			.optional(),
 		drive: z

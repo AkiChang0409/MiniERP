@@ -28,6 +28,11 @@ export async function notifyLarkReviewCard(
 		const uploaderId = artifact.sourceMetadata?.manualUpload?.uploadedBy;
 		if (!uploaderId) return; // e.g. email/drive ingest — no MiniERP uploader to notify.
 
+		// Lark-originated intakes drive their own conversational card flow (project
+		// picker → editable review card in the card-callback), so the auto read-only
+		// card would be a duplicate. Skip it.
+		if (artifact.sourceMetadata?.manualUpload?.uploadedFrom === 'lark') return;
+
 		const openId = await new ExternalIdentityLinkRepository(ctx.db).findActiveExternalIdByUser(
 			LARK_PROVIDER,
 			uploaderId

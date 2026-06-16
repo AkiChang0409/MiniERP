@@ -119,3 +119,36 @@ export async function sendInteractiveCard(
 		content: JSON.stringify(card)
 	});
 }
+
+/**
+ * Download a file/image resource a user sent in a message.
+ * Docs: GET /open-apis/im/v1/messages/{message_id}/resources/{file_key}?type=image|file
+ * Requires the `im:resource` scope. Success returns the raw binary; an error
+ * returns a JSON envelope (`code != 0`), which we surface as a throw.
+ */
+export async function downloadMessageResource(
+	env: Env,
+	messageId: string,
+	fileKey: string,
+	type: 'image' | 'file'
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+	const token = await getTenantAccessToken(env);
+	const url = `${larkBaseUrl(env)}/open-apis/im/v1/messages/${encodeURIComponent(
+		messageId
+	)}/resources/${encodeURIComponent(fileKey)}?type=${type}`;
+	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+	const contentType = res.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
+	// Lark returns JSON only on error; a successful download is binary.
+	if (!res.ok || contentType === 'application/json') {
+		let detail = `${res.status} ${res.statusText}`;
+		try {
+			const body = (await res.json()) as { code?: number; msg?: string };
+			detail = `code=${body.code} msg=${body.msg ?? 'unknown'}`;
+		} catch {
+			/* keep status detail */
+		}
+		throw new Error(`Lark resource download failed: ${detail}`);
+	}
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	return { bytes, mimeType: contentType || 'application/octet-stream' };
+}

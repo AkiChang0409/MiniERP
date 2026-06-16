@@ -9,26 +9,33 @@ import {
 } from '$platform/integrations/lark/verify';
 import { resolveUserByExternalIdentity } from '$platform/auth/resolve-external-identity';
 import { createWorkerContext } from '$platform/context';
+import { sendInteractiveCard } from '$platform/integrations/lark/client';
+import {
+	buildEditableReviewCard,
+	buildNoticeCard
+} from '$platform/integrations/lark/cards/finance-intake-cards';
 import { createDocumentIntakeService } from '$modules/document-intake';
 import { findCategoryById } from '$modules/finance';
 import { confirmInbox } from '$app-layer/finance-intake/confirm-inbox';
+import { processIntakeDocument } from '$app-layer/finance-intake/process-intake';
 
 /**
  * Lark (Feishu) interactive-card callback — the "回调配置" endpoint.
  *
- * Fires when a user taps Confirm / Reject on the document review card pushed by
- * `notifyLarkReviewCard` at `ready_for_review`. Confirm persists the artifact
- * (via the shared `confirmInbox` orchestrator); Reject abandons the intake.
+ * Handles every card action by `action` value:
+ *  - `pick_project` — conversational flow: user picked a project on the picker
+ *    card. ACK fast, then (in waitUntil) run OCR/classify/extract and push the
+ *    editable review card. OCR+LLM exceed Lark's 3s window, so it must be async.
+ *  - `approve` — conversational flow: editable review card submitted. Persist
+ *    the user-edited `form_value` fields via `confirmInbox` (pure D1, inline).
+ *  - `confirm` — read-only review card (App-upload flow) Confirm: persist the
+ *    AI-suggested fields as-is.
+ *  - `reject` — abandon the intake.
  *
  * Shares verification (token + url_verification + encrypted-mode policy) with
- * the event webhook via `$platform/integrations/lark/verify`. Card action
- * dispatch is server-authoritative: the button only carries
- * `{ action, document_id, category_id }`; field values are rebuilt from the
- * stored artifact, and the acting user is resolved from the Lark open_id (never
- * trusted from the payload).
- *
- * Must ACK within 3s. Confirm/Reject are pure D1 writes (no AI), so they run
- * inline and the response carries a result toast.
+ * the event webhook via `$platform/integrations/lark/verify`. The acting user is
+ * resolved from the Lark open_id (never trusted from the payload); routing data
+ * rides on the card `value`, edited field values on `form_value`.
  */
 
 const LARK_PROVIDER = 'lark';
@@ -39,6 +46,7 @@ interface CardAction {
 	action?: string;
 	document_id?: string;
 	category_id?: string;
+	project_id?: string;
 }
 
 /** Lark `{ toast: { type, content } }` response (card 2.0 callback). */
@@ -53,6 +61,21 @@ function readAction(body: Record<string, unknown>): CardAction | null {
 	const value = action?.value;
 	if (value && typeof value === 'object') return value as CardAction;
 	return null;
+}
+
+/** Selected option of a select_static (project picker) — `event.action.option`. */
+function readSelectedOption(body: Record<string, unknown>): string | undefined {
+	const event = body.event as Record<string, unknown> | undefined;
+	const action = (event?.action ?? body.action) as Record<string, unknown> | undefined;
+	return asString(action?.option);
+}
+
+/** Submitted form values of a form_submit (editable review) — `event.action.form_value`. */
+function readFormValue(body: Record<string, unknown>): Record<string, unknown> {
+	const event = body.event as Record<string, unknown> | undefined;
+	const action = (event?.action ?? body.action) as Record<string, unknown> | undefined;
+	const fv = action?.form_value;
+	return fv && typeof fv === 'object' ? (fv as Record<string, unknown>) : {};
 }
 
 /** Operator open_id across card 2.0 (`event.operator.open_id`) + legacy (`open_id`). */
@@ -128,6 +151,73 @@ export const POST: RequestHandler = async (event) => {
 		return toast('info', '操作正在处理或已完成。');
 	}
 	await env.KV.put(dedupKey, '1', { expirationTtl: ACTION_DEDUP_TTL });
+
+	// --- Conversational flow: project picked → run OCR/extract, push editable card ---
+	if (kind === 'pick_project') {
+		const projectId = readSelectedOption(body);
+		if (!projectId) return toast('error', '未获取到所选项目，请重新选择。');
+
+		// OCR + 2 LLM calls far exceed Lark's 3s ACK window → ACK now, process in
+		// the background, then push the editable review card to the user's DM.
+		const work = (async () => {
+			try {
+				const artifact = await processIntakeDocument(ctx, documentId);
+				if (!artifact.suggestedCategoryId) {
+					await sendInteractiveCard(
+						env,
+						openId,
+						'open_id',
+						buildNoticeCard('无法自动分类', '未能识别文档类别，请在 App 中处理。', 'red')
+					);
+					return;
+				}
+				const card = buildEditableReviewCard({
+					documentId,
+					categoryId: artifact.suggestedCategoryId,
+					fileName: artifact.originalFile.fileName,
+					documentType: artifact.documentType,
+					fields: (artifact.suggestedFields?.fields ?? {}) as Record<string, unknown>,
+					confidence: artifact.suggestedFields?.confidence,
+					projectId
+				});
+				await sendInteractiveCard(env, openId, 'open_id', card);
+			} catch (err) {
+				console.error('[lark] pick_project processing failed:', err);
+				await sendInteractiveCard(
+					env,
+					openId,
+					'open_id',
+					buildNoticeCard('识别失败', '处理文档时出错，请重试或在 App 中处理。', 'red')
+				).catch(() => {});
+			}
+		})();
+		const exec = event.platform?.ctx;
+		if (exec?.waitUntil) exec.waitUntil(work);
+		else await work;
+		return toast('info', '正在识别单据，请稍候…');
+	}
+
+	// --- Conversational flow: editable card submitted → persist edited fields ---
+	if (kind === 'approve') {
+		const categoryId = action.category_id;
+		const category = categoryId ? findCategoryById(categoryId) : undefined;
+		if (!category) return toast('error', '类别缺失，请重试或在 App 中处理。');
+		const projectId = action.project_id && action.project_id.trim() ? action.project_id : null;
+		const fields = readFormValue(body);
+
+		const result = await confirmInbox(ctx, {
+			documentId,
+			categoryId: category.id,
+			fields,
+			projectId,
+			actor: { id: resolved.id, email: resolved.email }
+		});
+		if (!result.ok) {
+			if (result.status === 409) return toast('info', '该文档已处理。');
+			return toast('error', `确认失败：${result.error}`);
+		}
+		return toast('success', '已确认并记账 ✅');
+	}
 
 	if (kind === 'reject') {
 		const intake = createDocumentIntakeService({ db: ctx.db, env: ctx.env, user: resolved });

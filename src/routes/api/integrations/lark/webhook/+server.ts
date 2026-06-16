@@ -11,7 +11,11 @@ import {
 	type GuardedCapabilityResult
 } from '$platform/ai/execute-capability';
 import { hashConfirmationPayload } from '$platform/workflow/payload-hash';
-import { sendTextMessage } from '$platform/integrations/lark/client';
+import {
+	sendTextMessage,
+	sendInteractiveCard,
+	downloadMessageResource
+} from '$platform/integrations/lark/client';
 import { parseLarkCommand, type LarkCommand } from '$platform/integrations/lark/commands';
 import {
 	asString,
@@ -21,6 +25,12 @@ import {
 	verifyCallbackToken
 } from '$platform/integrations/lark/verify';
 import {
+	buildUploadPromptCard,
+	buildProjectPickerCard,
+	buildNoticeCard,
+	type ProjectOption
+} from '$platform/integrations/lark/cards/finance-intake-cards';
+import {
 	createLeaveApi,
 	hrAgentManifest,
 	hrAgentAllowedCapabilities,
@@ -29,6 +39,11 @@ import {
 	resolveLeaveType,
 	type HrLlmIntent
 } from '$modules/hr';
+import { createDocumentIntakeService } from '$modules/document-intake';
+import { createProjectApi } from '$modules/project';
+
+/** Lark bot menu event_key that starts the finance document-intake flow. */
+const FINANCE_INTAKE_MENU_KEY = 'space_ocr_start';
 
 /**
  * Lark (Feishu) event webhook — HR leave assistant.
@@ -403,6 +418,170 @@ async function handleLarkMessage(event: RequestEvent, body: Record<string, unkno
 	await send(`暂不支持该操作。\n${HELP_TEXT}`);
 }
 
+// ===========================================================================
+// Finance document-intake flow (coexists with HR; never touches HR logic).
+// Entry points: the "财务文件录入" bot menu (event_key space_ocr_start) and any
+// image/file message. The flow is stateless — each card embeds the context
+// (documentId / categoryId / projectId) the next step needs.
+// ===========================================================================
+
+/** Bot custom-menu click → resolve user → prompt for a document upload. */
+async function handleMenuEvent(event: RequestEvent, body: Record<string, unknown>): Promise<void> {
+	const env = event.platform?.env;
+	if (!env) return;
+
+	const eventObj = body.event as Record<string, unknown> | undefined;
+	const eventKey = asString(eventObj?.event_key);
+	if (eventKey !== FINANCE_INTAKE_MENU_KEY) {
+		console.log(`[lark] unhandled menu event_key: ${eventKey ?? '(none)'}`);
+		return;
+	}
+	const operator = eventObj?.operator as Record<string, unknown> | undefined;
+	const operatorId = operator?.operator_id as Record<string, unknown> | undefined;
+	const openId = asString(operatorId?.open_id);
+	if (!openId) {
+		console.log('[lark] menu event missing operator open_id');
+		return;
+	}
+
+	// Menu events carry no chat_id — reply to the user's DM via open_id.
+	const ctx = await createModuleContext(event);
+	const resolved = await resolveUserByExternalIdentity(ctx.db, LARK_PROVIDER, openId);
+	const card = resolved
+		? buildUploadPromptCard()
+		: buildNoticeCard('未绑定账号', `你的 Lark 账号尚未绑定 MiniERP 账号。open_id: ${openId}`, 'red');
+	await sendInteractiveCard(env, openId, 'open_id', card).catch((e) =>
+		console.error('[lark] send card failed:', e)
+	);
+}
+
+/** Image/file message → download → store as artifact → project-picker card. */
+async function handleFinanceFileMessage(
+	event: RequestEvent,
+	body: Record<string, unknown>
+): Promise<void> {
+	const env = event.platform?.env;
+	if (!env) return;
+
+	const messageEvent = body.event as Record<string, unknown> | undefined;
+	const message = messageEvent?.message as Record<string, unknown> | undefined;
+	const sender = messageEvent?.sender as Record<string, unknown> | undefined;
+	const senderId = sender?.sender_id as Record<string, unknown> | undefined;
+
+	const openId = asString(senderId?.open_id);
+	const chatId = asString(message?.chat_id);
+	const messageId = asString(message?.message_id);
+	const messageType = asString(message?.message_type);
+	if (!chatId || !openId || !messageId) {
+		console.log('[lark] finance file message missing chat_id/open_id/message_id; skipped');
+		return;
+	}
+	const sendText = (text: string) =>
+		sendTextMessage(env, chatId, text).catch((e) => console.error('[lark] send failed:', e));
+
+	const ctx = await createModuleContext(event);
+	const resolved = await resolveUserByExternalIdentity(ctx.db, LARK_PROVIDER, openId);
+	if (!resolved) {
+		await sendText(`你的 Lark 账号尚未绑定 MiniERP 账号。open_id: ${openId}`);
+		return;
+	}
+	const mc: ModuleContext = { ...ctx, user: resolved };
+
+	// Resolve file_key + download type from the message content.
+	let fileKey: string | undefined;
+	let fileName: string;
+	let resourceType: 'image' | 'file';
+	try {
+		const content = JSON.parse(asString(message?.content) ?? '{}') as {
+			image_key?: string;
+			file_key?: string;
+			file_name?: string;
+		};
+		if (messageType === 'image') {
+			resourceType = 'image';
+			fileKey = content.image_key;
+			fileName = `lark-image-${messageId}.jpg`;
+		} else {
+			resourceType = 'file';
+			fileKey = content.file_key;
+			fileName = content.file_name ?? `lark-file-${messageId}`;
+		}
+	} catch {
+		await sendText('无法解析文件消息。');
+		return;
+	}
+	if (!fileKey) {
+		await sendText('未找到文件，请重新发送。');
+		return;
+	}
+
+	let bytes: Uint8Array;
+	let mimeType: string;
+	try {
+		const dl = await downloadMessageResource(env, messageId, fileKey, resourceType);
+		bytes = dl.bytes;
+		mimeType = dl.mimeType;
+	} catch (err) {
+		console.error('[lark] resource download failed:', err);
+		await sendText('下载文件失败，请稍后重试。');
+		return;
+	}
+
+	let documentId: string;
+	try {
+		const intake = createDocumentIntakeService({ db: ctx.db, env, user: resolved });
+		const artifact = await intake.createDocumentFromUpload({
+			tenantId: 'default',
+			uploadedBy: resolved.id,
+			uploadedFrom: 'lark',
+			fileName,
+			mimeType,
+			body: bytes,
+			sizeBytes: bytes.byteLength
+		});
+		documentId = artifact.id;
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : '存储失败';
+		await sendText(`文件存储失败：${msg}`);
+		return;
+	}
+
+	// Offer the project picker (active projects; the card caps the list length).
+	let projects: ProjectOption[] = [];
+	try {
+		const rows = await createProjectApi(mc).list({ status: 'active' });
+		projects = rows.map((r) => ({
+			id: r.project.id,
+			name: r.project.name,
+			customerName: r.customerName
+		}));
+	} catch (err) {
+		console.error('[lark] project list failed:', err);
+	}
+
+	await sendInteractiveCard(
+		env,
+		chatId,
+		'chat_id',
+		buildProjectPickerCard(documentId, projects)
+	).catch((e) => console.error('[lark] send card failed:', e));
+}
+
+/** Route an inbound message: image/file → finance intake; else → HR assistant. */
+async function handleInboundMessage(
+	event: RequestEvent,
+	body: Record<string, unknown>
+): Promise<void> {
+	const messageEvent = body.event as Record<string, unknown> | undefined;
+	const message = messageEvent?.message as Record<string, unknown> | undefined;
+	const messageType = asString(message?.message_type);
+	if (messageType === 'image' || messageType === 'file') {
+		await handleFinanceFileMessage(event, body);
+		return;
+	}
+	await handleLarkMessage(event, body);
+}
+
 export const POST: RequestHandler = async (event) => {
 	const tokenResult = resolveVerificationToken(event.platform?.env);
 	if ('response' in tokenResult) return tokenResult.response;
@@ -433,7 +612,10 @@ export const POST: RequestHandler = async (event) => {
 	const header = body.header as Record<string, unknown> | undefined;
 	const eventType = asString(header?.event_type) ?? 'unknown';
 
-	if (eventType === 'im.message.receive_v1' && event.platform?.env) {
+	const isMessage = eventType === 'im.message.receive_v1';
+	const isMenu = eventType === 'application.bot.menu_v6';
+
+	if ((isMessage || isMenu) && event.platform?.env) {
 		const kvEnv = event.platform.env;
 
 		// Inbound dedup: Lark re-delivers the same event on retry (same event_id).
@@ -450,11 +632,11 @@ export const POST: RequestHandler = async (event) => {
 			await kvEnv.KV.put(seenKey, '1', { expirationTtl: LARK_EVENT_DEDUP_TTL });
 		}
 
-		console.log(`[lark] handling event ${dedupId ?? '(no id)'}`);
-		// ACK fast; do the work (identity resolve, classify, capability, reply) after
+		console.log(`[lark] handling ${eventType} ${dedupId ?? '(no id)'}`);
+		// ACK fast; do the work (identity resolve, download, classify, reply) after
 		// responding. waitUntil keeps the isolate alive for the async work.
-		const work = handleLarkMessage(event, body).catch((err) =>
-			console.error('[lark] handler error:', err)
+		const work = (isMenu ? handleMenuEvent(event, body) : handleInboundMessage(event, body)).catch(
+			(err) => console.error('[lark] handler error:', err)
 		);
 		const ctx = event.platform?.ctx;
 		if (ctx?.waitUntil) ctx.waitUntil(work);

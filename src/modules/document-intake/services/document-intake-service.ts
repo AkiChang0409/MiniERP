@@ -66,7 +66,7 @@ export interface DocumentIntakeServiceContext {
 export interface CreateDocumentFromUploadInput {
 	tenantId?: string;
 	uploadedBy: string;
-	uploadedFrom?: 'ai_panel' | 'finance_workspace' | 'task_mode';
+	uploadedFrom?: 'ai_panel' | 'finance_workspace' | 'task_mode' | 'lark';
 	fileName: string;
 	mimeType: string;
 	body: ArrayBuffer | Uint8Array;

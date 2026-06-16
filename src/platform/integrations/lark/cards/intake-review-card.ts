@@ -72,7 +72,7 @@ const FIELD_LABELS: Record<string, string> = {
 const HIDDEN_KEYS = new Set(['project_id', 'projectId']);
 const MAX_FIELDS = 14;
 
-function prettifyKey(key: string): string {
+export function prettifyKey(key: string): string {
 	const snake = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 	return (
 		FIELD_LABELS[snake] ??
@@ -82,7 +82,7 @@ function prettifyKey(key: string): string {
 }
 
 /** Human-readable category label from a dotted category id. */
-function prettifyCategory(categoryId: string | null, documentType?: string): string {
+export function prettifyCategory(categoryId: string | null, documentType?: string): string {
 	if (categoryId) {
 		const leaf = categoryId.split('.').pop() ?? categoryId;
 		return leaf.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
