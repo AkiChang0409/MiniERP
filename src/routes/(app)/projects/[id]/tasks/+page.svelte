@@ -150,7 +150,13 @@
 	const parse = (iso: string | null | undefined) => {
 		if (!iso) return null;
 		const t = Date.parse(iso);
-		return Number.isNaN(t) ? null : t;
+		if (Number.isNaN(t)) return null;
+		const d = new Date(t);
+		return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+	};
+	const todayStart = () => {
+		const d = new Date();
+		return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 	};
 
 	// Window = min(start/baseline) - 7d .. max(end/baseline) + 14d, padded.
@@ -179,7 +185,7 @@
 				if (p != null) hi = Math.max(hi, p);
 			}
 		}
-		const today = Date.now();
+		const today = todayStart();
 		if (lo === Infinity) lo = today - 30 * ONE_DAY;
 		if (hi === -Infinity) hi = today + 90 * ONE_DAY;
 		lo = Math.min(lo, today);
@@ -194,7 +200,10 @@
 		if (t == null) return 0;
 		return Math.round((t - windowMs.from) / ONE_DAY);
 	};
-	const todayX = $derived((Math.round((Date.now() - windowMs.from) / ONE_DAY)) * pxPerDay);
+	const inclusiveDayWidth = (startIso: string | null, endIso: string | null) => {
+		return Math.max(1, dayOffset(endIso) - dayOffset(startIso) + 1);
+	};
+	const todayX = $derived((Math.round((todayStart() - windowMs.from) / ONE_DAY)) * pxPerDay);
 
 	const TICK_HEIGHT = 36;
 	const ROW_HEIGHT = 36;
@@ -258,6 +267,8 @@
 		);
 
 	type Group = { id: string; label: string; color: string | null; tasks: Task[] };
+	type StageRange = { id: string; label: string; color: string; startDay: number; endDay: number };
+	const fallbackStageColors = ['#387234', '#0284c7', '#d97706', '#7c3aed', '#be123c', '#0f766e'];
 	const groups = $derived.by<Group[]>(() => {
 		if (viewMode === 'assignee') {
 			const byUser = new Map<string, Task[]>();
@@ -359,6 +370,38 @@
 		return out;
 	});
 
+	const stageRanges = $derived.by<StageRange[]>(() => {
+		const byId = new Map(
+			stages.map((s, i) => [
+				s.id,
+				{ stage: s, fallback: fallbackStageColors[i % fallbackStageColors.length] }
+			])
+		);
+		const bounds = new Map<string, { start: number; end: number }>();
+		for (const t of tasks) {
+			if (!t.workflowStageId || !byId.has(t.workflowStageId) || !t.startDate || !t.endDate) continue;
+			const start = dayOffset(t.startDate);
+			const end = dayOffset(t.endDate);
+			const prev = bounds.get(t.workflowStageId);
+			bounds.set(t.workflowStageId, {
+				start: prev ? Math.min(prev.start, start) : start,
+				end: prev ? Math.max(prev.end, end) : end
+			});
+		}
+		return [...bounds.entries()]
+			.map(([id, bound]) => {
+				const meta = byId.get(id)!;
+				return {
+					id,
+					label: meta.stage.name,
+					color: meta.stage.color ?? meta.fallback,
+					startDay: bound.start,
+					endDay: bound.end
+				};
+			})
+			.sort((a, b) => a.startDay - b.startDay || a.endDay - b.endDay);
+	});
+
 	// Project summary bar geometry + overall completion.
 	const projectBar = $derived.by(() => {
 		if (!project) return null;
@@ -373,7 +416,15 @@
 		const total = tasks.length;
 		const done = tasks.filter((t) => t.status === 'completed').length;
 		const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-		return { startDay, endDay, urg, pct, total, done };
+		return {
+			startDay,
+			endDay,
+			widthDays: inclusiveDayWidth(project.startDate ?? project.createdAt, project.deadline ?? project.endDate),
+			urg,
+			pct,
+			total,
+			done
+		};
 	});
 	const chartHeight = $derived(
 		rows.length === 0 ? TICK_HEIGHT + ROW_HEIGHT : rows[rows.length - 1].y + ROW_HEIGHT
@@ -822,11 +873,10 @@
 	{@const lf = dragSelf && drag?.mode === 'resize-left' ? pv : 0}
 	{@const rt = dragSelf && drag?.mode === 'resize-right' ? pv : 0}
 	{@const sDay = dayOffset(t.startDate)}
-	{@const eDay = dayOffset(t.endDate)}
 	{@const bx = dayOffset(t.baselineStart) * pxPerDay}
-	{@const bw = Math.max(2, (dayOffset(t.baselineEnd) - dayOffset(t.baselineStart)) * pxPerDay)}
+	{@const bw = Math.max(2, inclusiveDayWidth(t.baselineStart, t.baselineEnd) * pxPerDay)}
 	{@const tx = (sDay + mv + lf) * pxPerDay}
-	{@const tw = Math.max(6, (eDay - sDay + rt - lf) * pxPerDay)}
+	{@const tw = Math.max(6, (inclusiveDayWidth(t.startDate, t.endDate) + rt - lf) * pxPerDay)}
 	{@const bufW = (t.bufferDays ?? 0) * pxPerDay}
 	{#if t.baselineStart && t.baselineEnd}
 		<rect x={bx} y={rowY + ROW_HEIGHT / 2 + 5} width={bw} height="4" rx="2" fill="#cbd5e1" fill-opacity="0.7"></rect>
@@ -1050,7 +1100,7 @@
 								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#f8fafc"></rect>
 								{#if projectBar}
 									{@const px = Math.max(0, projectBar.startDay * pxPerDay)}
-									{@const pw = Math.max(8, (projectBar.endDay - projectBar.startDay) * pxPerDay)}
+									{@const pw = Math.max(8, projectBar.widthDays * pxPerDay)}
 									{@const py = row.y + (ROW_HEIGHT - 20) / 2}
 									<rect x={px} y={py} width={pw} height="20" rx="5" fill={projectBar.urg.soft} stroke={projectBar.urg.border} stroke-width="1"></rect>
 									<rect x={px} y={py} width={Math.max(0, (pw * projectBar.pct) / 100)} height="20" rx="5" fill={projectBar.urg.fill} fill-opacity="0.8"></rect>
@@ -1063,7 +1113,7 @@
 								<rect x="0" y={row.y} width={chartWidth} height={ROW_HEIGHT} fill="#f1f5f9"></rect>
 								{#if gt.length > 0 && Number.isFinite(gStart) && Number.isFinite(gEnd) && collapsed.has(row.group.id)}
 									{@const lx = Math.max(0, gStart * pxPerDay)}
-									{@const lw = Math.max(8, (gEnd - gStart) * pxPerDay)}
+									{@const lw = Math.max(8, (gEnd - gStart + 1) * pxPerDay)}
 									<rect x={lx} y={row.y + (ROW_HEIGHT - 8) / 2} width={lw} height="8" rx="4" fill={row.group.color ?? '#94a3b8'} fill-opacity="0.45"></rect>
 								{/if}
 							{:else}
@@ -1078,6 +1128,15 @@
 									role="presentation"
 									onpointerdown={(e) => beginCreateDrag(e, row.group, row.y)}
 								></rect>
+								{#if viewMode === 'assignee'}
+									{#each stageRanges as range (range.id)}
+										{@const sx = Math.max(0, range.startDay * pxPerDay)}
+										{@const sw = Math.max(1, (range.endDay - range.startDay + 1) * pxPerDay)}
+										<rect x={sx} y={row.y} width={sw} height={ROW_HEIGHT} fill={range.color} fill-opacity="0.065">
+											<title>{range.label}</title>
+										</rect>
+									{/each}
+								{/if}
 								{#each row.tasks as t (t.id)}
 									{@render taskBar(t, row.y)}
 								{/each}
@@ -1107,7 +1166,7 @@
 						{#if createDrag}
 							{@const lo = Math.min(createDrag.startDay, createDrag.curDay)}
 							{@const hi = Math.max(createDrag.startDay, createDrag.curDay)}
-							<rect x={lo * pxPerDay} y={createDrag.y + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={Math.max(2, (hi - lo) * pxPerDay)} height={BAR_HEIGHT} rx="3" fill="#86efac" fill-opacity="0.5" stroke="#16a34a" stroke-dasharray="3 2"></rect>
+							<rect x={lo * pxPerDay} y={createDrag.y + (ROW_HEIGHT - BAR_HEIGHT) / 2} width={Math.max(2, (hi - lo + 1) * pxPerDay)} height={BAR_HEIGHT} rx="3" fill="#86efac" fill-opacity="0.5" stroke="#16a34a" stroke-dasharray="3 2"></rect>
 						{/if}
 						<defs>
 							<marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">

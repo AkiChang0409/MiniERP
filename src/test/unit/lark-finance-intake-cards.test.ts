@@ -50,6 +50,24 @@ describe('buildProjectPickerCard', () => {
 		expect((select.options as unknown[]).length).toBe(50);
 		expect(JSON.stringify(card.elements)).toContain('仅显示前');
 	});
+
+	it('shows an explicit empty-state instead of an empty dropdown', () => {
+		const card = buildProjectPickerCard('doc-1', []);
+		const action = findByTag(card.elements as unknown, 'action');
+		expect(action).toBeUndefined();
+		expect(JSON.stringify(card.elements)).toContain('没有找到可选项目');
+	});
+
+	it('truncates long option labels for card rendering', () => {
+		const card = buildProjectPickerCard('doc-1', [
+			{ id: 'p1', name: 'A'.repeat(100), customerName: 'Customer' }
+		]);
+		const action = findByTag(card.elements as unknown, 'action');
+		const select = ((action?.actions ?? []) as Array<Record<string, unknown>>)[0];
+		const [option] = select.options as Array<{ text: { content: string } }>;
+		expect(option.text.content.length).toBeLessThanOrEqual(80);
+		expect(option.text.content.endsWith('...')).toBe(true);
+	});
 });
 
 describe('buildEditableReviewCard', () => {

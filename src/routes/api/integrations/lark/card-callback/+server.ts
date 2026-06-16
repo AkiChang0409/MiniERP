@@ -67,7 +67,11 @@ function readAction(body: Record<string, unknown>): CardAction | null {
 function readSelectedOption(body: Record<string, unknown>): string | undefined {
 	const event = body.event as Record<string, unknown> | undefined;
 	const action = (event?.action ?? body.action) as Record<string, unknown> | undefined;
-	return asString(action?.option);
+	const option = action?.option;
+	if (typeof option === 'object' && option) {
+		return asString((option as Record<string, unknown>).value);
+	}
+	return asString(option) ?? asString(action?.selected_option);
 }
 
 /** Submitted form values of a form_submit (editable review) — `event.action.form_value`. */

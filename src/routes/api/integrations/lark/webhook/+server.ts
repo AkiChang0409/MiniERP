@@ -44,6 +44,13 @@ import { createProjectApi } from '$modules/project';
 
 /** Lark bot menu event_key that starts the finance document-intake flow. */
 const FINANCE_INTAKE_MENU_KEY = 'space_ocr_start';
+const PROJECT_PICKER_QUERY_LIMIT = 200;
+const CLOSED_PROJECT_STATUSES = new Set(['completed', 'archived', 'terminated', 'cancelled', 'canceled']);
+
+function isSelectableProjectStatus(status: unknown): boolean {
+	const normalized = asString(status)?.trim().toLowerCase();
+	return !normalized || !CLOSED_PROJECT_STATUSES.has(normalized);
+}
 
 /**
  * Lark (Feishu) event webhook — HR leave assistant.
@@ -546,15 +553,20 @@ async function handleFinanceFileMessage(
 		return;
 	}
 
-	// Offer the project picker (active projects; the card caps the list length).
+	// Offer the project picker. Project status vocabulary has drifted across
+	// releases (`active`, `ongoing`, `under_review`, `unassigned`), so filter out
+	// terminal states instead of requiring legacy `active`.
 	let projects: ProjectOption[] = [];
 	try {
-		const rows = await createProjectApi(mc).list({ status: 'active' });
-		projects = rows.map((r) => ({
-			id: r.project.id,
-			name: r.project.name,
-			customerName: r.customerName
-		}));
+		const rows = await createProjectApi(mc).list({ pageSize: PROJECT_PICKER_QUERY_LIMIT });
+		projects = rows
+			.filter((r) => isSelectableProjectStatus(r.project.status))
+			.map((r) => ({
+				id: r.project.id,
+				name: r.project.name,
+				customerName: r.customerName
+			}));
+		console.log(`[lark] project picker rows=${rows.length} selectable=${projects.length}`);
 	} catch (err) {
 		console.error('[lark] project list failed:', err);
 	}

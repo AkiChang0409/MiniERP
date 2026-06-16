@@ -54,10 +54,21 @@ export function buildNoticeCard(title: string, content: string, template = 'blue
 
 /**
  * Project picker: a select_static dropdown. On selection Lark fires
- * card.action.trigger with `event.action.option` = chosen projectId and
- * `event.action.value` = `{ action:'pick_project', document_id }`.
+ * card.action.trigger with `event.action.option` containing the chosen
+ * projectId and `event.action.value` = `{ action:'pick_project', document_id }`.
  */
-const MAX_PROJECT_OPTIONS = 50;
+export const MAX_PROJECT_OPTIONS = 50;
+
+function compactLabel(parts: Array<string | null | undefined>): string {
+	return parts
+		.map((part) => part?.trim())
+		.filter((part): part is string => Boolean(part))
+		.join(' · ');
+}
+
+function truncateLabel(label: string): string {
+	return label.length > 80 ? `${label.slice(0, 77)}...` : label;
+}
 
 export function buildProjectPickerCard(
 	documentId: string,
@@ -66,7 +77,7 @@ export function buildProjectPickerCard(
 	const options = projects.slice(0, MAX_PROJECT_OPTIONS).map((p) => ({
 		text: {
 			tag: 'plain_text',
-			content: p.customerName ? `${p.name} · ${p.customerName}` : p.name
+			content: truncateLabel(compactLabel([p.name, p.customerName]))
 		},
 		value: p.id
 	}));
@@ -76,8 +87,15 @@ export function buildProjectPickerCard(
 		{
 			tag: 'div',
 			text: { tag: 'lark_md', content: '单据已收到 ✅。请选择要归入的**项目**：' }
-		},
-		{
+		}
+	];
+	if (options.length === 0) {
+		elements.push({
+			tag: 'note',
+			elements: [{ tag: 'plain_text', content: '没有找到可选项目。请先在 MiniERP 中创建或恢复项目。' }]
+		});
+	} else {
+		elements.push({
 			tag: 'action',
 			actions: [
 				{
@@ -87,8 +105,8 @@ export function buildProjectPickerCard(
 					options
 				}
 			]
-		}
-	];
+		});
+	}
 	if (truncated) {
 		elements.push({
 			tag: 'note',
