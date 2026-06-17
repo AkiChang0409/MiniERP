@@ -122,21 +122,29 @@ export class ProjectTaskService {
 	}
 
 	/**
-	 * Dependency-driven blocked rule. A task in a pre-work state
-	 * (unassigned / ongoing / blocked) is `blocked` while any of its blocking
-	 * predecessors is not yet `completed`; it auto-clears (→ ongoing if it has an
-	 * assignee, else unassigned) once they finish. Submitted/completed tasks are
-	 * never auto-blocked. Iterates to a fixpoint so dependency CHAINS settle in a
-	 * single call, and only persists the rows that actually changed.
+	 * System-driven derived status for tasks in a pre-work state
+	 * (unassigned / ongoing / blocked) — submitted/completed tasks are never
+	 * auto-changed. Precedence per task:
+	 *   1. has an unfinished blocking predecessor          → `blocked`
+	 *   2. assigned AND its start date has arrived (today ≥ start) → `ongoing`
+	 *      (and stamps `actualStart` the first time)
+	 *   3. otherwise (no assignee, or not started yet)     → `unassigned`
+	 *
+	 * Key rule: **assignment alone does NOT make a task ongoing** — work only
+	 * "starts" when the timeline reaches the task. Because there is no cron, this
+	 * runs lazily on every task read (`list`) plus on edits / dependency changes /
+	 * record-gate moves, so a future task flips to ongoing the first time someone
+	 * opens the board on/after its start date. Iterates to a fixpoint so blocked
+	 * dependency CHAINS settle in one call; only changed rows are persisted.
 	 */
-	async recomputeBlocked(projectId: string) {
+	async recomputeDerivedStatus(projectId: string) {
 		const [tasks, deps] = await Promise.all([
 			this.taskRepo.listForProject(projectId),
 			this.depRepo.listForProject(projectId)
 		]);
+		const todayIso = new Date().toISOString().slice(0, 10);
 		const eligible = (s: string) => s === 'unassigned' || s === 'ongoing' || s === 'blocked';
 		const status = new Map(tasks.map((t) => [t.id, t.status as string]));
-		const assignee = new Map(tasks.map((t) => [t.id, t.assigneeId]));
 
 		let changed = true;
 		let guard = 0;
@@ -151,7 +159,8 @@ export class ProjectTaskService {
 						d.isBlocking &&
 						(status.get(d.fromTaskId) ?? 'completed') !== 'completed'
 				);
-				const target = blocked ? 'blocked' : assignee.get(t.id) ? 'ongoing' : 'unassigned';
+				const started = !!t.assigneeId && !!t.startDate && t.startDate <= todayIso;
+				const target = blocked ? 'blocked' : started ? 'ongoing' : 'unassigned';
 				if (target !== s) {
 					status.set(t.id, target);
 					changed = true;
@@ -162,9 +171,12 @@ export class ProjectTaskService {
 		for (const t of tasks) {
 			const next = status.get(t.id)!;
 			if (next === t.status) continue;
-			await this.taskRepo.update(t.id, { status: next });
-			// Surface newly-blocked tasks on the project timeline (unblock is
-			// intentionally not audited — it's derivable and would be noisy).
+			const patch: Record<string, unknown> = { status: next };
+			// Stamp the real start the first time work actually begins.
+			if (next === 'ongoing' && !t.actualStart) patch.actualStart = todayIso;
+			await this.taskRepo.update(t.id, patch);
+			// Surface newly-blocked tasks on the project timeline (unblock / start
+			// are derivable and intentionally not audited — would be noisy).
 			if (next === 'blocked') {
 				await writeTaskAudit(this.ctx, {
 					projectId,
@@ -205,6 +217,9 @@ export class ProjectTaskService {
 	async list(projectId: string) {
 		const project = await this.projectRepo.findById(projectId);
 		if (!project) throw new NotFoundError('Project', projectId);
+		// Lazy time-trigger (no cron): bring derived statuses up to date so tasks
+		// whose start date has arrived flip to `ongoing` when the board is opened.
+		await this.recomputeDerivedStatus(projectId);
 		const [tasks, deps] = await Promise.all([
 			this.taskRepo.listForProject(projectId),
 			this.depRepo.listForProject(projectId)
@@ -245,10 +260,11 @@ export class ProjectTaskService {
 			parentTaskId: input.parentTaskId ?? null,
 			name: input.name.trim(),
 			description: input.description ?? null,
-			// Status is system-managed, never client-set: a task starts `ongoing`
-			// the moment it has an assignee, otherwise `unassigned`. Submission /
-			// approval / blocking-dependency rules drive every later transition.
-			status: input.assigneeId ? 'ongoing' : 'unassigned',
+			// Status is system-managed, never client-set. Tasks always start
+			// `unassigned`; `recomputeDerivedStatus` flips to `ongoing` only once
+			// the task is assigned AND its start date has arrived (not on assignment
+			// alone), or to `blocked` when a blocking predecessor is unfinished.
+			status: 'unassigned',
 			startDate: input.startDate ?? null,
 			endDate: input.endDate ?? null,
 			assigneeId: input.assigneeId ?? null,
@@ -285,8 +301,8 @@ export class ProjectTaskService {
 		if (typeof update.name === 'string') update.name = update.name.trim();
 
 		// Status is system-managed: never accept it (or completedAt) from a
-		// generic edit. Transitions come from assignment (here), submission,
-		// approval, and the blocking-dependency rule (recomputeBlocked).
+		// generic edit. Assignment / start-date / blocking-dependency all feed the
+		// derived-status rule below; submission & approval move it elsewhere.
 		delete (update as { status?: unknown }).status;
 		delete (update as { completedAt?: unknown }).completedAt;
 
@@ -297,27 +313,13 @@ export class ProjectTaskService {
 			update.kind = patch.isMilestone ? 'milestone' : 'task';
 		}
 
-		// Assignment drives unassigned ↔ ongoing (only from those pre-work states;
-		// a submitted/completed task keeps its status until the workflow moves it).
-		if (patch.assigneeId !== undefined) {
-			const nowIso = new Date().toISOString();
-			if (patch.assigneeId && existing.status === 'unassigned') {
-				update.status = 'ongoing';
-				if (!existing.actualStart && patch.actualStart === undefined) {
-					update.actualStart = nowIso.slice(0, 10);
-				}
-			} else if (
-				!patch.assigneeId &&
-				(existing.status === 'ongoing' || existing.status === 'blocked')
-			) {
-				update.status = 'unassigned';
-			}
-		}
 		await this.taskRepo.update(taskId, update);
 
-		// Re-derive blocked across the project (this task's assignment may have
-		// changed, which affects its own blocked eligibility).
-		await this.recomputeBlocked(projectId);
+		// Re-derive status across the project: changing assignee / start date / a
+		// dependency can flip this task (and its dependents) between unassigned /
+		// ongoing / blocked. Assignment alone never forces `ongoing` — the start
+		// date must have arrived.
+		await this.recomputeDerivedStatus(projectId);
 
 		// Audit any date move into the schedule-change log (drives "this task
 		// slipped N times / why" + the task history timeline). Only when a date
@@ -393,7 +395,7 @@ export class ProjectTaskService {
 			lagDays: input.lagDays ?? 0
 		});
 		// A new blocking edge can immediately block the successor.
-		await this.recomputeBlocked(input.projectId);
+		await this.recomputeDerivedStatus(input.projectId);
 		return { id };
 	}
 
@@ -401,7 +403,7 @@ export class ProjectTaskService {
 		await this.assertCanEdit(projectId);
 		await this.depRepo.softDelete(depId);
 		// Removing an edge may unblock the former successor.
-		await this.recomputeBlocked(projectId);
+		await this.recomputeDerivedStatus(projectId);
 		return { id: depId };
 	}
 

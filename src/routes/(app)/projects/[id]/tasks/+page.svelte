@@ -143,7 +143,7 @@
 
 	// --------------------------------------------------------------- timeline
 	type Scale = 'day' | 'week' | 'month';
-	let scale = $state<Scale>('week');
+	let scale = $state<Scale>('day');
 	const PX_PER_DAY: Record<Scale, number> = { day: 30, week: 11, month: 4 };
 	const pxPerDay = $derived(PX_PER_DAY[scale]);
 
@@ -207,8 +207,8 @@
 	const todayX = $derived((Math.round((todayStart() - windowMs.from) / ONE_DAY)) * pxPerDay);
 
 	const TICK_HEIGHT = 36;
-	const ROW_HEIGHT = 36;
-	const BAR_HEIGHT = 15;
+	const ROW_HEIGHT = 28;
+	const BAR_HEIGHT = 12;
 
 	const ticks = $derived.by(() => {
 		const out: Array<{ x: number; label: string; major: boolean }> = [];
@@ -713,11 +713,13 @@
 	const currentUser = $derived(
 		(data.user as { id: string; roles?: string[] } | null | undefined) ?? null
 	);
+	// Reviewer = the project's PM (its owner) + org admins/owners. Holding the
+	// global `project_manager` role does NOT make you this project's reviewer.
 	const canManage = $derived.by(() => {
 		const u = currentUser;
 		if (!u) return false;
 		const roles = u.roles ?? [];
-		if (roles.some((r) => r === 'owner' || r === 'admin' || r === 'project_manager')) return true;
+		if (roles.some((r) => r === 'owner' || r === 'admin')) return true;
 		return (data.project as { ownerId?: string } | null)?.ownerId === u.id;
 	});
 
@@ -1223,7 +1225,7 @@
 	<section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
 			<div class="flex">
 				<!-- Left: task list -->
-				<div class="w-72 shrink-0 border-r border-slate-200 bg-slate-50/50">
+				<div class="w-56 shrink-0 border-r border-slate-200 bg-slate-50/50">
 					<div class="flex h-9 items-center border-b border-slate-200 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
 						{viewMode === 'assignee' ? 'Project · Assignee' : 'Project · Stage · Task'}
 					</div>
@@ -1267,14 +1269,14 @@
 								style={`height:${ROW_HEIGHT}px`}
 								onclick={() => openEdit(t)}
 							>
-								<div class="flex items-center gap-1.5">
+								<div class="flex items-center gap-1.5 leading-tight">
 									{#if t.kind === 'milestone'}<span class="text-amber-500">◆</span>{/if}
 									<span class="truncate text-xs font-medium text-slate-800">{t.name}</span>
 									{#if t.outsourcedPartnerId || t.subProjectId}<span class="shrink-0 text-violet-500" title="Outsourced / sub-project">⇢</span>{/if}
 									{#if criticalPath.has(t.id)}<span class="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" title="Critical path"></span>{/if}
 									{#if conflictedTaskIds.has(t.id)}<span class="ml-auto shrink-0 text-rose-500" title="Has a conflict">⚠</span>{/if}
 								</div>
-								<p class="truncate text-[10px] text-slate-400">
+								<p class="truncate text-[10px] leading-tight text-slate-400">
 									{viewMode === 'assignee'
 										? (t.startDate ?? '') + (t.endDate ? ` → ${t.endDate}` : '')
 										: (t.assigneeName ?? t.assigneeEmail ?? '— unassigned —')}{t.estimatedHours ? ` · ${t.estimatedHours}h` : ''}
@@ -1298,14 +1300,13 @@
 							</pattern>
 						</defs>
 
-						<!-- ticks -->
+						<!-- date axis header (labels only; full-height grid is drawn as an
+						     overlay below so row fills can't paint over it) -->
 						<rect x="0" y="0" width={chartWidth} height={TICK_HEIGHT} fill="#f8fafc"></rect>
 						{#each ticks as tick}
-							<line x1={tick.x} x2={tick.x} y1="0" y2={chartHeight} stroke={tick.major ? '#cbd5e1' : '#eef2f6'} stroke-width={tick.major ? 1 : 0.5}></line>
 							<text x={tick.x + 3} y={22} font-size="10" fill={tick.major ? '#475569' : '#94a3b8'}>{tick.label}</text>
 						{/each}
 						{#if todayX >= 0 && todayX <= chartWidth}
-							<line x1={todayX} x2={todayX} y1="0" y2={chartHeight} stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 2"></line>
 							<text x={todayX + 3} y={12} font-size="9" fill="#16a34a" font-weight="600">Today</text>
 						{/if}
 
@@ -1376,6 +1377,34 @@
 								{/if}
 							{/if}
 						{/each}
+
+						<!-- grid overlay: full-height vertical lines (every day at day-scale)
+						     + the Today marker, on TOP of row fills so they stay visible.
+						     pointer-events:none keeps the drag-to-create surface working. -->
+						<g pointer-events="none">
+							{#each ticks as tick}
+								<line
+									x1={tick.x}
+									x2={tick.x}
+									y1={TICK_HEIGHT}
+									y2={chartHeight}
+									stroke={tick.major ? '#cbd5e1' : '#e2e8f0'}
+									stroke-width={tick.major ? 1 : 0.75}
+									stroke-dasharray={tick.major ? '0' : '2 3'}
+								></line>
+							{/each}
+							{#if todayX >= 0 && todayX <= chartWidth}
+								<line
+									x1={todayX}
+									x2={todayX}
+									y1="0"
+									y2={chartHeight}
+									stroke="#16a34a"
+									stroke-width="1.5"
+									stroke-dasharray="4 3"
+								></line>
+							{/if}
+						</g>
 
 						<!-- drag-to-create preview -->
 						{#if createDrag}

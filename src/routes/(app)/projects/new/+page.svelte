@@ -470,7 +470,7 @@
 			<h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">People</h3>
 			<div class="grid gap-4 md:grid-cols-2">
 				<label class="space-y-1 text-sm">
-					<span class="text-slate-700">Owner</span>
+					<span class="text-slate-700">Owner (Project Manager · 审核人)</span>
 					{#if data.canAssignOwner}
 						<select
 							name="ownerId"

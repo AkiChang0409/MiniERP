@@ -94,6 +94,26 @@ export class ProjectQmsService {
 		}
 	}
 
+	/** Org-level oversight roles (NOT the same as "PM of a project"). */
+	private isOrgAdmin(): boolean {
+		return (this.user.roles ?? []).some((r) => r === 'owner' || r === 'admin');
+	}
+
+	/**
+	 * A task's reviewer is the PROJECT's PM — i.e. its `ownerId` (appointed via
+	 * the project's Owner field at creation / reassignment) — plus org admins/
+	 * owners for oversight. Crucially, holding the GLOBAL `project_manager` role
+	 * does NOT let you review a project you don't own.
+	 */
+	private async assertCanReview(projectId: string) {
+		if (this.isOrgAdmin()) return;
+		const project = await this.projectRepo.findById(projectId);
+		if (project?.ownerId && project.ownerId === this.user.id) return;
+		throw new ProjectPermissionError(
+			'Only the project owner (PM) or an org admin can review this task.'
+		);
+	}
+
 	private async assertCanEdit(projectId: string, requireCrucial = false) {
 		const project = await this.projectRepo.findById(projectId);
 		if (!project) throw new NotFoundError('Project', projectId);
@@ -401,9 +421,11 @@ export class ProjectQmsService {
 	 * carries its submission note + ISO records so the reviewer has full context.
 	 */
 	async listReviewQueue(userId: string) {
-		const manager = isManager(this.user.roles ?? []);
+		// Org admins/owners see every project's queue; everyone else sees only the
+		// projects they are the PM (owner) of.
+		const orgAdmin = this.isOrgAdmin();
 		const rows = await this.taskRepo.listByStatusWithContext('under_review');
-		const scoped = manager ? rows : rows.filter((r) => r.projectOwnerId === userId);
+		const scoped = orgAdmin ? rows : rows.filter((r) => r.projectOwnerId === userId);
 		return Promise.all(
 			scoped.map(async (t) => ({ ...t, records: await this.recordRepo.listForTask(t.id) }))
 		);
@@ -412,7 +434,7 @@ export class ProjectQmsService {
 	/** Approve a submitted task: approve its submitted ISO records (the gate then
 	 * completes it), or — when there are no records — complete it directly. */
 	async approveTask(projectId: string, taskId: string) {
-		await this.assertCanEdit(projectId, true);
+		await this.assertCanReview(projectId);
 		const task = await this.taskRepo.findInProject(projectId, taskId);
 		if (!task) throw new NotFoundError('Task', taskId);
 		const records = await this.recordRepo.listForTask(taskId);
@@ -443,7 +465,7 @@ export class ProjectQmsService {
 				to: 'completed',
 				taskName: task.name
 			});
-			await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
+			await new ProjectTaskService(this.ctx).recomputeDerivedStatus(projectId);
 		}
 		const fresh = await this.taskRepo.findInProject(projectId, taskId);
 		return { status: fresh?.status ?? 'completed' };
@@ -452,7 +474,7 @@ export class ProjectQmsService {
 	/** Send a submitted task back to the assignee (→ ongoing). Rejects its
 	 * submitted records with the reason so the assignee can rework + resubmit. */
 	async rejectTask(projectId: string, taskId: string, reason: string | null) {
-		await this.assertCanEdit(projectId, true);
+		await this.assertCanReview(projectId);
 		const task = await this.taskRepo.findInProject(projectId, taskId);
 		if (!task) throw new NotFoundError('Task', taskId);
 		const records = await this.recordRepo.listForTask(taskId);
@@ -479,7 +501,7 @@ export class ProjectQmsService {
 				taskName: task.name,
 				reason
 			});
-			await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
+			await new ProjectTaskService(this.ctx).recomputeDerivedStatus(projectId);
 		}
 		return { status: 'ongoing' as const, reason: reason ?? null };
 	}
@@ -584,7 +606,7 @@ export class ProjectQmsService {
 	}
 
 	async approveRecord(projectId: string, recordId: string) {
-		await this.assertCanEdit(projectId, true);
+		await this.assertCanReview(projectId);
 		const record = await this.loadRecordOrThrow(projectId, recordId);
 		await this.recordRepo.update(recordId, {
 			status: 'approved' as QmsRecordStatus,
@@ -596,7 +618,7 @@ export class ProjectQmsService {
 	}
 
 	async rejectRecord(projectId: string, recordId: string, reason: string | null) {
-		await this.assertCanEdit(projectId, true);
+		await this.assertCanReview(projectId);
 		const record = await this.loadRecordOrThrow(projectId, recordId);
 		await this.recordRepo.update(recordId, {
 			status: 'rejected' as QmsRecordStatus,
@@ -610,9 +632,9 @@ export class ProjectQmsService {
 		return { id: recordId, status: 'rejected' as QmsRecordStatus };
 	}
 
-	/** Waive: a manager explicitly excuses a record from the gate. */
+	/** Waive: the project PM (owner) / admin explicitly excuses a record. */
 	async waiveRecord(projectId: string, recordId: string, reason: string | null) {
-		await this.assertCanEdit(projectId, true);
+		await this.assertCanReview(projectId);
 		const record = await this.loadRecordOrThrow(projectId, recordId);
 		await this.recordRepo.update(recordId, {
 			status: 'waived' as QmsRecordStatus,
@@ -696,7 +718,7 @@ export class ProjectQmsService {
 		}
 
 		// Completing (or re-opening) this task can (un)block its dependents.
-		await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
+		await new ProjectTaskService(this.ctx).recomputeDerivedStatus(projectId);
 	}
 
 	/** Does the task have required records that aren't yet satisfied? Used by the

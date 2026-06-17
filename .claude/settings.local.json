@@ -137,7 +137,10 @@
       "Bash(grep -viE '^\\\\s*#|^\\\\s*$')",
       "Bash(grep -E \"\\\\.\\(ts|sql\\)$\")",
       "Bash(npx tsc *)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(cd /c/Users/akiwc/Documents/Axiom/MiniERP; npm run check > /tmp/chk.txt 2>&1; echo \"exit=$?\"; tail -1 /tmp/chk.txt; grep -c \"ERROR\" /tmp/chk.txt)",
+      "Bash(echo \"tsc=$?\")",
+      "Bash(echo \"done=$?\")"
     ]
   }
 }
