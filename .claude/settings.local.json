@@ -135,7 +135,9 @@
       "Bash(git --no-pager show e464c85 -- src/modules/finance/capabilities/classify-document-category/capability.ts)",
       "Bash(grep -vE '^\\\\s*#|^\\\\s*$')",
       "Bash(grep -viE '^\\\\s*#|^\\\\s*$')",
-      "Bash(grep -E \"\\\\.\\(ts|sql\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|sql\\)$\")",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }

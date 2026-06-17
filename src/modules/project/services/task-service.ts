@@ -18,6 +18,7 @@ import {
 	type SchedTask,
 	type SchedDep
 } from './scheduling';
+import { writeTaskAudit } from './task-audit';
 
 /**
  * Phase 1B / Epic 2 — task and Gantt-portfolio orchestration. Permission
@@ -160,7 +161,20 @@ export class ProjectTaskService {
 
 		for (const t of tasks) {
 			const next = status.get(t.id)!;
-			if (next !== t.status) await this.taskRepo.update(t.id, { status: next });
+			if (next === t.status) continue;
+			await this.taskRepo.update(t.id, { status: next });
+			// Surface newly-blocked tasks on the project timeline (unblock is
+			// intentionally not audited — it's derivable and would be noisy).
+			if (next === 'blocked') {
+				await writeTaskAudit(this.ctx, {
+					projectId,
+					taskId: t.id,
+					action: 'project.task.blocked',
+					from: t.status,
+					to: 'blocked',
+					taskName: t.name
+				});
+			}
 		}
 	}
 

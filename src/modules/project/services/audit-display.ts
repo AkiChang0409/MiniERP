@@ -109,6 +109,26 @@ export function summarizeAuditForProject(action: string, meta: Record<string, un
 		}
 		case 'invoice_out.delete':
 			return 'Removed customer invoice';
+		case 'project.task.submitted': {
+			const name = str('taskName');
+			return name ? `Task “${name}” submitted for review` : 'A task was submitted for review';
+		}
+		case 'project.task.approved': {
+			const name = str('taskName');
+			return name ? `Task “${name}” approved & completed` : 'A task was approved & completed';
+		}
+		case 'project.task.rejected': {
+			const name = str('taskName');
+			const reason = str('reason');
+			const base = name ? `Task “${name}” sent back for rework` : 'A task was sent back for rework';
+			return reason ? `${base} — ${reason}` : base;
+		}
+		case 'project.task.blocked': {
+			const name = str('taskName');
+			return name
+				? `Task “${name}” blocked by an unfinished predecessor`
+				: 'A task is blocked by an unfinished predecessor';
+		}
 		case 'document.unclassified_upload': {
 			const fn = str('fileName');
 			const tag = str('tag');
@@ -122,6 +142,10 @@ export function summarizeAuditForProject(action: string, meta: Record<string, un
 }
 
 export function activityVariantForAction(action: string): ActivityVariant {
+	// Task lifecycle transitions (system-driven) have their own colour mapping.
+	if (action === 'project.task.approved') return 'success';
+	if (action === 'project.task.rejected' || action === 'project.task.blocked') return 'warn';
+	if (action === 'project.task.submitted') return 'info';
 	if (action.endsWith('.delete') || action === 'project.remove') return 'warn';
 	if (action.startsWith('project.') && action !== 'project.update') return 'warn';
 	if (action === 'project.update') return 'success';

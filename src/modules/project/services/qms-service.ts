@@ -9,6 +9,7 @@ import {
 } from '../repositories';
 import { ProjectPermissionError, ProjectValidationError } from '../domain';
 import { ProjectTaskService } from './task-service';
+import { writeTaskAudit } from './task-audit';
 
 /**
  * ISO 9001 QMS orchestration.
@@ -434,6 +435,14 @@ export class ProjectQmsService {
 				completedAt: new Date().toISOString(),
 				progressPct: 100
 			});
+			await writeTaskAudit(this.ctx, {
+				projectId,
+				taskId,
+				action: 'project.task.approved',
+				from: task.status,
+				to: 'completed',
+				taskName: task.name
+			});
 			await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
 		}
 		const fresh = await this.taskRepo.findInProject(projectId, taskId);
@@ -461,6 +470,15 @@ export class ProjectQmsService {
 			await this.syncTaskGate(projectId, taskId);
 		} else {
 			await this.taskRepo.update(taskId, { status: 'ongoing', completedAt: null });
+			await writeTaskAudit(this.ctx, {
+				projectId,
+				taskId,
+				action: 'project.task.rejected',
+				from: task.status,
+				to: 'ongoing',
+				taskName: task.name,
+				reason
+			});
 			await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
 		}
 		return { status: 'ongoing' as const, reason: reason ?? null };
@@ -553,6 +571,14 @@ export class ProjectQmsService {
 			...taskPatch,
 			status: 'under_review',
 			completedAt: null
+		});
+		await writeTaskAudit(this.ctx, {
+			projectId,
+			taskId,
+			action: 'project.task.submitted',
+			from: task.status,
+			to: 'under_review',
+			taskName: task.name
 		});
 		return { status: 'under_review' as const };
 	}
@@ -648,6 +674,26 @@ export class ProjectQmsService {
 			patch.completedAt = null;
 		}
 		await this.taskRepo.update(taskId, patch);
+
+		// Record the transition on the project timeline (ISO traceability).
+		const action =
+			target === 'completed'
+				? 'project.task.approved'
+				: target === 'under_review'
+					? 'project.task.submitted'
+					: anyRejected
+						? 'project.task.rejected'
+						: null;
+		if (action) {
+			await writeTaskAudit(this.ctx, {
+				projectId,
+				taskId,
+				action,
+				from: task.status,
+				to: target,
+				taskName: task.name
+			});
+		}
 
 		// Completing (or re-opening) this task can (un)block its dependents.
 		await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
