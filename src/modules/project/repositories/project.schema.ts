@@ -250,6 +250,9 @@ export const projectTasks = sqliteTable('project_tasks', {
 			'general'
 		]
 	}),
+	// Assignee's free-text submission note captured on the personal task-detail
+	// page (mainly for tasks without ISO records; see qms.schema.ts).
+	submissionNote: text('submission_note'),
 	...timeFields
 });
 

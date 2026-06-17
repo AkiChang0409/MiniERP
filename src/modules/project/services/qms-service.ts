@@ -389,6 +389,95 @@ export class ProjectQmsService {
 		);
 	}
 
+	/** True if the user may act on this task from the personal detail page:
+	 * the assignee, a record's responsible person, or a manager/owner/collaborator. */
+	private async canAccessTaskAsWorker(
+		projectId: string,
+		task: { assigneeId: string | null },
+		userId: string
+	): Promise<boolean> {
+		const user = this.user;
+		if (isManager(user.roles ?? [])) return true;
+		if (task.assigneeId === userId) return true;
+		const project = await this.projectRepo.findById(projectId);
+		if (project?.ownerId === userId) return true;
+		const collab = await this.collaboratorRepo.findByProjectAndUser(projectId, userId);
+		return !!collab;
+	}
+
+	/** Full task detail for the assignee's personal task page (title, project,
+	 * dates, description, submission note + the ISO records on the task). */
+	async getTaskDetail(taskId: string, userId: string) {
+		const task = await this.taskRepo.findById(taskId);
+		if (!task) throw new NotFoundError('Task', taskId);
+		const records = await this.recordRepo.listForTask(taskId);
+		const allowed =
+			(await this.canAccessTaskAsWorker(task.projectId, task, userId)) ||
+			records.some((r) => r.responsibleUserId === userId);
+		if (!allowed) {
+			throw new ProjectPermissionError('You are not assigned to this task.');
+		}
+		const project = await this.projectRepo.findById(task.projectId);
+		return {
+			task: { ...task, projectName: project?.name ?? null },
+			records,
+			canManage: isManager(this.user.roles ?? []) || project?.ownerId === userId
+		};
+	}
+
+	/**
+	 * The assignee submits the task from their personal page.
+	 *   - If the task has required ISO records: submit every still-open one
+	 *     (saving the per-record note), then let the gate move the task to
+	 *     under_review / completed.
+	 *   - If the task has no required records: mark it completed directly.
+	 * `note` is stored on the task; `recordNotes` overrides per-record content.
+	 */
+	async assigneeSubmitTask(
+		projectId: string,
+		taskId: string,
+		opts: { note?: string | null; recordNotes?: Record<string, string> }
+	) {
+		const task = await this.taskRepo.findInProject(projectId, taskId);
+		if (!task) throw new NotFoundError('Task', taskId);
+		const user = this.user;
+		if (!(await this.canAccessTaskAsWorker(projectId, task, user.id))) {
+			throw new ProjectPermissionError('Only the task assignee can submit this task.');
+		}
+
+		const taskPatch: Record<string, unknown> = {};
+		if (opts.note !== undefined) taskPatch.submissionNote = opts.note;
+
+		const required = await this.recordRepo.requiredForTask(taskId);
+		if (required.length > 0) {
+			const now = new Date().toISOString();
+			for (const r of required) {
+				if (!['not_started', 'draft', 'rejected'].includes(r.status)) continue;
+				const fields = opts.recordNotes?.[r.id] ?? r.fields ?? opts.note ?? null;
+				await this.recordRepo.update(r.id, {
+					status: 'submitted' as QmsRecordStatus,
+					submittedAt: now,
+					submittedById: user.id,
+					rejectedReason: null,
+					fields
+				});
+			}
+			if (Object.keys(taskPatch).length > 0) await this.taskRepo.update(taskId, taskPatch);
+			await this.syncTaskGate(projectId, taskId);
+			const fresh = await this.taskRepo.findInProject(projectId, taskId);
+			return { status: fresh?.status ?? 'under_review' };
+		}
+
+		// No ISO gate — the assignee completes directly.
+		await this.taskRepo.update(taskId, {
+			...taskPatch,
+			status: 'completed',
+			completedAt: new Date().toISOString(),
+			progressPct: 100
+		});
+		return { status: 'completed' as const };
+	}
+
 	async approveRecord(projectId: string, recordId: string) {
 		await this.assertCanEdit(projectId, true);
 		const record = await this.loadRecordOrThrow(projectId, recordId);
