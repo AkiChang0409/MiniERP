@@ -16,6 +16,7 @@ import {
 	extractDocumentFieldsCapability,
 	categoryIdForDocumentType
 } from '$modules/finance';
+import { sendLarkEditableReviewCard } from './lark-editable-card';
 
 export async function processIntakeDocument(
 	ctx: ModuleContext,
@@ -26,7 +27,7 @@ export async function processIntakeDocument(
 	const userId = ctx.user?.id ?? '';
 	const intake = createDocumentIntakeService({ db: ctx.db, env, user: ctx.user });
 
-	return intake.processDocument({
+	const artifact = await intake.processDocument({
 		tenantId: 'default',
 		documentId,
 		ocrStrategy: opts.ocrStrategy ?? 'ocr_api',
@@ -71,4 +72,9 @@ export async function processIntakeDocument(
 			};
 		}
 	});
+
+	// For Lark-originated intakes, push the editable review card (full category
+	// field set). No-op for App uploads (handled by the read-only notifier).
+	await sendLarkEditableReviewCard(env, ctx.db, artifact);
+	return artifact;
 }

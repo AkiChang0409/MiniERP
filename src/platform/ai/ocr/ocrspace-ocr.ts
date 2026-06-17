@@ -50,12 +50,20 @@ function readEnv(platformEnv: Env, key: string): string {
 	return typeof fromProcess === 'string' ? fromProcess.trim() : '';
 }
 
-/** OCR.space `filetype` hint. Our client preprocessing emits JPEG; PNG is the
- *  only other lossless raster we forward without re-encoding. */
-function fileTypeHint(mimeType: string, fileName: string): 'JPG' | 'PNG' {
+/**
+ * OCR.space `filetype` hint. AI-Panel uploads arrive pre-encoded as JPEG, but
+ * server-originated uploads (e.g. Lark) send the raw file untouched — so we must
+ * map every format OCR.space accepts. A wrong hint (e.g. labelling a TIFF as JPG)
+ * makes OCR.space only partially decode the image → truncated text.
+ */
+function fileTypeHint(mimeType: string, fileName: string): 'JPG' | 'PNG' | 'GIF' | 'TIF' | 'BMP' | 'PDF' {
 	const m = mimeType.toLowerCase();
 	const n = fileName.toLowerCase();
+	if (m.includes('pdf') || n.endsWith('.pdf')) return 'PDF';
 	if (m.includes('png') || n.endsWith('.png')) return 'PNG';
+	if (m.includes('gif') || n.endsWith('.gif')) return 'GIF';
+	if (m.includes('tif') || /\.tiff?$/.test(n)) return 'TIF';
+	if (m.includes('bmp') || n.endsWith('.bmp')) return 'BMP';
 	return 'JPG';
 }
 
@@ -113,7 +121,12 @@ export async function runOcrSpaceOcr(
 	// send `language` when not on engine 3 so we don't break the auto path.
 	if (engine !== '3') form.append('language', readEnv(env, 'OCR_SPACE_LANGUAGE') || 'eng');
 
-	const mime = input.mimeType.toLowerCase().startsWith('image/') ? input.mimeType : 'image/jpeg';
+	const lowerMime = input.mimeType.toLowerCase();
+	const mime = lowerMime.includes('pdf')
+		? 'application/pdf'
+		: lowerMime.startsWith('image/')
+			? input.mimeType
+			: 'image/jpeg';
 	// Copy into a fresh ArrayBuffer so Blob doesn't capture an oversized view.
 	const ab = input.imageBytes.slice().buffer;
 	form.append('file', new Blob([ab], { type: mime }), input.fileName || 'document.jpg');

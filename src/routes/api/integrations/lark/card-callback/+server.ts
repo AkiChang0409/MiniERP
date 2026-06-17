@@ -9,6 +9,8 @@ import {
 } from '$platform/integrations/lark/verify';
 import { resolveUserByExternalIdentity } from '$platform/auth/resolve-external-identity';
 import { createWorkerContext } from '$platform/context';
+import { sendInteractiveCard } from '$platform/integrations/lark/client';
+import { buildResultCard } from '$platform/integrations/lark/cards/intake-review-card';
 import {
 	createDocumentIntakeService,
 	type DocumentProcessorMessage
@@ -78,6 +80,19 @@ function readFormValue(body: Record<string, unknown>): Record<string, unknown> {
 	const action = (event?.action ?? body.action) as Record<string, unknown> | undefined;
 	const fv = action?.form_value;
 	return fv && typeof fv === 'object' ? (fv as Record<string, unknown>) : {};
+}
+
+/**
+ * Lark files arrive raw (no browser preprocessing that the App's OCR.space route
+ * relies on). Route photos through the vision LLM (reads the full document, no
+ * resize/convert needed, handles low-res); keep tif/bmp on OCR.space (which now
+ * gets the correct filetype hint).
+ */
+function ocrStrategyForLark(mimeType: string, fileName: string): 'vision_openai' | 'ocr_api' {
+	const m = mimeType.toLowerCase();
+	const n = fileName.toLowerCase();
+	const visionFriendly = /image\/(png|jpe?g|webp|gif)/.test(m) || /\.(png|jpe?g|webp|gif)$/.test(n);
+	return visionFriendly ? 'vision_openai' : 'ocr_api';
 }
 
 /** Operator open_id across card 2.0 (`event.operator.open_id`) + legacy (`open_id`). */
@@ -163,6 +178,15 @@ export const POST: RequestHandler = async (event) => {
 		// in the editable review card it pushes once processing completes.
 		await env.KV.put(`lark:fin-project:${documentId}`, projectId, { expirationTtl: 3600 });
 
+		// Choose the OCR route by the stored file's type (raw Lark file → no browser
+		// preprocessing, so vision for photos / OCR.space for tif/bmp).
+		const intake = createDocumentIntakeService({ db: ctx.db, env: ctx.env, user: resolved });
+		const artifact = await intake.getDocumentArtifact({ tenantId: 'default', documentId });
+		const ocrStrategy = ocrStrategyForLark(
+			artifact?.originalFile.mimeType ?? '',
+			artifact?.originalFile.fileName ?? ''
+		);
+
 		// The pipeline (OCR + 2 LLM calls) must NOT run in this HTTP worker's
 		// waitUntil — it gets evicted mid-run and strands the artifact in
 		// 'processing'. Route it through the same async queue the App upload uses;
@@ -174,12 +198,12 @@ export const POST: RequestHandler = async (event) => {
 				tenantId: 'default',
 				userId: resolved.id,
 				userEmail: resolved.email,
-				ocrStrategy: 'ocr_api'
+				ocrStrategy
 			} satisfies DocumentProcessorMessage);
 		} else {
 			// Dev / no queue binding: process inline (localhost budget is generous).
 			// The notifier still sends the card at ready_for_review.
-			const work = processIntakeDocument(ctx, documentId).catch((err) =>
+			const work = processIntakeDocument(ctx, documentId, { ocrStrategy }).catch((err) =>
 				console.error('[lark] inline pick_project processing failed:', err)
 			);
 			const exec = event.platform?.ctx;
@@ -189,6 +213,22 @@ export const POST: RequestHandler = async (event) => {
 		return toast('info', '已收到，正在识别单据，稍后会推送可编辑的字段卡片…');
 	}
 
+	// Writes (confirm/approve/reject) run several sequential D1 ops (create record
+	// + audit hash-chain + markConfirmed) that can exceed Lark's ~3s callback
+	// window → Lark shows "出错了 code 200341" even though the write succeeded.
+	// Fix: ACK immediately with a "处理中" toast, do the write in the background,
+	// and push the real result as a follow-up card.
+	const pushResult = (card: Record<string, unknown>) =>
+		sendInteractiveCard(env, openId, 'open_id', card).catch((e) =>
+			console.error('[lark] result card send failed:', e)
+		);
+	const runBackground = (work: Promise<unknown>) => {
+		const guarded = work.catch((e) => console.error('[lark] bg work failed:', e));
+		const exec = event.platform?.ctx;
+		if (exec?.waitUntil) exec.waitUntil(guarded);
+		else void guarded;
+	};
+
 	// --- Conversational flow: editable card submitted → persist edited fields ---
 	if (kind === 'approve') {
 		const categoryId = action.category_id;
@@ -197,32 +237,46 @@ export const POST: RequestHandler = async (event) => {
 		const projectId = action.project_id && action.project_id.trim() ? action.project_id : null;
 		const fields = readFormValue(body);
 
-		const result = await confirmInbox(ctx, {
-			documentId,
-			categoryId: category.id,
-			fields,
-			projectId,
-			actor: { id: resolved.id, email: resolved.email }
-		});
-		if (!result.ok) {
-			if (result.status === 409) return toast('info', '该文档已处理。');
-			return toast('error', `确认失败：${result.error}`);
-		}
-		return toast('success', '已确认并记账 ✅');
+		runBackground(
+			confirmInbox(ctx, {
+				documentId,
+				categoryId: category.id,
+				fields,
+				projectId,
+				actor: { id: resolved.id, email: resolved.email }
+			}).then((result) =>
+				pushResult(
+					result.ok
+						? buildResultCard('✅ 已入库', `已记账：${category.label}。`, 'green')
+						: buildResultCard(
+								'入库未完成',
+								result.status === 409 ? '该文档已处理。' : `失败：${result.error}`,
+								'red'
+							)
+				)
+			)
+		);
+		return toast('info', '正在入库，请稍候…');
 	}
 
 	if (kind === 'reject') {
 		const intake = createDocumentIntakeService({ db: ctx.db, env: ctx.env, user: resolved });
-		const result = await intake.abandonIntake({
-			tenantId: 'default',
-			documentId,
-			reason: 'Rejected via Lark card'
-		});
-		if (!result.ok) {
-			if (result.status === 'not_abandonable') return toast('info', '该文档已处理，无需放弃。');
-			return toast('error', '未找到该文档。');
-		}
-		return toast('success', '已放弃，不会创建任何记录。');
+		runBackground(
+			intake
+				.abandonIntake({ tenantId: 'default', documentId, reason: 'Rejected via Lark card' })
+				.then((result) =>
+					pushResult(
+						result.ok
+							? buildResultCard('🚫 已放弃', '已放弃，不会创建任何记录。', 'grey')
+							: buildResultCard(
+									'未完成',
+									result.status === 'not_abandonable' ? '该文档已处理。' : '未找到该文档。',
+									'red'
+								)
+					)
+				)
+		);
+		return toast('info', '正在处理…');
 	}
 
 	if (kind === 'confirm') {
@@ -238,24 +292,31 @@ export const POST: RequestHandler = async (event) => {
 			return toast('info', '此类别需要在 App 中选择项目后确认。');
 		}
 
-		// Server-authoritative: rebuild the fields from the stored artifact.
 		const intake = createDocumentIntakeService({ db: ctx.db, env: ctx.env, user: resolved });
-		const artifact = await intake.getDocumentArtifact({ tenantId: 'default', documentId });
-		if (!artifact) return toast('error', '未找到该文档。');
-
-		const result = await confirmInbox(ctx, {
-			documentId,
-			categoryId: category.id,
-			fields: (artifact.suggestedFields?.fields ?? {}) as Record<string, unknown>,
-			projectId: null,
-			actor: { id: resolved.id, email: resolved.email }
-		});
-
-		if (!result.ok) {
-			if (result.status === 409) return toast('info', '该文档已处理。');
-			return toast('error', `确认失败：${result.error}`);
-		}
-		return toast('success', '已确认并记账。');
+		runBackground(
+			(async () => {
+				// Server-authoritative: rebuild the fields from the stored artifact.
+				const artifact = await intake.getDocumentArtifact({ tenantId: 'default', documentId });
+				if (!artifact) return pushResult(buildResultCard('未完成', '未找到该文档。', 'red'));
+				const result = await confirmInbox(ctx, {
+					documentId,
+					categoryId: category.id,
+					fields: (artifact.suggestedFields?.fields ?? {}) as Record<string, unknown>,
+					projectId: null,
+					actor: { id: resolved.id, email: resolved.email }
+				});
+				return pushResult(
+					result.ok
+						? buildResultCard('✅ 已入库', `已记账：${category.label}。`, 'green')
+						: buildResultCard(
+								'入库未完成',
+								result.status === 409 ? '该文档已处理。' : `失败：${result.error}`,
+								'red'
+							)
+				);
+			})()
+		);
+		return toast('info', '正在入库，请稍候…');
 	}
 
 	return toast('info', '暂不支持的卡片操作。');

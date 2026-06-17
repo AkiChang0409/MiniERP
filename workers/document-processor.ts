@@ -43,6 +43,7 @@ import {
 	buildVisionFieldExtractionPrompt
 } from '../src/modules/finance';
 import { getDb } from '../src/infrastructure/db';
+import { sendLarkEditableReviewCard } from '../src/app/finance-intake/lark-editable-card';
 
 export type { DocumentProcessorMessage };
 
@@ -117,7 +118,7 @@ async function processOne(
 		? documentTypeForCategory(presetCategoryId)
 		: undefined;
 
-	await service.processDocument({
+	const artifact = await service.processDocument({
 		tenantId: payload.tenantId,
 		documentId: payload.documentId,
 		clientExtractedText: payload.clientExtractedText,
@@ -187,4 +188,8 @@ async function processOne(
 			};
 		}
 	});
+
+	// Lark-originated intake → push the editable review card (full category field
+	// set) now that processing is complete. No-op for App uploads.
+	await sendLarkEditableReviewCard(env, db, artifact);
 }

@@ -140,4 +140,29 @@ describe('buildEditableReviewCard', () => {
 		const reject = allButtons.find((b) => (b.value as { action?: string })?.action === 'reject');
 		expect(reject?.value).toEqual({ action: 'reject', document_id: 'doc-9' });
 	});
+
+	it('renders an input for EVERY category field when fieldKeys is given (blanks included)', () => {
+		const card = buildEditableReviewCard({
+			documentId: 'doc-9',
+			categoryId: 'expense.sales_cost.invoice',
+			fileName: 'inv.pdf',
+			// full category set; only some were extracted
+			fieldKeys: ['invoice_number', 'supplier_name', 'date', 'amount', 'currency', 'line_items'],
+			fields: { supplier_name: 'Seungyeon Lim', date: '2025-09-01' },
+			projectId: 'p1'
+		});
+		const bodyElements = (card.body as Record<string, unknown>).elements as Array<
+			Record<string, unknown>
+		>;
+		const form = bodyElements.find((e) => e.tag === 'form')!;
+		const inputs = (form.elements as Array<Record<string, unknown>>).filter((e) => e.tag === 'input');
+		const names = inputs.map((i) => i.name);
+		// every category field is present...
+		expect(names).toEqual(['invoice_number', 'supplier_name', 'date', 'amount', 'currency']);
+		expect(names).not.toContain('line_items'); // non-editable, filtered
+		// extracted values pre-filled, un-extracted blank
+		expect(inputs.find((i) => i.name === 'supplier_name')?.default_value).toBe('Seungyeon Lim');
+		expect(inputs.find((i) => i.name === 'invoice_number')?.default_value).toBe('');
+		expect(inputs.find((i) => i.name === 'amount')?.default_value).toBe('');
+	});
 });

@@ -139,6 +139,13 @@ export interface EditableReviewCardInput {
 	categoryId: string | null;
 	fileName: string;
 	documentType?: string;
+	/**
+	 * The FULL set of field keys for the category (llmFields ∪ userFields), so the
+	 * user can edit/fill fields the AI did not extract. When omitted, falls back to
+	 * the keys present in `fields` (extracted-only). Order is preserved.
+	 */
+	fieldKeys?: string[];
+	/** Extracted values, keyed the same as fieldKeys (snake_case category keys). */
 	fields: Record<string, unknown>;
 	confidence?: Record<string, number>;
 	/** Project the flow already pinned — embedded in the approve action + shown. */
@@ -147,16 +154,23 @@ export interface EditableReviewCardInput {
 }
 
 /**
- * Editable field-review card (card 2.0 form). Each scalar extracted field
- * becomes an `input` named by its field key; Approve is a `form_submit` button
- * so the callback receives `event.action.form_value` with the edited values.
+ * Editable field-review card (card 2.0 form). Renders an `input` for every field
+ * in the category (pre-filled where the AI extracted a value, blank otherwise);
+ * Approve is a `form_submit` button so the callback receives
+ * `event.action.form_value` with the final (user-edited) values.
  */
 export function buildEditableReviewCard(input: EditableReviewCardInput): Record<string, unknown> {
 	const categoryLabel = prettifyCategory(input.categoryId, input.documentType);
 
+	// Full category field set when provided (lets users fill un-extracted fields),
+	// else just the extracted keys. Dedupe + drop non-editable (project/line items).
+	const keys = [
+		...new Set(input.fieldKeys && input.fieldKeys.length ? input.fieldKeys : Object.keys(input.fields))
+	].filter((k) => !NON_EDITABLE_KEYS.has(k));
+
 	const inputs: Array<Record<string, unknown>> = [];
-	for (const [key, raw] of Object.entries(input.fields)) {
-		if (NON_EDITABLE_KEYS.has(key)) continue;
+	for (const key of keys) {
+		const raw = input.fields[key]; // undefined for un-extracted keys → blank input
 		if (raw !== null && typeof raw === 'object') continue; // skip arrays/objects
 		const conf = input.confidence?.[key];
 		const lowConf = typeof conf === 'number' && conf < 0.5 ? ' ⚠️' : '';

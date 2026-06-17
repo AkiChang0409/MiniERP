@@ -3,24 +3,16 @@
  * reaches `ready_for_review`. Best-effort: any failure (no Lark creds, no active
  * binding, send error) is swallowed so the intake pipeline is never affected.
  *
- * Two shapes, by origin:
- *  - App upload (`uploadedFrom !== 'lark'`): a read-only Confirm/Reject card.
- *  - Lark menu flow (`uploadedFrom === 'lark'`): an EDITABLE form card, with the
- *    project the user already picked (read from KV `lark:fin-project:<id>`,
- *    written by the card-callback `pick_project` handler) embedded in Approve.
- *
- * Runs wherever `processDocument` reaches ready_for_review — inline (dev) AND the
- * queue worker (prod). The queue worker therefore needs LARK_APP_ID/SECRET set
- * (see deploy workflow). Boundary: imports `$platform/*` only — no `$modules/*`.
+ * Scope: **App uploads only** — sends the read-only Confirm/Reject card. Lark-
+ * originated intakes (`uploadedFrom === 'lark'`) are handled by the app-layer
+ * `sendLarkEditableReviewCard` (called from the composition root after
+ * processDocument), which can pull the full category field set from finance to
+ * build an editable card. This notifier stays platform-only (no `$modules/*`).
  */
 import type { DBClient } from '$infrastructure/db';
 import { ExternalIdentityLinkRepository } from '$platform/auth/external-identity-link-repository';
 import { sendInteractiveCard } from '$platform/integrations/lark/client';
 import { buildIntakeReviewCard } from '$platform/integrations/lark/cards/intake-review-card';
-import {
-	buildEditableReviewCard,
-	buildNoticeCard
-} from '$platform/integrations/lark/cards/finance-intake-cards';
 import type { DocumentArtifact } from '../schemas/document-artifact.schema';
 
 const LARK_PROVIDER = 'lark';
@@ -34,6 +26,9 @@ export async function notifyLarkReviewCard(
 		// Without app credentials we can't mint a token / send anything.
 		if (!env.LARK_APP_ID || !env.LARK_APP_SECRET) return;
 
+		// Lark-originated intakes get an editable card from the app layer instead.
+		if (artifact.sourceMetadata?.manualUpload?.uploadedFrom === 'lark') return;
+
 		const uploaderId = artifact.sourceMetadata?.manualUpload?.uploadedBy;
 		if (!uploaderId) return; // e.g. email/drive ingest — no MiniERP uploader to notify.
 
@@ -46,42 +41,18 @@ export async function notifyLarkReviewCard(
 			return;
 		}
 
-		const fromLark = artifact.sourceMetadata?.manualUpload?.uploadedFrom === 'lark';
-		const fileName = artifact.originalFile.fileName;
-		const fields = (artifact.suggestedFields?.fields ?? {}) as Record<string, unknown>;
-		const confidence = artifact.suggestedFields?.confidence;
-
-		let card: Record<string, unknown>;
-		if (fromLark) {
-			if (!artifact.suggestedCategoryId) {
-				card = buildNoticeCard('无法自动分类', '未能识别该单据类别，请在 App 中处理。', 'red');
-			} else {
-				const projectId =
-					(await env.KV.get(`lark:fin-project:${artifact.id}`)) ?? undefined;
-				card = buildEditableReviewCard({
-					documentId: artifact.id,
-					categoryId: artifact.suggestedCategoryId,
-					fileName,
-					documentType: artifact.documentType,
-					fields,
-					confidence,
-					projectId
-				});
-			}
-		} else {
-			card = buildIntakeReviewCard({
-				documentId: artifact.id,
-				fileName,
-				categoryId: artifact.suggestedCategoryId ?? null,
-				documentType: artifact.documentType,
-				fields,
-				confidence,
-				appBaseUrl: env.BETTER_AUTH_URL ?? ''
-			});
-		}
+		const card = buildIntakeReviewCard({
+			documentId: artifact.id,
+			fileName: artifact.originalFile.fileName,
+			categoryId: artifact.suggestedCategoryId ?? null,
+			documentType: artifact.documentType,
+			fields: (artifact.suggestedFields?.fields ?? {}) as Record<string, unknown>,
+			confidence: artifact.suggestedFields?.confidence,
+			appBaseUrl: env.BETTER_AUTH_URL ?? ''
+		});
 
 		await sendInteractiveCard(env, openId, 'open_id', card);
-		console.log(`[lark] review card (${fromLark ? 'editable' : 'readonly'}) sent for doc ${artifact.id}`);
+		console.log(`[lark] readonly review card sent for doc ${artifact.id}`);
 	} catch (err) {
 		console.error('[lark] review card notify failed (non-fatal):', err);
 	}

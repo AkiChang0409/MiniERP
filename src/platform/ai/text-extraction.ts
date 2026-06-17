@@ -169,19 +169,37 @@ export async function extractTextFromBytesRaw(
 	visionPrompt?: { system: string; user: string }
 ): Promise<PlatformTextExtractionResult> {
 	if (isPdfMime(mimeType, fileName)) {
+		// Server-originated PDFs (no browser pdfjs text — e.g. Lark / email intake):
+		// OCR.space parses PDFs natively (renders + OCRs the pages), which is far
+		// better than the byte heuristic below. Use it when configured; the
+		// heuristic stays as a last-resort fallback.
+		if (readEnv(env, 'OCR_SPACE_API_KEY')) {
+			const ocr = await runOcrSpaceOcr(env, { imageBytes: bytes, mimeType, fileName: fileName ?? '' });
+			if (ocr.ok) {
+				const partial = ocr.exitCode === 2;
+				return {
+					method: 'ocr',
+					status: partial ? 'partial' : 'success',
+					text: ocr.text,
+					confidence: partial ? 0.55 : 0.8,
+					provider: 'ocr_space',
+					providerJobId: `ocrspace_engine_${ocr.engine}`
+				};
+			}
+			// else fall through to the heuristic (e.g. >1MB free-tier reject)
+		}
+
 		// DEPRECATED Ship 1: this byte-heuristic only "works" on PDFs whose text
 		// streams are uncompressed plain ASCII (extremely rare). For modern PDFs
 		// the bytes are mostly compressed Flate streams + structural keywords,
 		// so this path produces garbage that breaks downstream classification.
 		//
-		// The canonical PDF text path is now the browser pdfjs extractor in
-		// src/app/ai-panel/.../UploadStep.svelte (and intake/DropZone.svelte).
-		// Server callers should pass `clientExtractedText` to processDocument()
-		// rather than relying on this.
+		// The canonical PDF text path is the browser pdfjs extractor in
+		// src/app/ai-panel/.../UploadStep.svelte (and intake/DropZone.svelte);
+		// AI-Panel callers pass `clientExtractedText` to processDocument().
 		//
-		// Kept here as a last-resort fallback so non-AI-Panel upload sources
-		// (e.g. future email intake) don't crash, but it will mark the artifact
-		// as needs_manual_review for any non-trivial PDF.
+		// Kept here as a last-resort fallback so other upload sources don't crash,
+		// but it will mark the artifact as needs_manual_review for any non-trivial PDF.
 		const text = decodePdfHeuristicBytes(bytes);
 		const hasWordLikeAscii = /[A-Za-z]{4,}/.test(
 			text.replace(/\bobj\b|\bendobj\b|\bstream\b|\bendstream\b|\bxref\b/g, '')
@@ -218,11 +236,15 @@ export async function extractTextFromBytesRaw(
 			if (!ocr.ok) {
 				return buildFailure('ocr_api_failed', ocr.error, 'ocr');
 			}
+			// OCRExitCode 2 = partial success (some pages/regions failed). Flag it as
+			// partial + lower confidence rather than presenting truncated text as a
+			// clean read — common when a raw, low-res, or mis-typed file slips in.
+			const partial = ocr.exitCode === 2;
 			return {
 				method: 'ocr',
-				status: 'success',
+				status: partial ? 'partial' : 'success',
 				text: ocr.text,
-				confidence: 0.85,
+				confidence: partial ? 0.55 : 0.85,
 				provider: 'ocr_space',
 				providerJobId: `ocrspace_engine_${ocr.engine}`
 			};
