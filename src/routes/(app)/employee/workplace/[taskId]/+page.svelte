@@ -37,8 +37,10 @@
 
 	const task = $derived(data.task as Task);
 	const records = $derived((data.records as WorkRecord[]) ?? []);
-	const hasRequired = $derived(records.some((r) => r.isRequired));
 	const isDone = $derived(task.status === 'completed');
+	// Already submitted and awaiting PM review — the assignee can't resubmit until
+	// it's sent back (a rejected ISO record drops the task back to `ongoing`).
+	const awaitingReview = $derived(task.status === 'under_review');
 
 	let recordNotes = $state<{ [id: string]: string }>({});
 	let taskNote = $state('');
@@ -171,7 +173,7 @@
 							{#if r.status === 'rejected' && r.rejectedReason}
 								<p class="mt-1.5 text-[11px] text-rose-600">退回原因：{r.rejectedReason}</p>
 							{/if}
-							{#if canSubmitRecord(r.status) && !isDone}
+							{#if canSubmitRecord(r.status) && !isDone && !awaitingReview}
 								<textarea
 									rows="2"
 									placeholder="填写该记录的说明 / 完成情况"
@@ -189,12 +191,23 @@
 		{/if}
 
 		<!-- Submission area (always present) -->
-		{#if !isDone}
+		{#if isDone}
+			<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-700 shadow-sm">
+				✓ 任务已完成。
+				{#if task.submissionNote}<span class="mt-1 block text-emerald-800/80">提交说明：{task.submissionNote}</span>{/if}
+			</div>
+		{:else if awaitingReview}
+			<div class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-700 shadow-sm">
+				⏳ 已提交，等待 PM 审核。
+				{#if task.submissionNote}<span class="mt-1 block text-amber-800/80">提交说明：{task.submissionNote}</span>{/if}
+				<span class="mt-1 block text-[12px] text-amber-700/80">若被退回，本任务会回到“进行中”，你可在此重新提交。</span>
+			</div>
+		{:else}
 			<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
 				<h3 class="text-sm font-semibold text-slate-800">提交区</h3>
 				<label class="mt-3 block">
 					<span class="text-xs font-medium text-slate-500">说明 / 完成情况</span>
-					<textarea bind:value={taskNote} rows="3" placeholder="描述你的完成情况，供 PM 审阅" class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"></textarea>
+					<textarea bind:value={taskNote} rows="3" placeholder="描述你的完成情况，供 PM 审核" class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"></textarea>
 				</label>
 				<div class="mt-3">
 					<span class="text-xs font-medium text-slate-500">附件上传</span>
@@ -213,14 +226,9 @@
 						disabled={busy}
 						onclick={submit}
 					>
-						{busy ? '提交中…' : hasRequired ? '提交并送 PM 审批' : '标记任务完成'}
+						{busy ? '提交中…' : '提交（送 PM 审核）'}
 					</button>
 				</div>
-			</div>
-		{:else}
-			<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-700 shadow-sm">
-				✓ 任务已完成。
-				{#if task.submissionNote}<span class="mt-1 block text-emerald-800/80">提交说明：{task.submissionNote}</span>{/if}
 			</div>
 		{/if}
 	</div>

@@ -8,6 +8,7 @@ import {
 	QmsRecordRepository
 } from '../repositories';
 import { ProjectPermissionError, ProjectValidationError } from '../domain';
+import { ProjectTaskService } from './task-service';
 
 /**
  * ISO 9001 QMS orchestration.
@@ -389,6 +390,82 @@ export class ProjectQmsService {
 		);
 	}
 
+	// -----------------------------------------------------------------------
+	// Review workspace (PM / owner / admin)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Tasks awaiting review (`under_review`) that this user may approve:
+	 * managers/admins see all; otherwise only tasks in projects they own. Each
+	 * carries its submission note + ISO records so the reviewer has full context.
+	 */
+	async listReviewQueue(userId: string) {
+		const manager = isManager(this.user.roles ?? []);
+		const rows = await this.taskRepo.listByStatusWithContext('under_review');
+		const scoped = manager ? rows : rows.filter((r) => r.projectOwnerId === userId);
+		return Promise.all(
+			scoped.map(async (t) => ({ ...t, records: await this.recordRepo.listForTask(t.id) }))
+		);
+	}
+
+	/** Approve a submitted task: approve its submitted ISO records (the gate then
+	 * completes it), or — when there are no records — complete it directly. */
+	async approveTask(projectId: string, taskId: string) {
+		await this.assertCanEdit(projectId, true);
+		const task = await this.taskRepo.findInProject(projectId, taskId);
+		if (!task) throw new NotFoundError('Task', taskId);
+		const records = await this.recordRepo.listForTask(taskId);
+		const required = records.filter((r) => r.isRequired);
+		if (required.length > 0) {
+			const now = new Date().toISOString();
+			for (const r of required) {
+				if (r.status === 'submitted') {
+					await this.recordRepo.update(r.id, {
+						status: 'approved' as QmsRecordStatus,
+						approvedAt: now,
+						approvedById: this.user.id
+					});
+				}
+			}
+			await this.syncTaskGate(projectId, taskId);
+		} else {
+			await this.taskRepo.update(taskId, {
+				status: 'completed',
+				completedAt: new Date().toISOString(),
+				progressPct: 100
+			});
+			await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
+		}
+		const fresh = await this.taskRepo.findInProject(projectId, taskId);
+		return { status: fresh?.status ?? 'completed' };
+	}
+
+	/** Send a submitted task back to the assignee (→ ongoing). Rejects its
+	 * submitted records with the reason so the assignee can rework + resubmit. */
+	async rejectTask(projectId: string, taskId: string, reason: string | null) {
+		await this.assertCanEdit(projectId, true);
+		const task = await this.taskRepo.findInProject(projectId, taskId);
+		if (!task) throw new NotFoundError('Task', taskId);
+		const records = await this.recordRepo.listForTask(taskId);
+		const submitted = records.filter((r) => r.isRequired && r.status === 'submitted');
+		if (submitted.length > 0) {
+			for (const r of submitted) {
+				await this.recordRepo.update(r.id, {
+					status: 'rejected' as QmsRecordStatus,
+					rejectedReason: reason ?? null,
+					version: (r.version ?? 1) + 1,
+					approvedAt: null,
+					approvedById: null
+				});
+			}
+			await this.syncTaskGate(projectId, taskId);
+		} else {
+			await this.taskRepo.update(taskId, { status: 'ongoing', completedAt: null });
+			await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
+		}
+		return { status: 'ongoing' as const, reason: reason ?? null };
+	}
+
 	/** True if the user may act on this task from the personal detail page:
 	 * the assignee, a record's responsible person, or a manager/owner/collaborator. */
 	private async canAccessTaskAsWorker(
@@ -426,11 +503,14 @@ export class ProjectQmsService {
 	}
 
 	/**
-	 * The assignee submits the task from their personal page.
+	 * The assignee submits the task for PM review from their personal page.
+	 * Uniform flow regardless of ISO: submit → under_review → PM completes.
 	 *   - If the task has required ISO records: submit every still-open one
-	 *     (saving the per-record note), then let the gate move the task to
-	 *     under_review / completed.
-	 *   - If the task has no required records: mark it completed directly.
+	 *     (saving the per-record note); the gate then advances the task (normally
+	 *     to under_review, awaiting record approval).
+	 *   - If the task has no records: just move it to under_review for the PM to
+	 *     confirm. The PM completes it from the Gantt (the completion gate there
+	 *     is a no-op when there are no required records).
 	 * `note` is stored on the task; `recordNotes` overrides per-record content.
 	 */
 	async assigneeSubmitTask(
@@ -468,14 +548,13 @@ export class ProjectQmsService {
 			return { status: fresh?.status ?? 'under_review' };
 		}
 
-		// No ISO gate — the assignee completes directly.
+		// No ISO records — submit for PM review (do not self-complete).
 		await this.taskRepo.update(taskId, {
 			...taskPatch,
-			status: 'completed',
-			completedAt: new Date().toISOString(),
-			progressPct: 100
+			status: 'under_review',
+			completedAt: null
 		});
-		return { status: 'completed' as const };
+		return { status: 'under_review' as const };
 	}
 
 	async approveRecord(projectId: string, recordId: string) {
@@ -551,34 +630,27 @@ export class ProjectQmsService {
 			['submitted', 'approved', 'waived'].includes(r.status)
 		);
 
-		const now = new Date().toISOString();
-		if (allSatisfied) {
-			if (task.status !== 'completed') {
-				await this.taskRepo.update(taskId, {
-					status: 'completed',
-					completedAt: now,
-					progressPct: 100
-				});
-			}
-			return;
-		}
-		if (anyRejected) {
-			if (task.status !== 'ongoing') {
-				await this.taskRepo.update(taskId, { status: 'ongoing', completedAt: null });
-			}
-			return;
-		}
-		if (allSubmittedOrBeyond) {
-			if (task.status !== 'under_review') {
-				await this.taskRepo.update(taskId, { status: 'under_review', completedAt: null });
-			}
-			return;
-		}
-		// Some records are still not_started/draft. Only correct a stale terminal
+		let target: string | null = null;
+		if (allSatisfied) target = 'completed';
+		else if (anyRejected) target = 'ongoing';
+		else if (allSubmittedOrBeyond) target = 'under_review';
+		// Some records are still not_started/draft: only correct a stale terminal
 		// status; leave unassigned/ongoing tasks untouched.
-		if (task.status === 'completed' || task.status === 'under_review') {
-			await this.taskRepo.update(taskId, { status: 'ongoing', completedAt: null });
+		else if (task.status === 'completed' || task.status === 'under_review') target = 'ongoing';
+
+		if (!target || target === task.status) return;
+
+		const patch: Record<string, unknown> = { status: target };
+		if (target === 'completed') {
+			patch.completedAt = new Date().toISOString();
+			patch.progressPct = 100;
+		} else {
+			patch.completedAt = null;
 		}
+		await this.taskRepo.update(taskId, patch);
+
+		// Completing (or re-opening) this task can (un)block its dependents.
+		await new ProjectTaskService(this.ctx).recomputeBlocked(projectId);
 	}
 
 	/** Does the task have required records that aren't yet satisfied? Used by the

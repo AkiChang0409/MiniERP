@@ -93,6 +93,34 @@ export class ProjectTaskRepository extends BaseRepository<typeof projectTasks> {
 		return rows.map((r) => ({ projectId: r.projectId, status: r.status, n: Number(r.n ?? 0) }));
 	}
 
+	/** Tasks in a given status with project + assignee context — powers the
+	 * manager/owner review workspace (status='under_review'). */
+	async listByStatusWithContext(status: string) {
+		return this.db
+			.select({
+				id: projectTasks.id,
+				projectId: projectTasks.projectId,
+				projectName: projects.name,
+				projectOwnerId: projects.ownerId,
+				name: projectTasks.name,
+				description: projectTasks.description,
+				status: projectTasks.status,
+				startDate: projectTasks.startDate,
+				endDate: projectTasks.endDate,
+				taskType: projectTasks.taskType,
+				submissionNote: projectTasks.submissionNote,
+				assigneeId: projectTasks.assigneeId,
+				assigneeName: users.name,
+				assigneeEmail: users.email
+			})
+			.from(projectTasks)
+			.leftJoin(projects, eq(projectTasks.projectId, projects.id))
+			.leftJoin(users, eq(projectTasks.assigneeId, users.id))
+			// `status` is a free string at the call site; the column is an enum.
+			.where(and(eq(projectTasks.status, status as never), isNull(projectTasks.deletedAt)))
+			.orderBy(asc(projectTasks.endDate));
+	}
+
 	/** Tasks assigned to a user with project name + description — powers the
 	 * personal Workplace ("My Space") view. */
 	async assignedToUserWithProject(userId: string) {

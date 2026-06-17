@@ -9,8 +9,7 @@ import {
 	ProjectTaskDependencyRepository,
 	ProjectWorkflowStageRepository,
 	ProjectGanttPortfolioRepository,
-	ProjectScheduleChangeRepository,
-	QmsRecordRepository
+	ProjectScheduleChangeRepository
 } from '../repositories';
 import { ProjectPermissionError, ProjectValidationError } from '../domain';
 import {
@@ -110,7 +109,6 @@ export class ProjectTaskService {
 	private stageRepo: ProjectWorkflowStageRepository;
 	private portfolioRepo: ProjectGanttPortfolioRepository;
 	private scheduleChangeRepo: ProjectScheduleChangeRepository;
-	private qmsRecordRepo: QmsRecordRepository;
 
 	constructor(private ctx: ModuleContext) {
 		this.projectRepo = new ProjectRepository(ctx.db);
@@ -120,31 +118,49 @@ export class ProjectTaskService {
 		this.stageRepo = new ProjectWorkflowStageRepository(ctx.db);
 		this.portfolioRepo = new ProjectGanttPortfolioRepository(ctx.db);
 		this.scheduleChangeRepo = new ProjectScheduleChangeRepository(ctx.db);
-		this.qmsRecordRepo = new QmsRecordRepository(ctx.db);
 	}
 
 	/**
-	 * ISO 9001 completion gate. A task may only be marked `completed` once every
-	 * REQUIRED QMS record attached to it is satisfied (approved / waived, or —
-	 * when the template needs no approval — submitted). The legitimate completion
-	 * path is `ProjectQmsService.syncTaskGate`, which writes the task status via
-	 * the repo and therefore never trips this gate; this only blocks a user who
-	 * tries to short-circuit completion manually.
+	 * Dependency-driven blocked rule. A task in a pre-work state
+	 * (unassigned / ongoing / blocked) is `blocked` while any of its blocking
+	 * predecessors is not yet `completed`; it auto-clears (→ ongoing if it has an
+	 * assignee, else unassigned) once they finish. Submitted/completed tasks are
+	 * never auto-blocked. Iterates to a fixpoint so dependency CHAINS settle in a
+	 * single call, and only persists the rows that actually changed.
 	 */
-	private async assertCompletionGate(taskId: string) {
-		const required = await this.qmsRecordRepo.requiredForTask(taskId);
-		const unsatisfied = required.filter(
-			(r) =>
-				!(
-					r.status === 'approved' ||
-					r.status === 'waived' ||
-					(!r.requiresApproval && r.status === 'submitted')
-				)
-		);
-		if (unsatisfied.length > 0) {
-			throw new ProjectValidationError({
-				status: `需先完成并通过本任务的 ISO 记录审批（${unsatisfied.length} 项待处理）。`
-			});
+	async recomputeBlocked(projectId: string) {
+		const [tasks, deps] = await Promise.all([
+			this.taskRepo.listForProject(projectId),
+			this.depRepo.listForProject(projectId)
+		]);
+		const eligible = (s: string) => s === 'unassigned' || s === 'ongoing' || s === 'blocked';
+		const status = new Map(tasks.map((t) => [t.id, t.status as string]));
+		const assignee = new Map(tasks.map((t) => [t.id, t.assigneeId]));
+
+		let changed = true;
+		let guard = 0;
+		while (changed && guard++ <= tasks.length) {
+			changed = false;
+			for (const t of tasks) {
+				const s = status.get(t.id)!;
+				if (!eligible(s)) continue;
+				const blocked = deps.some(
+					(d) =>
+						d.toTaskId === t.id &&
+						d.isBlocking &&
+						(status.get(d.fromTaskId) ?? 'completed') !== 'completed'
+				);
+				const target = blocked ? 'blocked' : assignee.get(t.id) ? 'ongoing' : 'unassigned';
+				if (target !== s) {
+					status.set(t.id, target);
+					changed = true;
+				}
+			}
+		}
+
+		for (const t of tasks) {
+			const next = status.get(t.id)!;
+			if (next !== t.status) await this.taskRepo.update(t.id, { status: next });
 		}
 	}
 
@@ -215,7 +231,10 @@ export class ProjectTaskService {
 			parentTaskId: input.parentTaskId ?? null,
 			name: input.name.trim(),
 			description: input.description ?? null,
-			status: input.status ?? 'unassigned',
+			// Status is system-managed, never client-set: a task starts `ongoing`
+			// the moment it has an assignee, otherwise `unassigned`. Submission /
+			// approval / blocking-dependency rules drive every later transition.
+			status: input.assigneeId ? 'ongoing' : 'unassigned',
 			startDate: input.startDate ?? null,
 			endDate: input.endDate ?? null,
 			assigneeId: input.assigneeId ?? null,
@@ -244,18 +263,18 @@ export class ProjectTaskService {
 		const existing = await this.taskRepo.findInProject(projectId, taskId);
 		if (!existing) throw new NotFoundError('Task', taskId);
 
-		// ISO 9001 gate: block manual completion while required records are open.
-		// (Approval-driven completion goes through the repo and skips this.)
-		if (patch.status === 'completed' && existing.status !== 'completed') {
-			await this.assertCompletionGate(taskId);
-		}
-
 		const update: Record<string, unknown> = { ...patch };
 		// `rescheduleReason` is an input, not a column — pull it out before the
 		// row update and fold it into the schedule-change log below.
 		const rescheduleReason = patch.rescheduleReason ?? null;
 		delete (update as { rescheduleReason?: unknown }).rescheduleReason;
 		if (typeof update.name === 'string') update.name = update.name.trim();
+
+		// Status is system-managed: never accept it (or completedAt) from a
+		// generic edit. Transitions come from assignment (here), submission,
+		// approval, and the blocking-dependency rule (recomputeBlocked).
+		delete (update as { status?: unknown }).status;
+		delete (update as { completedAt?: unknown }).completedAt;
 
 		// Keep `kind` and the legacy `isMilestone` boolean mutually consistent.
 		if (patch.kind !== undefined) {
@@ -264,25 +283,27 @@ export class ProjectTaskService {
 			update.kind = patch.isMilestone ? 'milestone' : 'task';
 		}
 
-		const nowIso = new Date().toISOString();
-		// Auto-stamp the actual start the first time work begins.
-		if (
-			patch.status &&
-			patch.status !== 'unassigned' &&
-			patch.status !== 'completed' &&
-			!existing.actualStart &&
-			patch.actualStart === undefined
-		) {
-			update.actualStart = nowIso.slice(0, 10);
-		}
-		if (update.status === 'completed' && !existing.completedAt) {
-			update.completedAt = nowIso;
-			if (patch.progressPct === undefined) update.progressPct = 100;
-		}
-		if (update.status && update.status !== 'completed' && existing.completedAt) {
-			update.completedAt = null;
+		// Assignment drives unassigned ↔ ongoing (only from those pre-work states;
+		// a submitted/completed task keeps its status until the workflow moves it).
+		if (patch.assigneeId !== undefined) {
+			const nowIso = new Date().toISOString();
+			if (patch.assigneeId && existing.status === 'unassigned') {
+				update.status = 'ongoing';
+				if (!existing.actualStart && patch.actualStart === undefined) {
+					update.actualStart = nowIso.slice(0, 10);
+				}
+			} else if (
+				!patch.assigneeId &&
+				(existing.status === 'ongoing' || existing.status === 'blocked')
+			) {
+				update.status = 'unassigned';
+			}
 		}
 		await this.taskRepo.update(taskId, update);
+
+		// Re-derive blocked across the project (this task's assignment may have
+		// changed, which affects its own blocked eligibility).
+		await this.recomputeBlocked(projectId);
 
 		// Audit any date move into the schedule-change log (drives "this task
 		// slipped N times / why" + the task history timeline). Only when a date
@@ -357,12 +378,16 @@ export class ProjectTaskService {
 			kind: input.kind ?? 'finish_to_start',
 			lagDays: input.lagDays ?? 0
 		});
+		// A new blocking edge can immediately block the successor.
+		await this.recomputeBlocked(input.projectId);
 		return { id };
 	}
 
 	async removeDependency(depId: string, projectId: string) {
 		await this.assertCanEdit(projectId);
 		await this.depRepo.softDelete(depId);
+		// Removing an edge may unblock the former successor.
+		await this.recomputeBlocked(projectId);
 		return { id: depId };
 	}
 

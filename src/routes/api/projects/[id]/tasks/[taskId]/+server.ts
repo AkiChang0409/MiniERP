@@ -28,8 +28,9 @@ export const PATCH: RequestHandler = async (event) => {
 			'orderIndex',
 			'isMilestone',
 			'workflowStageId',
-			'status',
-			'completedAt',
+			// NOTE: `status` / `completedAt` are intentionally NOT accepted — task
+			// status is system-managed (assignment / submission / approval /
+			// blocking-dependency rules), never set directly from a generic edit.
 			// Gantt optimization P0
 			'kind',
 			'progressPct',

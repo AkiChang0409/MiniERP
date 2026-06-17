@@ -126,7 +126,7 @@
 							{#if sum.submitted > 0}<span class="ml-1 text-amber-600">{sum.submitted} 待审批</span>{/if}
 							{#if sum.done > 0}<span class="ml-1 text-emerald-600">{sum.done} 已通过</span>{/if}
 						{:else}
-							<span class="text-slate-400">无需 ISO 记录，可直接标记完成</span>
+							<span class="text-slate-400">无需 ISO 记录，提交后由 PM 审核完成</span>
 						{/if}
 					</div>
 					<span class="text-xs font-medium text-[var(--sf-green)]">打开任务 →</span>

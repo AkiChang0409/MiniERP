@@ -268,13 +268,31 @@
 	});
 
 	// Pick sidebar groups for the current section
+	// Managers / admins / PMs can review submitted tasks (project owners can too,
+	// reachable via direct link even without one of these roles).
+	const isReviewer = $derived(
+		!!data.user &&
+			(data.user.roles ?? []).some(
+				(r: string) => r === 'owner' || r === 'admin' || r === 'project_manager'
+			)
+	);
+
 	const shellSidebarGroups = $derived.by((): SideGroup[] => {
 		if (primaryFromPath === 'project') return projectListGroups;
 		if (primaryFromPath === 'hr') return hrGroups;
 		if (primaryFromPath === 'procurement') return procurementGroups;
 		if (primaryFromPath === 'sales-crm') return salesCrmGroups;
 		if (primaryFromPath === 'inventory') return inventoryGroups;
-		if (primaryFromPath === 'employee') return employeeGroups;
+		if (primaryFromPath === 'employee') {
+			const groups = [...employeeGroups];
+			if (isReviewer) {
+				groups.splice(1, 0, {
+					title: 'Manage',
+					items: [{ href: '/employee/review', label: 'Review Inbox', moduleId: null, icon: 'R' }]
+				});
+			}
+			return groups;
+		}
 		if (primaryFromPath === 'settings') return settingsGroups;
 		return financeGroups;
 	});
@@ -343,6 +361,10 @@
 		// Employee / Workplace
 		if (itemPath === '/employee/workplace') {
 			return path.startsWith('/employee/workplace');
+		}
+		// Employee / Review Inbox
+		if (itemPath === '/employee/review') {
+			return path.startsWith('/employee/review');
 		}
 		// Employee / My Leave
 		if (itemPath === '/employee/leave') {

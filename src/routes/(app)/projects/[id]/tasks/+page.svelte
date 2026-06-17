@@ -755,6 +755,32 @@
 			.map((t) => ({ ...t, attached: attached.has(t.id) }));
 	});
 
+	// Task status is system-managed (read-only in the editor); these just render it.
+	const taskStatusLabel = (s: string) =>
+		(
+			({
+				unassigned: '未分配',
+				ongoing: '进行中',
+				under_review: '待审核',
+				completed: '已完成',
+				blocked: '受阻（前置未完成）'
+			}) as { [k: string]: string }
+		)[s] ?? s;
+	const taskStatusBadge = (s: string) => {
+		switch (s) {
+			case 'completed':
+				return 'bg-emerald-100 text-emerald-700';
+			case 'under_review':
+				return 'bg-amber-100 text-amber-700';
+			case 'blocked':
+				return 'bg-rose-100 text-rose-700';
+			case 'ongoing':
+				return 'bg-sky-100 text-sky-700';
+			default:
+				return 'bg-slate-100 text-slate-600';
+		}
+	};
+
 	const qmsStatusColor = (s: string) => {
 		switch (s) {
 			case 'approved':
@@ -913,9 +939,9 @@
 			return Number.isNaN(n) ? null : n;
 		};
 		return {
+			// `status` is system-managed — never sent from the editor.
 			name: e.name.trim(),
 			description: e.description.trim() || null,
-			status: e.status,
 			kind: e.kind,
 			startDate: e.startDate || null,
 			endDate: e.endDate || null,
@@ -923,7 +949,6 @@
 			estimatedHours: num(e.estimatedHours),
 			progressPct: num(e.progressPct),
 			bufferDays: num(e.bufferDays) ?? 0,
-			blockedReason: e.blockedReason.trim() || null,
 			workflowStageId: e.workflowStageId || null,
 			parentTaskId: e.parentTaskId || null,
 			outsourcedPartnerId: e.outsourcedPartnerId || null,
@@ -1420,16 +1445,12 @@
 							<option value="buffer">Buffer</option>
 						</select>
 					</label>
-					<label class="block">
-						<span class="text-xs font-medium text-slate-500">Status</span>
-						<select bind:value={editor.status} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5">
-							<option value="unassigned">Unassigned</option>
-							<option value="ongoing">Ongoing</option>
-							<option value="under_review">Under review</option>
-							<option value="completed">Completed</option>
-							<option value="blocked">Blocked</option>
-						</select>
-					</label>
+					<div class="block">
+						<span class="text-xs font-medium text-slate-500">Status（系统自动）</span>
+						<div class="mt-1 flex h-[34px] items-center">
+							<span class="rounded-full px-2 py-0.5 text-[11px] {taskStatusBadge(editor.status)}">{taskStatusLabel(editor.status)}</span>
+						</div>
+					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<label class="block">
@@ -1468,10 +1489,9 @@
 					</label>
 				</div>
 				{#if editor.status === 'blocked'}
-					<label class="block">
-						<span class="text-xs font-medium text-slate-500">Blocked reason</span>
-						<input bind:value={editor.blockedReason} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5" placeholder="Why is it blocked?" />
-					</label>
+					<p class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+						受阻：存在未完成的前置（阻塞型）任务。前置完成后会自动解除。
+					</p>
 				{/if}
 
 				<!-- Outsourcing (P4) -->

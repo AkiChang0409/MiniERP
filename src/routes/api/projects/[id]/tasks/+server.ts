@@ -45,7 +45,7 @@ export const POST: RequestHandler = async (event) => {
 			parentTaskId: body.parentTaskId == null ? null : String(body.parentTaskId),
 			isMilestone: Boolean(body.isMilestone),
 			workflowStageId: body.workflowStageId == null ? null : String(body.workflowStageId),
-			status: (body.status as undefined) ?? undefined,
+			// `status` is system-managed (derived from assignee on create), never client-set.
 			// Gantt optimization P0
 			kind: body.kind == null ? undefined : (String(body.kind) as 'task' | 'milestone' | 'buffer'),
 			progressPct:
