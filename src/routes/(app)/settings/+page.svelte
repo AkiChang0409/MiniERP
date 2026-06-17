@@ -89,6 +89,17 @@
 				<p class="mt-1">Core modules are always considered available during dependency checks.</p>
 				<p class="mt-1">Runtime reads this configuration from <code>company_settings.modules.enabled</code>.</p>
 			</div>
+
+			<a
+				href="/settings/qms-templates"
+				class="block rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm transition hover:bg-emerald-50"
+			>
+				<h3 class="text-sm font-semibold text-emerald-800">质量管理 · ISO 9001</h3>
+				<p class="mt-1 text-xs text-slate-600">
+					维护 QMS 文件模板库（Quality Policy、Design Review、Incoming Inspection…）。task 模板会按 Task type 自动建议给 Gantt 任务。
+				</p>
+				<span class="mt-2 inline-block text-xs font-medium text-[var(--sf-green)]">打开模板库 →</span>
+			</a>
 		</div>
 	</div>
 </PageShell>

@@ -39,6 +39,7 @@
 		blockedReason: string | null;
 		outsourcedPartnerId: string | null;
 		subProjectId: string | null;
+		taskType: string | null;
 	};
 	type Dep = {
 		id: string;
@@ -600,6 +601,7 @@
 		rescheduleReason: string;
 		outsourcedPartnerId: string;
 		subProjectId: string;
+		taskType: string;
 	};
 	type HistoryRow = {
 		id: string;
@@ -631,6 +633,7 @@
 		rescheduleReason: '',
 		outsourcedPartnerId: '',
 		subProjectId: '',
+		taskType: '',
 		...preset
 	});
 	let editor = $state<Editor | null>(null);
@@ -664,11 +667,193 @@
 		}
 	}
 
+	// ---------------------------------------------------------------- ISO 9001 QMS
+	const TASK_TYPES: Array<{ value: string; label: string }> = [
+		{ value: '', label: '— 无 —' },
+		{ value: 'design', label: '设计开发 Design' },
+		{ value: 'procurement', label: '采购 Procurement' },
+		{ value: 'production', label: '生产装配 Production' },
+		{ value: 'software', label: '软件/AI Software' },
+		{ value: 'sales', label: '销售/项目 Sales' },
+		{ value: 'inspection', label: '检验 Inspection' },
+		{ value: 'document_control', label: '文控 Doc Control' },
+		{ value: 'quality', label: '质量问题 Quality' },
+		{ value: 'handover', label: '交付 Handover' },
+		{ value: 'general', label: '通用 General' }
+	];
+	type QmsTemplate = {
+		id: string;
+		code: string;
+		name: string;
+		scope: string;
+		taskType: string | null;
+		responsibleRole: string | null;
+		requiresApproval: boolean;
+		isActive: boolean;
+		moduleCategory: string | null;
+	};
+	type QmsRecord = {
+		id: string;
+		templateId: string;
+		code: string | null;
+		name: string;
+		status: string;
+		responsibleUserId: string | null;
+		responsibleName: string | null;
+		responsibleEmail: string | null;
+		responsibleRole: string | null;
+		isRequired: boolean;
+		requiresApproval: boolean;
+		version: number;
+		rejectedReason: string | null;
+		fileUrl: string | null;
+	};
+
+	// Current viewer (from the app layout) — gates the approve/reject/waive controls.
+	const currentUser = $derived(
+		(data.user as { id: string; roles?: string[] } | null | undefined) ?? null
+	);
+	const canManage = $derived.by(() => {
+		const u = currentUser;
+		if (!u) return false;
+		const roles = u.roles ?? [];
+		if (roles.some((r) => r === 'owner' || r === 'admin' || r === 'project_manager')) return true;
+		return (data.project as { ownerId?: string } | null)?.ownerId === u.id;
+	});
+
+	let allTemplates = $state<QmsTemplate[]>([]);
+	let qmsRecords = $state<QmsRecord[]>([]);
+	let qmsBusy = $state(false);
+
+	async function ensureTemplates() {
+		if (allTemplates.length > 0) return;
+		try {
+			const res: any = await fetch('/api/qms/templates').then((r) => r.json());
+			allTemplates = (res?.data?.templates ?? res?.templates ?? []) as QmsTemplate[];
+		} catch {
+			/* leave empty */
+		}
+	}
+	async function loadQmsRecords(taskId: string) {
+		qmsRecords = [];
+		try {
+			const res: any = await fetch(`/api/projects/${projectId}/tasks/${taskId}/records`).then((r) => r.json());
+			qmsRecords = (res?.data?.records ?? res?.records ?? []) as QmsRecord[];
+		} catch {
+			/* leave empty */
+		}
+	}
+	// Templates whose taskType matches the editor's current selection, each
+	// flagged if already attached. Filtered client-side so changing the dropdown
+	// updates instantly (no save needed).
+	const qmsSuggestions = $derived.by(() => {
+		const tt = editor?.taskType ?? '';
+		if (!tt) return [] as Array<QmsTemplate & { attached: boolean }>;
+		const attached = new Set(qmsRecords.map((r) => r.templateId));
+		return allTemplates
+			.filter((t) => t.isActive && t.scope === 'task' && t.taskType === tt)
+			.map((t) => ({ ...t, attached: attached.has(t.id) }));
+	});
+
+	const qmsStatusColor = (s: string) => {
+		switch (s) {
+			case 'approved':
+				return 'bg-emerald-100 text-emerald-700';
+			case 'submitted':
+				return 'bg-amber-100 text-amber-700';
+			case 'rejected':
+				return 'bg-rose-100 text-rose-700';
+			case 'waived':
+				return 'bg-slate-200 text-slate-600';
+			case 'draft':
+				return 'bg-sky-100 text-sky-700';
+			default:
+				return 'bg-slate-100 text-slate-500';
+		}
+	};
+
+	async function attachRecord(templateId: string) {
+		if (!editor?.id) return;
+		qmsBusy = true;
+		editorError = null;
+		try {
+			const res = await fetch(`/api/projects/${projectId}/tasks/${editor.id}/records`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ templateIds: [templateId] })
+			});
+			if (!res.ok) {
+				try {
+					const b: any = await res.json();
+					editorError = b?.error ?? 'Attach failed.';
+				} catch {
+					editorError = 'Attach failed.';
+				}
+			}
+			await loadQmsRecords(editor.id);
+			await refresh();
+		} finally {
+			qmsBusy = false;
+		}
+	}
+	async function recordAction(
+		recordId: string,
+		action: 'submit' | 'approve' | 'reject' | 'waive',
+		reason?: string
+	) {
+		if (!editor?.id) return;
+		qmsBusy = true;
+		editorError = null;
+		try {
+			const res = await fetch(`/api/projects/${projectId}/records/${recordId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ action, reason })
+			});
+			if (!res.ok) {
+				try {
+					const b: any = await res.json();
+					editorError = b?.error ?? 'Action failed.';
+				} catch {
+					editorError = 'Action failed.';
+				}
+			}
+			await loadQmsRecords(editor.id);
+			await refresh();
+			// The gate may have moved the task (under_review / completed / ongoing);
+			// reflect that in the still-open editor.
+			const fresh = tasks.find((t) => t.id === editor?.id);
+			if (fresh && editor) editor.status = fresh.status;
+		} finally {
+			qmsBusy = false;
+		}
+	}
+	function rejectRecord(recordId: string) {
+		const reason = prompt('退回原因（可选）：') ?? '';
+		recordAction(recordId, 'reject', reason);
+	}
+	function waiveRecord(recordId: string) {
+		const reason = prompt('豁免原因（说明为何无需此记录）：');
+		if (reason === null) return;
+		recordAction(recordId, 'waive', reason);
+	}
+	async function changeResponsible(recordId: string, userId: string) {
+		if (!editor?.id) return;
+		await fetch(`/api/projects/${projectId}/records/${recordId}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action: 'update', responsibleUserId: userId || null })
+		});
+		await loadQmsRecords(editor.id);
+	}
+
 	function openCreatePreset(preset: Partial<Editor>) {
 		editor = blankEditor(preset);
 		editorError = null;
 		taskHistory = [];
+		qmsRecords = [];
 		ensurePartners();
+		ensureTemplates();
 	}
 	function openCreate(stageId?: string) {
 		openCreatePreset({ workflowStageId: stageId && stageId !== '__backlog__' ? stageId : '' });
@@ -703,16 +888,20 @@
 			workflowStageId: t.workflowStageId ?? '',
 			parentTaskId: t.parentTaskId ?? '',
 			outsourcedPartnerId: t.outsourcedPartnerId ?? '',
-			subProjectId: t.subProjectId ?? ''
+			subProjectId: t.subProjectId ?? '',
+			taskType: t.taskType ?? ''
 		});
 		editorError = null;
 		ensurePartners();
 		loadHistory(t.id);
+		ensureTemplates();
+		loadQmsRecords(t.id);
 	}
 	function closeEditor() {
 		editor = null;
 		editorError = null;
 		taskHistory = [];
+		qmsRecords = [];
 	}
 
 	function editorPayload(e: Editor) {
@@ -739,6 +928,7 @@
 			parentTaskId: e.parentTaskId || null,
 			outsourcedPartnerId: e.outsourcedPartnerId || null,
 			subProjectId: e.subProjectId || null,
+			taskType: e.taskType || null,
 			rescheduleReason: e.rescheduleReason.trim() || null
 		};
 	}
@@ -1257,6 +1447,12 @@
 						</select>
 					</label>
 				</div>
+				<label class="block">
+					<span class="text-xs font-medium text-slate-500">Task type（ISO 记录匹配键）</span>
+					<select bind:value={editor.taskType} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5">
+						{#each TASK_TYPES as tt}<option value={tt.value}>{tt.label}</option>{/each}
+					</select>
+				</label>
 				<div class="grid grid-cols-3 gap-3">
 					<label class="block">
 						<span class="text-xs font-medium text-slate-500">Est. hours</span>
@@ -1350,6 +1546,67 @@
 							</ul>
 						</div>
 					{/if}
+
+					<!-- ISO 9001 records -->
+					<div class="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+						<p class="text-xs font-semibold text-emerald-800">ISO 9001 记录</p>
+						{#if !editor.taskType}
+							<p class="mt-1 text-xs text-slate-500">选择上方 “Task type” 后，系统会建议本任务需要的 ISO 记录。</p>
+						{:else}
+							{#if qmsRecords.length > 0}
+								<ul class="mt-2 space-y-2">
+									{#each qmsRecords as r (r.id)}
+										<li class="rounded-md border border-slate-200 bg-white p-2">
+											<div class="flex flex-wrap items-center gap-2">
+												<span class="rounded-full px-2 py-0.5 text-[10px] {qmsStatusColor(r.status)}">{r.status}</span>
+												<span class="truncate text-xs font-medium text-slate-700">{r.code ? r.code + ' · ' : ''}{r.name}</span>
+												{#if r.requiresApproval}<span class="text-[10px] text-amber-600">需审批</span>{/if}
+												{#if !r.isRequired}<span class="text-[10px] text-slate-400">非必需</span>{/if}
+												{#if r.version > 1}<span class="text-[10px] text-slate-400">v{r.version}</span>{/if}
+											</div>
+											{#if r.rejectedReason && r.status === 'rejected'}
+												<p class="mt-1 text-[11px] text-rose-600">退回：{r.rejectedReason}</p>
+											{/if}
+											<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+												<select
+													class="rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px]"
+													value={r.responsibleUserId ?? ''}
+													onchange={(e) => changeResponsible(r.id, (e.currentTarget as HTMLSelectElement).value)}
+												>
+													<option value="">— 责任人 —</option>
+													{#each users as u}<option value={u.id}>{assigneeLabel(u)}</option>{/each}
+												</select>
+												{#if r.status !== 'approved' && r.status !== 'waived'}
+													<button type="button" class="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] hover:bg-slate-50" disabled={qmsBusy} onclick={() => recordAction(r.id, 'submit')}>提交</button>
+												{/if}
+												{#if canManage}
+													{#if r.status === 'submitted'}
+														<button type="button" class="rounded-md border border-emerald-300 px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-50" disabled={qmsBusy} onclick={() => recordAction(r.id, 'approve')}>通过</button>
+														<button type="button" class="rounded-md border border-rose-300 px-2 py-0.5 text-[11px] text-rose-700 hover:bg-rose-50" disabled={qmsBusy} onclick={() => rejectRecord(r.id)}>退回</button>
+													{/if}
+													{#if r.status !== 'waived' && r.status !== 'approved'}
+														<button type="button" class="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-50" disabled={qmsBusy} onclick={() => waiveRecord(r.id)}>豁免</button>
+													{/if}
+												{/if}
+											</div>
+										</li>
+									{/each}
+								</ul>
+							{:else}
+								<p class="mt-1 text-xs text-slate-400">尚未附加任何记录。</p>
+							{/if}
+							{#if qmsSuggestions.filter((s) => !s.attached).length > 0}
+								<p class="mt-2 text-[11px] font-medium text-slate-500">建议附加：</p>
+								<div class="mt-1 flex flex-wrap gap-1.5">
+									{#each qmsSuggestions.filter((s) => !s.attached) as s (s.id)}
+										<button type="button" class="rounded-md border border-emerald-300 bg-white px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-50" disabled={qmsBusy} onclick={() => attachRecord(s.id)}>+ {s.code} {s.name}</button>
+									{/each}
+								</div>
+							{:else if qmsSuggestions.length === 0}
+								<p class="mt-2 text-[11px] text-slate-400">该 task type 暂无匹配的 ISO 模板。</p>
+							{/if}
+						{/if}
+					</div>
 				{/if}
 			</div>
 			{#if editorError}

@@ -21,6 +21,7 @@ export {
 	type TaskUpdateInput,
 	type TaskDependencyInput
 } from './services/task-service';
+export { ProjectQmsService, type QmsTemplateInput } from './services/qms-service';
 export { ProjectNotificationService } from './services/notification-service';
 export {
 	ProjectAutoAssignService,

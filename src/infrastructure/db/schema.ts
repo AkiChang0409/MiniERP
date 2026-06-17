@@ -76,6 +76,9 @@ export {
 	projectNotifications
 } from '$modules/project/repositories/project.schema';
 
+// Project QMS (ISO 9001 compliance templates + records)
+export { qmsTemplates, qmsRecords } from '$modules/project/repositories/qms.schema';
+
 // Project archive documents (contracts / quotations / POs)
 export {
 	contracts,

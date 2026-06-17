@@ -9,7 +9,8 @@ import {
 	ProjectTaskDependencyRepository,
 	ProjectWorkflowStageRepository,
 	ProjectGanttPortfolioRepository,
-	ProjectScheduleChangeRepository
+	ProjectScheduleChangeRepository,
+	QmsRecordRepository
 } from '../repositories';
 import { ProjectPermissionError, ProjectValidationError } from '../domain';
 import {
@@ -55,6 +56,8 @@ export interface TaskCreateInput {
 	baselineStart?: string | null;
 	baselineEnd?: string | null;
 	actualStart?: string | null;
+	/** ISO 9001 work-type classification — the QMS template matching key. */
+	taskType?: string | null;
 }
 
 export interface TaskUpdateInput {
@@ -80,6 +83,8 @@ export interface TaskUpdateInput {
 	baselineStart?: string | null;
 	baselineEnd?: string | null;
 	actualStart?: string | null;
+	/** ISO 9001 work-type classification — the QMS template matching key. */
+	taskType?: string | null;
 	/** Not a column — captured into the schedule-change log when dates move. */
 	rescheduleReason?: string | null;
 }
@@ -105,6 +110,7 @@ export class ProjectTaskService {
 	private stageRepo: ProjectWorkflowStageRepository;
 	private portfolioRepo: ProjectGanttPortfolioRepository;
 	private scheduleChangeRepo: ProjectScheduleChangeRepository;
+	private qmsRecordRepo: QmsRecordRepository;
 
 	constructor(private ctx: ModuleContext) {
 		this.projectRepo = new ProjectRepository(ctx.db);
@@ -114,6 +120,32 @@ export class ProjectTaskService {
 		this.stageRepo = new ProjectWorkflowStageRepository(ctx.db);
 		this.portfolioRepo = new ProjectGanttPortfolioRepository(ctx.db);
 		this.scheduleChangeRepo = new ProjectScheduleChangeRepository(ctx.db);
+		this.qmsRecordRepo = new QmsRecordRepository(ctx.db);
+	}
+
+	/**
+	 * ISO 9001 completion gate. A task may only be marked `completed` once every
+	 * REQUIRED QMS record attached to it is satisfied (approved / waived, or —
+	 * when the template needs no approval — submitted). The legitimate completion
+	 * path is `ProjectQmsService.syncTaskGate`, which writes the task status via
+	 * the repo and therefore never trips this gate; this only blocks a user who
+	 * tries to short-circuit completion manually.
+	 */
+	private async assertCompletionGate(taskId: string) {
+		const required = await this.qmsRecordRepo.requiredForTask(taskId);
+		const unsatisfied = required.filter(
+			(r) =>
+				!(
+					r.status === 'approved' ||
+					r.status === 'waived' ||
+					(!r.requiresApproval && r.status === 'submitted')
+				)
+		);
+		if (unsatisfied.length > 0) {
+			throw new ProjectValidationError({
+				status: `需先完成并通过本任务的 ISO 记录审批（${unsatisfied.length} 项待处理）。`
+			});
+		}
 	}
 
 	private async assertCanEdit(projectId: string, requireCrucial = false) {
@@ -201,7 +233,8 @@ export class ProjectTaskService {
 			bufferDays: input.bufferDays ?? 0,
 			blockedReason: input.blockedReason ?? null,
 			outsourcedPartnerId: input.outsourcedPartnerId ?? null,
-			subProjectId: input.subProjectId ?? null
+			subProjectId: input.subProjectId ?? null,
+			taskType: input.taskType ?? null
 		});
 		return { id };
 	}
@@ -210,6 +243,12 @@ export class ProjectTaskService {
 		await this.assertCanEdit(projectId);
 		const existing = await this.taskRepo.findInProject(projectId, taskId);
 		if (!existing) throw new NotFoundError('Task', taskId);
+
+		// ISO 9001 gate: block manual completion while required records are open.
+		// (Approval-driven completion goes through the repo and skips this.)
+		if (patch.status === 'completed' && existing.status !== 'completed') {
+			await this.assertCompletionGate(taskId);
+		}
 
 		const update: Record<string, unknown> = { ...patch };
 		// `rescheduleReason` is an input, not a column — pull it out before the

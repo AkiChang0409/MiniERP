@@ -229,6 +229,27 @@ export const projectTasks = sqliteTable('project_tasks', {
 	// or links to a child project that delivers this slice of work.
 	outsourcedPartnerId: text('outsourced_partner_id').references(() => businessPartners.id),
 	subProjectId: text('sub_project_id').references((): AnySQLiteColumn => projects.id),
+
+	// --- ISO 9001 QMS (2026-06) ---------------------------------------------
+	// Controlled work-type classification used purely as the matching key
+	// between a free-text task and the QMS document templates (see
+	// `qms.schema.ts`). The task NAME stays user-defined; this small enum is
+	// what the suggestion engine matches on. Nullable — untyped tasks simply
+	// get no template suggestions.
+	taskType: text('task_type', {
+		enum: [
+			'design',
+			'procurement',
+			'production',
+			'software',
+			'sales',
+			'inspection',
+			'document_control',
+			'quality',
+			'handover',
+			'general'
+		]
+	}),
 	...timeFields
 });
 

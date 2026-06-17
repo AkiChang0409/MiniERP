@@ -1,54 +1,38 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import {
-	ProjectTaskService,
-	ProjectPermissionError,
-	ProjectValidationError
-} from '$modules/project';
+import { ProjectQmsService, ProjectPermissionError, ProjectValidationError } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
- * PATCH  /api/projects/[id]/tasks/[taskId]   — drag/resize, reassign, etc.
- * DELETE /api/projects/[id]/tasks/[taskId]   — soft-delete
+ * PATCH  /api/qms/templates/[templateId]  — edit a template (manager only)
+ * DELETE /api/qms/templates/[templateId]  — retire (isActive=false)
  */
 export const PATCH: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectTaskService(ctx);
+		const svc = new ProjectQmsService(ctx);
 		const body = (await event.request.json()) as Record<string, unknown>;
 		const allowed = [
+			'code',
 			'name',
+			'moduleCategory',
+			'scope',
+			'taskType',
+			'responsibleRole',
+			'fieldSchema',
+			'fileTemplateUrl',
+			'fileTemplateName',
+			'requiresApproval',
+			'isActive',
 			'description',
-			'startDate',
-			'endDate',
-			'assigneeId',
-			'estimatedHours',
-			'parentTaskId',
-			'orderIndex',
-			'isMilestone',
-			'workflowStageId',
-			'status',
-			'completedAt',
-			// Gantt optimization P0
-			'kind',
-			'progressPct',
-			'bufferDays',
-			'blockedReason',
-			'outsourcedPartnerId',
-			'subProjectId',
-			'baselineStart',
-			'baselineEnd',
-			'actualStart',
-			'rescheduleReason',
-			// ISO 9001
-			'taskType'
+			'orderIndex'
 		];
 		const patch: Record<string, unknown> = {};
 		for (const k of allowed) {
 			if (Object.prototype.hasOwnProperty.call(body, k)) patch[k] = body[k];
 		}
-		const result = await svc.update(event.params.taskId, event.params.id, patch);
+		const result = await svc.updateTemplate(event.params.templateId, patch);
 		return ok(result);
 	} catch (e) {
 		if (e instanceof ProjectValidationError) {
@@ -63,8 +47,8 @@ export const PATCH: RequestHandler = async (event) => {
 export const DELETE: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectTaskService(ctx);
-		const result = await svc.remove(event.params.taskId, event.params.id);
+		const svc = new ProjectQmsService(ctx);
+		const result = await svc.archiveTemplate(event.params.templateId);
 		return ok(result);
 	} catch (e) {
 		if (e instanceof ProjectPermissionError) return fail(e.message, 403);

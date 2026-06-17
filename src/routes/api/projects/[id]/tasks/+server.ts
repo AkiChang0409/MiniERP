@@ -57,7 +57,9 @@ export const POST: RequestHandler = async (event) => {
 			subProjectId: body.subProjectId == null ? null : String(body.subProjectId),
 			baselineStart: body.baselineStart == null ? null : String(body.baselineStart),
 			baselineEnd: body.baselineEnd == null ? null : String(body.baselineEnd),
-			actualStart: body.actualStart == null ? null : String(body.actualStart)
+			actualStart: body.actualStart == null ? null : String(body.actualStart),
+			// ISO 9001
+			taskType: body.taskType == null ? null : String(body.taskType)
 		});
 		return ok(result, 201);
 	} catch (e) {

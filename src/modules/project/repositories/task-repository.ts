@@ -51,6 +51,7 @@ export class ProjectTaskRepository extends BaseRepository<typeof projectTasks> {
 				blockedReason: projectTasks.blockedReason,
 				outsourcedPartnerId: projectTasks.outsourcedPartnerId,
 				subProjectId: projectTasks.subProjectId,
+				taskType: projectTasks.taskType,
 				createdAt: projectTasks.createdAt,
 				updatedAt: projectTasks.updatedAt,
 				assigneeName: users.name,
@@ -90,6 +91,27 @@ export class ProjectTaskRepository extends BaseRepository<typeof projectTasks> {
 			.where(and(inArray(projectTasks.projectId, projectIds), isNull(projectTasks.deletedAt)))
 			.groupBy(projectTasks.projectId, projectTasks.status);
 		return rows.map((r) => ({ projectId: r.projectId, status: r.status, n: Number(r.n ?? 0) }));
+	}
+
+	/** Tasks assigned to a user with project name + description — powers the
+	 * personal Workplace ("My Space") view. */
+	async assignedToUserWithProject(userId: string) {
+		return this.db
+			.select({
+				id: projectTasks.id,
+				projectId: projectTasks.projectId,
+				projectName: projects.name,
+				name: projectTasks.name,
+				description: projectTasks.description,
+				status: projectTasks.status,
+				startDate: projectTasks.startDate,
+				endDate: projectTasks.endDate,
+				taskType: projectTasks.taskType
+			})
+			.from(projectTasks)
+			.leftJoin(projects, eq(projectTasks.projectId, projects.id))
+			.where(and(eq(projectTasks.assigneeId, userId), isNull(projectTasks.deletedAt)))
+			.orderBy(asc(projectTasks.endDate));
 	}
 
 	/** Used by the workload balancer (Epic 4). */

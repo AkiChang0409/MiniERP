@@ -131,7 +131,10 @@
 	const employeeGroups: SideGroup[] = [
 		{
 			title: 'Self-Service',
-			items: [{ href: '/employee/leave', label: 'My Leave', moduleId: null, icon: 'L' }]
+			items: [
+				{ href: '/employee/workplace', label: 'My Workplace', moduleId: null, icon: 'W' },
+				{ href: '/employee/leave', label: 'My Leave', moduleId: null, icon: 'L' }
+			]
 		},
 		{
 			title: 'AI (Test)',
@@ -336,6 +339,10 @@
 		// HR / Overtime
 		if (itemPath === '/hr/overtime') {
 			return path.startsWith('/hr/overtime');
+		}
+		// Employee / Workplace
+		if (itemPath === '/employee/workplace') {
+			return path.startsWith('/employee/workplace');
 		}
 		// Employee / My Leave
 		if (itemPath === '/employee/leave') {
