@@ -19,7 +19,8 @@ import {
  */
 describe('project capability contract', () => {
 	it('every capability exposes serializable Zod input + output schemas', () => {
-		expect(projectCapabilities.length).toBe(7);
+		// 7 read/suggestive (R0–R1) + 4 Stage-2 drafts (R3, read) + 2 Stage-3 writes (R4).
+		expect(projectCapabilities.length).toBe(13);
 		for (const capability of projectCapabilities) {
 			expect(capability.inputSchema, `${capability.id} missing inputSchema`).toBeDefined();
 			expect(capability.outputSchema, `${capability.id} missing outputSchema`).toBeDefined();
@@ -32,9 +33,10 @@ describe('project capability contract', () => {
 		for (const capability of projectCapabilities) {
 			const policy = projectAgentAllowedCapabilities.find((entry) => entry.id === capability.id);
 			expect(policy, `${capability.id} has no policy entry`).toBeDefined();
-			// All project capabilities are read-only / suggestive.
-			expect(policy?.sideEffect).toBe('read');
-			expect(policy?.requiresConfirmation).toBe(false);
+			// Invariant: write capabilities require confirmation; read/draft do not.
+			expect(policy?.requiresConfirmation, `${capability.id} confirmation/sideEffect mismatch`).toBe(
+				policy?.sideEffect === 'write'
+			);
 		}
 	});
 });

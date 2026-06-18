@@ -1,5 +1,4 @@
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
-import { createFinanceApi } from '../../api';
 import type { FinanceCapability } from '../types';
 import {
 	answerFinanceQuestionInputSchema,
@@ -40,6 +39,10 @@ export const answerFinanceQuestionCapability: FinanceCapability<
 			throw new Error('finance.answer-question requires a module context');
 		}
 
+		// Lazy import to avoid a static cycle (capabilities → api → services →
+		// finance barrel → module → capabilities). HR uses a dedicated api file for
+		// the same reason; finance's aggregate api closes the loop statically.
+		const { createFinanceApi } = await import('../../api');
 		const api = createFinanceApi(ctx.moduleContext);
 		const overview = await api.insights.getCompanyFinancialOverview({});
 

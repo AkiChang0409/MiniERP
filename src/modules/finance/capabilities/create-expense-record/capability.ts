@@ -1,4 +1,3 @@
-import { createFinanceApi } from '../../api';
 import type { FinanceCapability } from '../types';
 import {
 	createExpenseRecordInputSchema,
@@ -28,6 +27,8 @@ export const createExpenseRecordCapability: FinanceCapability<
 		if (!ctx.moduleContext) {
 			throw new Error('finance.create-expense-record requires a module context');
 		}
+		// Lazy import breaks the static capabilities → api → barrel cycle.
+		const { createFinanceApi } = await import('../../api');
 		const created = await createFinanceApi(ctx.moduleContext).expenses.create(input);
 		return { id: created.id };
 	}
