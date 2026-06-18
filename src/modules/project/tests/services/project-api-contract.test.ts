@@ -55,7 +55,49 @@ const EXPECTED_METHODS = [
 	'getProjectFinancials',
 	// directory
 	'searchUsers',
-	'listUsers'
+	'listUsers',
+	// tasks / Gantt (ProjectTaskService — renamed to avoid project-level collisions)
+	'listTasks',
+	'createTask',
+	'updateTask',
+	'removeTask',
+	'listTaskHistory',
+	'addTaskDependency',
+	'removeTaskDependency',
+	'getTaskSchedule',
+	'getCriticalPath',
+	'getGanttPortfolio',
+	'listStages',
+	'setStages',
+	'advanceStages',
+	// QMS templates
+	'listQmsTemplates',
+	'createQmsTemplate',
+	'updateQmsTemplate',
+	'archiveQmsTemplate',
+	// QMS records
+	'suggestQmsForTask',
+	'listTaskRecords',
+	'listProjectRecords',
+	'attachRecordsToTask',
+	'updateRecord',
+	'submitRecord',
+	'approveRecord',
+	'rejectRecord',
+	'waiveRecord',
+	// QMS-driven task workflow (workplace / review)
+	'getWorkplace',
+	'listReviewQueue',
+	'approveTask',
+	'rejectTask',
+	'getTaskDetail',
+	'assigneeSubmitTask',
+	// notifications
+	'listNotifications',
+	'markNotificationRead',
+	'markAllNotificationsRead',
+	// task execution calendar
+	'getCalendarEvents'
 ] as const;
 
 describe('project api contract', () => {

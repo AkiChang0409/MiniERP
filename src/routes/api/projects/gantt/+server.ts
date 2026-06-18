@@ -1,6 +1,6 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
-import { ProjectTaskService } from '$modules/project';
+import { createProjectApi } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -15,9 +15,9 @@ import { fail, ok } from '$platform/http';
 export const GET: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectTaskService(ctx);
+		const project = createProjectApi(ctx);
 		const scope = event.url.searchParams.get('scope') === 'mine' ? 'mine' : 'all';
-		const data = await svc.portfolio({
+		const data = await project.getGanttPortfolio({
 			scope,
 			fromIso: event.url.searchParams.get('from') ?? undefined,
 			toIso: event.url.searchParams.get('to') ?? undefined

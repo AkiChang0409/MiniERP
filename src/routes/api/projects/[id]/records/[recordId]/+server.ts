@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import { ProjectQmsService, ProjectPermissionError, ProjectValidationError } from '$modules/project';
+import { createProjectApi, ProjectPermissionError, ProjectValidationError } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -19,7 +19,7 @@ import { fail, ok } from '$platform/http';
 export const PATCH: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
+		const project = createProjectApi(ctx);
 		const projectId = event.params.id;
 		const recordId = event.params.recordId;
 		const body = (await event.request.json()) as Record<string, unknown>;
@@ -28,31 +28,31 @@ export const PATCH: RequestHandler = async (event) => {
 		let result;
 		switch (action) {
 			case 'submit':
-				result = await svc.submitRecord(
+				result = await project.submitRecord(
 					projectId,
 					recordId,
 					body.fields === undefined ? undefined : body.fields == null ? null : String(body.fields)
 				);
 				break;
 			case 'approve':
-				result = await svc.approveRecord(projectId, recordId);
+				result = await project.approveRecord(projectId, recordId);
 				break;
 			case 'reject':
-				result = await svc.rejectRecord(
+				result = await project.rejectRecord(
 					projectId,
 					recordId,
 					body.reason == null ? null : String(body.reason)
 				);
 				break;
 			case 'waive':
-				result = await svc.waiveRecord(
+				result = await project.waiveRecord(
 					projectId,
 					recordId,
 					body.reason == null ? null : String(body.reason)
 				);
 				break;
 			case 'update':
-				result = await svc.updateRecord(projectId, recordId, {
+				result = await project.updateRecord(projectId, recordId, {
 					responsibleUserId:
 						body.responsibleUserId === undefined
 							? undefined

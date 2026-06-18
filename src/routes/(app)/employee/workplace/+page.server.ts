@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { createModuleContext } from '$platform/modules';
-import { ProjectQmsService } from '$modules/project';
+import { createProjectApi } from '$modules/project';
 
 /**
  * Personal Workplace — the signed-in user's assigned tasks across projects,
@@ -17,9 +17,9 @@ export const load: PageServerLoad = async (event) => {
 		return { workplace: [], dataMessage: 'Sign in to see your workplace.' };
 	}
 	const ctx = await createModuleContext(event);
-	const svc = new ProjectQmsService(ctx);
+	const project = createProjectApi(ctx);
 	try {
-		const workplace = await svc.getWorkplace(userId);
+		const workplace = await project.getWorkplace(userId);
 		return { workplace, dataMessage: null as string | null };
 	} catch (err) {
 		const msg = (err as Error)?.message ?? '';

@@ -1,72 +1,108 @@
 import type { PageServerLoad } from './$types';
 
 import { createModuleContext } from '$platform/modules';
-import {
-	createProjectApi,
-	ProjectCalendarIntegrationService
-} from '$modules/project';
+import { createProjectApi, ProjectCalendarIntegrationService } from '$modules/project';
 
-function firstOfMonth(date: Date): Date {
-	return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+type CalendarView = 'agenda' | 'week' | 'month';
+
+function parseView(value: string | null): CalendarView {
+	return value === 'agenda' || value === 'month' ? value : 'week';
 }
 
-function lastOfMonth(date: Date): Date {
-	return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+function isoDay(d: Date): string {
+	return d.toISOString().slice(0, 10);
 }
 
-function parseMonthParam(value: string | null): { year: number; month: number } {
+function parseAnchor(value: string | null): Date {
+	if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+		const d = new Date(`${value}T00:00:00Z`);
+		if (!Number.isNaN(d.getTime())) return d;
+	}
+	return new Date(`${isoDay(new Date())}T00:00:00Z`);
+}
+
+function parseMonth(value: string | null): { year: number; month: number } {
 	if (value) {
 		const m = /^(\d{4})-(\d{2})$/.exec(value);
 		if (m) {
 			const year = Number(m[1]);
 			const month = Number(m[2]) - 1;
-			if (Number.isFinite(year) && month >= 0 && month <= 11) {
-				return { year, month };
-			}
+			if (Number.isFinite(year) && month >= 0 && month <= 11) return { year, month };
 		}
 	}
 	const now = new Date();
 	return { year: now.getUTCFullYear(), month: now.getUTCMonth() };
 }
 
+/** Window the calendar projects events over, derived from the active view. */
+function windowFor(
+	view: CalendarView,
+	anchor: Date,
+	month: { year: number; month: number }
+): { fromIso: string; toIso: string } {
+	if (view === 'month') {
+		const first = new Date(Date.UTC(month.year, month.month, 1));
+		const last = new Date(Date.UTC(month.year, month.month + 1, 0));
+		return { fromIso: isoDay(first), toIso: isoDay(last) };
+	}
+	if (view === 'week') {
+		const start = new Date(anchor);
+		start.setUTCDate(start.getUTCDate() - start.getUTCDay()); // back to Sunday
+		const end = new Date(start);
+		end.setUTCDate(end.getUTCDate() + 6);
+		return { fromIso: isoDay(start), toIso: isoDay(end) };
+	}
+	// agenda: reach back to surface overdue work + look ~3 weeks ahead.
+	const start = new Date(anchor);
+	start.setUTCDate(start.getUTCDate() - 45);
+	const end = new Date(anchor);
+	end.setUTCDate(end.getUTCDate() + 21);
+	return { fromIso: isoDay(start), toIso: isoDay(end) };
+}
+
 export const load: PageServerLoad = async (event) => {
+	const view = parseView(event.url.searchParams.get('view'));
+	const anchor = parseAnchor(event.url.searchParams.get('date'));
+	const month = parseMonth(event.url.searchParams.get('month'));
+
+	const currentUserId = event.locals.user?.id ?? null;
+
 	if (!event.platform) {
 		return {
-			entries: [],
-			month: { year: new Date().getUTCFullYear(), month: new Date().getUTCMonth() },
+			events: [],
+			view,
+			anchor: isoDay(anchor),
+			month,
 			range: { from: '', to: '' },
-			integrations: []
+			integrations: [],
+			currentUserId,
+			dataMessage: 'Cloudflare platform bindings are required.'
 		};
 	}
 
-	const { year, month } = parseMonthParam(event.url.searchParams.get('month'));
-	const first = firstOfMonth(new Date(Date.UTC(year, month, 1)));
-	const last = lastOfMonth(new Date(Date.UTC(year, month, 1)));
-	const fromIso = first.toISOString().slice(0, 10);
-	const toIso = last.toISOString().slice(0, 10);
+	const { fromIso, toIso } = windowFor(view, anchor, month);
 
 	const ctx = await createModuleContext(event);
 	const project = createProjectApi(ctx);
 	const integrationsSvc = new ProjectCalendarIntegrationService(ctx);
 
-	// `statusForUser()` already handles a missing table; we still wrap each
-	// call so an unrelated DB blip on either side doesn't take the whole
-	// page down.
-	let entries: Awaited<ReturnType<typeof project.getCalendarEntries>> = [];
+	let events: Awaited<ReturnType<typeof project.getCalendarEvents>> = [];
 	let integrations: Awaited<ReturnType<typeof integrationsSvc.statusForUser>> = [];
 	let dataMessage: string | null = null;
-	const [entriesRes, integrationsRes] = await Promise.allSettled([
-		project.getCalendarEntries({ fromIso, toIso }),
+
+	const [eventsRes, integrationsRes] = await Promise.allSettled([
+		project.getCalendarEvents({ fromIso, toIso }),
 		integrationsSvc.statusForUser()
 	]);
-	if (entriesRes.status === 'fulfilled') {
-		entries = entriesRes.value;
+
+	if (eventsRes.status === 'fulfilled') {
+		events = eventsRes.value;
 	} else {
-		const msg = (entriesRes.reason as Error)?.message ?? '';
-		if (/no such table|project_calendar_integrations|project_tasks/i.test(msg)) {
+		const msg = (eventsRes.reason as Error)?.message ?? '';
+		if (/no such table|project_tasks|project_calendar_integrations/i.test(msg)) {
 			dataMessage = 'Database is missing recent tables. Run `npm run db:migrate:local`.';
 		} else {
-			throw entriesRes.reason;
+			throw eventsRes.reason;
 		}
 	}
 	if (integrationsRes.status === 'fulfilled') {
@@ -74,10 +110,13 @@ export const load: PageServerLoad = async (event) => {
 	}
 
 	return {
-		entries,
-		month: { year, month },
+		events,
+		view,
+		anchor: isoDay(anchor),
+		month,
 		range: { from: fromIso, to: toIso },
 		integrations,
+		currentUserId,
 		dataMessage
 	};
 };

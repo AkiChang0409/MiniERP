@@ -50,7 +50,7 @@
 	async function decide(t: QueueTask, decision: 'approve' | 'reject') {
 		let reason: string | null = null;
 		if (decision === 'reject') {
-			reason = prompt('退回原因（assignee 会看到）：') ?? '';
+			reason = prompt('Rejection reason (visible to the assignee):') ?? '';
 		}
 		busyId = t.id;
 		errorById = { ...errorById, [t.id]: '' };
@@ -61,7 +61,7 @@
 				body: JSON.stringify({ decision, reason })
 			});
 			if (!res.ok) {
-				let msg = `操作失败 (HTTP ${res.status}).`;
+				let msg = `Action failed (HTTP ${res.status}).`;
 				try {
 					const b: any = await res.json();
 					if (b?.error) msg = b.error;
@@ -73,7 +73,7 @@
 			}
 			await invalidateAll();
 		} catch (e) {
-			errorById = { ...errorById, [t.id]: `网络错误：${(e as Error).message}` };
+			errorById = { ...errorById, [t.id]: `Network error: ${(e as Error).message}` };
 		} finally {
 			busyId = null;
 		}
@@ -82,8 +82,8 @@
 
 <PageShell
 	eyebrow="Employee · Review"
-	title="审核工作区"
-	description="你负责项目里、assignee 提交待审的任务。通过则任务完成；退回则回到“进行中”由 assignee 重新提交。"
+	title="Review Workspace"
+	description="Tasks submitted for your review. Approving completes the task; rejecting sends it back to the assignee for resubmission."
 >
 	{#if data.dataMessage}
 		<p class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
@@ -92,25 +92,25 @@
 	{/if}
 
 	<p class="mb-4 text-sm text-slate-500">
-		待审 <span class="font-semibold text-[var(--sf-green)]">{queue.length}</span> 项。
+		<span class="font-semibold text-[var(--sf-green)]">{queue.length}</span> submission{queue.length === 1 ? '' : 's'} pending review.
 	</p>
 
 	<div class="space-y-4">
 		{#each queue as t (t.id)}
 			<div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
 				<div class="flex flex-wrap items-center gap-2">
-					<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">待审核</span>
+					<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">Pending review</span>
 					<a href={`/projects/${t.projectId}/tasks`} class="text-sm font-semibold text-slate-900 hover:text-[var(--sf-green)] hover:underline">{t.name}</a>
 					<span class="text-xs text-slate-400">·</span>
-					<span class="text-xs text-slate-500">{t.projectName ?? '项目'}</span>
-					<span class="ml-auto text-xs text-slate-500">提交人：{t.assigneeName ?? t.assigneeEmail ?? '—'}</span>
+					<span class="text-xs text-slate-500">{t.projectName ?? 'Project'}</span>
+					<span class="ml-auto text-xs text-slate-500">Submitted by: {t.assigneeName ?? t.assigneeEmail ?? '—'}</span>
 				</div>
 
 				{#if t.description}
 					<p class="mt-1.5 text-sm text-slate-600">{t.description}</p>
 				{/if}
 				{#if t.submissionNote}
-					<p class="mt-1.5 whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">提交说明：{t.submissionNote}</p>
+					<p class="mt-1.5 whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">Submission note: {t.submissionNote}</p>
 				{/if}
 
 				{#if t.records.length > 0}
@@ -120,11 +120,11 @@
 								<div class="flex flex-wrap items-center gap-2">
 									<span class="rounded-full px-2 py-0.5 text-[10px] {recColor(r.status)}">{r.status}</span>
 									<span class="text-xs font-medium text-slate-700">{r.code ? r.code + ' · ' : ''}{r.name}</span>
-									{#if r.requiresApproval}<span class="text-[10px] text-amber-600">需审批</span>{/if}
-									<span class="text-[10px] text-slate-400">责任人：{r.responsibleName ?? '—'}</span>
+									{#if r.requiresApproval}<span class="text-[10px] text-amber-600">Approval required</span>{/if}
+									<span class="text-[10px] text-slate-400">Owner: {r.responsibleName ?? '—'}</span>
 								</div>
 								{#if r.fields}
-									<p class="mt-1 whitespace-pre-wrap text-[11px] text-slate-600">填写：{r.fields}</p>
+									<p class="mt-1 whitespace-pre-wrap text-[11px] text-slate-600">Filled: {r.fields}</p>
 								{/if}
 							</li>
 						{/each}
@@ -141,7 +141,7 @@
 						disabled={busyId === t.id}
 						onclick={() => decide(t, 'reject')}
 					>
-						退回
+						Reject
 					</button>
 					<button
 						type="button"
@@ -149,13 +149,13 @@
 						disabled={busyId === t.id}
 						onclick={() => decide(t, 'approve')}
 					>
-						{busyId === t.id ? '处理中…' : '通过 → 完成'}
+						{busyId === t.id ? 'Processing...' : 'Approve → complete'}
 					</button>
 				</div>
 			</div>
 		{:else}
 			<div class="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
-				没有待审核的提交。
+				No submissions are pending review.
 			</div>
 		{/each}
 	</div>

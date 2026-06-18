@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import { ProjectQmsService } from '$modules/project';
+import { createProjectApi } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -12,8 +12,8 @@ import { fail, ok } from '$platform/http';
 export const GET: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
-		const data = await svc.suggestForTask(event.params.id, event.params.taskId);
+		const project = createProjectApi(ctx);
+		const data = await project.suggestQmsForTask(event.params.id, event.params.taskId);
 		return ok(data);
 	} catch (e) {
 		if (e instanceof NotFoundError) return fail(e.message, 404);

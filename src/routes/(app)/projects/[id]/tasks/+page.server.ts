@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
 
 import { createModuleContext } from '$platform/modules';
-import { ProjectTaskService, createProjectApi } from '$modules/project';
+import { createProjectApi } from '$modules/project';
 
 /**
  * Project-internal Gantt (P1). Loads the task roster + dependency graph +
@@ -28,16 +28,15 @@ export const load: PageServerLoad = async (event) => {
 	}
 
 	const ctx = await createModuleContext(event);
-	const svc = new ProjectTaskService(ctx);
 	const api = createProjectApi(ctx);
 	const projectId = event.params.id;
 
 	try {
 		const [project, roster, sched, stages, users, subProjects] = await Promise.all([
 			api.getById(projectId),
-			svc.list(projectId),
-			svc.schedule(projectId),
-			svc.listStages(projectId),
+			api.listTasks(projectId),
+			api.getTaskSchedule(projectId),
+			api.listStages(projectId),
 			api.listUsers(),
 			api.getSubProjects(projectId)
 		]);

@@ -54,17 +54,17 @@
 	const statusLabel = (s: string) =>
 		(
 			({
-				not_started: '待填写',
-				draft: '草稿',
-				submitted: '已提交 · 待审批',
-				approved: '已通过',
-				rejected: '被退回',
-				waived: '已豁免',
-				unassigned: '未开始',
-				ongoing: '进行中',
-				under_review: '待审批',
-				completed: '已完成',
-				blocked: '受阻'
+				not_started: 'Not started',
+				draft: 'Draft',
+				submitted: 'Submitted · pending approval',
+				approved: 'Approved',
+				rejected: 'Rejected',
+				waived: 'Waived',
+				unassigned: 'Not started',
+				ongoing: 'In progress',
+				under_review: 'Pending approval',
+				completed: 'Completed',
+				blocked: 'Blocked'
 			}) as { [k: string]: string }
 		)[s] ?? s;
 
@@ -80,8 +80,8 @@
 
 <PageShell
 	eyebrow="Employee · Workplace"
-	title="我的工作台"
-	description="分配给你的任务。点开任意任务进入详情页：查看描述、下载模板、填写说明并提交或标记完成。"
+	title="My Workplace"
+	description="Tasks assigned to you. Open any task to view details, download templates, add notes, and submit or mark the work complete."
 >
 	{#if data.dataMessage}
 		<p class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
@@ -90,8 +90,8 @@
 	{/if}
 
 	<p class="mb-4 text-sm text-slate-500">
-		共 <span class="font-semibold text-slate-700">{tasks.length}</span> 个任务，
-		<span class="font-semibold text-[var(--sf-green)]">{pendingCount}</span> 项待提交记录。
+		<span class="font-semibold text-slate-700">{tasks.length}</span> task{tasks.length === 1 ? '' : 's'},
+		<span class="font-semibold text-[var(--sf-green)]">{pendingCount}</span> record{pendingCount === 1 ? '' : 's'} pending submission.
 	</p>
 
 	<div class="space-y-3">
@@ -105,12 +105,12 @@
 					<span class="rounded-full px-2 py-0.5 text-[11px] {statusColor(t.status)}">{statusLabel(t.status)}</span>
 					<span class="text-sm font-semibold text-slate-900">{t.name}</span>
 					<span class="text-xs text-slate-400">·</span>
-					<span class="text-xs text-slate-500">{t.projectName ?? '项目'}</span>
+					<span class="text-xs text-slate-500">{t.projectName ?? 'Project'}</span>
 					{#if !t.assignedToMe}
-						<span class="text-[11px] text-slate-400">（你是某记录的责任人）</span>
+						<span class="text-[11px] text-slate-400">(you own one of the records)</span>
 					{/if}
 					{#if t.endDate}
-						<span class="ml-auto text-xs text-slate-500">截止 {t.endDate}</span>
+						<span class="ml-auto text-xs text-slate-500">Due {t.endDate}</span>
 					{/if}
 				</div>
 
@@ -121,20 +121,20 @@
 				<div class="mt-2 flex items-center justify-between">
 					<div class="text-xs text-slate-500">
 						{#if sum}
-							ISO 记录：
-							{#if sum.pending > 0}<span class="font-medium text-rose-600">{sum.pending} 待提交</span>{/if}
-							{#if sum.submitted > 0}<span class="ml-1 text-amber-600">{sum.submitted} 待审批</span>{/if}
-							{#if sum.done > 0}<span class="ml-1 text-emerald-600">{sum.done} 已通过</span>{/if}
+							ISO records:
+							{#if sum.pending > 0}<span class="font-medium text-rose-600">{sum.pending} pending submission</span>{/if}
+							{#if sum.submitted > 0}<span class="ml-1 text-amber-600">{sum.submitted} pending approval</span>{/if}
+							{#if sum.done > 0}<span class="ml-1 text-emerald-600">{sum.done} approved</span>{/if}
 						{:else}
-							<span class="text-slate-400">无需 ISO 记录，提交后由 PM 审核完成</span>
+							<span class="text-slate-400">No ISO records required. The PM will review this task after submission.</span>
 						{/if}
 					</div>
-					<span class="text-xs font-medium text-[var(--sf-green)]">打开任务 →</span>
+					<span class="text-xs font-medium text-[var(--sf-green)]">Open task →</span>
 				</div>
 			</a>
 		{:else}
 			<div class="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
-				目前没有分配给你的任务。
+				No tasks are assigned to you yet.
 			</div>
 		{/each}
 	</div>

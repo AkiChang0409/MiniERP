@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import { ProjectQmsService, ProjectPermissionError, ProjectValidationError } from '$modules/project';
+import { createProjectApi, ProjectPermissionError, ProjectValidationError } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -15,7 +15,7 @@ import { fail, ok } from '$platform/http';
 export const POST: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
+		const project = createProjectApi(ctx);
 		const body = (await event.request.json().catch(() => ({}))) as {
 			note?: unknown;
 			recordNotes?: Record<string, unknown>;
@@ -26,7 +26,7 @@ export const POST: RequestHandler = async (event) => {
 				if (v != null) recordNotes[k] = String(v);
 			}
 		}
-		const result = await svc.assigneeSubmitTask(event.params.id, event.params.taskId, {
+		const result = await project.assigneeSubmitTask(event.params.id, event.params.taskId, {
 			note: body.note === undefined ? undefined : body.note == null ? null : String(body.note),
 			recordNotes
 		});

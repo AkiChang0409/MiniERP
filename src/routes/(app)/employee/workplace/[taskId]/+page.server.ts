@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { createModuleContext } from '$platform/modules';
-import { ProjectQmsService } from '$modules/project';
+import { createProjectApi } from '$modules/project';
 import { ProjectPermissionError } from '$modules/project';
 import { NotFoundError } from '$platform/modules/errors';
 
@@ -17,9 +17,9 @@ export const load: PageServerLoad = async (event) => {
 		throw error(401, 'Sign in to view this task.');
 	}
 	const ctx = await createModuleContext(event);
-	const svc = new ProjectQmsService(ctx);
+	const project = createProjectApi(ctx);
 	try {
-		const detail = await svc.getTaskDetail(event.params.taskId, userId);
+		const detail = await project.getTaskDetail(event.params.taskId, userId);
 		return detail;
 	} catch (e) {
 		if (e instanceof NotFoundError) throw error(404, 'Task not found.');

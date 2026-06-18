@@ -3,8 +3,7 @@ import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
 import {
 	answerProjectQuestion,
-	createProjectApi,
-	ProjectTaskService
+	createProjectApi
 } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
@@ -26,11 +25,10 @@ export const POST: RequestHandler = async (event) => {
 
 		const ctx = await createModuleContext(event);
 		const project = createProjectApi(ctx);
-		const taskSvc = new ProjectTaskService(ctx);
 
 		const [shell, taskData, comments, attachments] = await Promise.all([
 			project.getProjectShell(event.params.id),
-			taskSvc.list(event.params.id),
+			project.listTasks(event.params.id),
 			project.listComments(event.params.id),
 			project.listAttachments(event.params.id)
 		]);

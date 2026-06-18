@@ -49,6 +49,15 @@ const INTENT_KEYWORDS: Array<{ intent: ProjectIntent; patterns: RegExp[] }> = [
 		patterns: [/meeting\s+agenda/i, /draft.*agenda/i, /agenda\s+for.*meeting/i]
 	},
 	{
+		intent: 'view_calendar',
+		patterns: [
+			/calendar/i,
+			/(this|next)\s+week.*(tasks?|due|deadlines?)/i,
+			/what('s| is).*(due|overdue|happening)/i,
+			/tasks?\s+(due|starting|overdue)\s+(today|this\s+week|tomorrow)/i
+		]
+	},
+	{
 		intent: 'answer_project_question',
 		patterns: [/(what|who|when|why|how|where)\b/i, /question\s+about.*project/i, /ask.*project/i]
 	}
@@ -67,6 +76,7 @@ const INTENT_RISK: Record<ProjectIntent, ProjectRiskLevel> = {
 	extract_tasks: 'R1',
 	draft_meeting_agenda: 'R0',
 	process_meeting_notes: 'R1',
+	view_calendar: 'R1',
 	unknown: 'R0'
 };
 
@@ -77,6 +87,7 @@ const INTENT_REQUIRED_INPUTS: Record<ProjectIntent, string[]> = {
 	extract_tasks: ['document_text'],
 	draft_meeting_agenda: ['project', 'objective'],
 	process_meeting_notes: ['transcript'],
+	view_calendar: ['fromIso', 'toIso'],
 	unknown: []
 };
 

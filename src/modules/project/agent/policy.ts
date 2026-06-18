@@ -64,6 +64,13 @@ export const projectAgentAllowedCapabilities: ProjectCapabilityPolicyEntry[] = [
 		sideEffect: 'read',
 		requiresConfirmation: false,
 		requiredUserPermissions: ['project:edit']
+	},
+	{
+		id: 'project.view-calendar',
+		riskLevel: 'R1',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:view']
 	}
 ];
 

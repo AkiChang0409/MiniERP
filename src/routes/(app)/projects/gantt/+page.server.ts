@@ -2,7 +2,7 @@ import type { PageServerLoad } from './$types';
 
 import { createModuleContext } from '$platform/modules';
 import {
-	ProjectTaskService,
+	createProjectApi,
 	computeUrgency,
 	type UrgencyResult
 } from '$modules/project';
@@ -26,7 +26,7 @@ export const load: PageServerLoad = async (event) => {
 	}
 
 	const ctx = await createModuleContext(event);
-	const svc = new ProjectTaskService(ctx);
+	const project = createProjectApi(ctx);
 
 	const range = defaultRange();
 	const scope = event.url.searchParams.get('scope') === 'mine' ? 'mine' : 'all';
@@ -35,10 +35,10 @@ export const load: PageServerLoad = async (event) => {
 
 	// Portfolio query joins `project_tasks` — if migration 0010 hasn't run,
 	// degrade to a project-only view rather than 500.
-	let projects: Awaited<ReturnType<typeof svc.portfolio>>['projects'] = [];
+	let projects: Awaited<ReturnType<typeof project.getGanttPortfolio>>['projects'] = [];
 	let dataMessage: string | null = null;
 	try {
-		const result = await svc.portfolio({ scope, fromIso: from, toIso: to });
+		const result = await project.getGanttPortfolio({ scope, fromIso: from, toIso: to });
 		projects = result.projects;
 	} catch (err) {
 		const msg = (err as Error)?.message ?? '';

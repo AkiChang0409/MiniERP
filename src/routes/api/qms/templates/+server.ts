@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import { ProjectQmsService, ProjectPermissionError, ProjectValidationError } from '$modules/project';
+import { createProjectApi, ProjectPermissionError, ProjectValidationError } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -11,9 +11,9 @@ import { fail, ok } from '$platform/http';
 export const GET: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
+		const project = createProjectApi(ctx);
 		const includeInactive = event.url.searchParams.get('includeInactive') === '1';
-		const templates = await svc.listTemplates({ includeInactive });
+		const templates = await project.listQmsTemplates({ includeInactive });
 		return ok({ templates });
 	} catch (e) {
 		if (e instanceof ProjectPermissionError) return fail(e.message, 403);
@@ -24,9 +24,9 @@ export const GET: RequestHandler = async (event) => {
 export const POST: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
+		const project = createProjectApi(ctx);
 		const body = (await event.request.json()) as Record<string, unknown>;
-		const result = await svc.createTemplate({
+		const result = await project.createQmsTemplate({
 			code: String(body.code ?? ''),
 			name: String(body.name ?? ''),
 			moduleCategory: body.moduleCategory == null ? null : String(body.moduleCategory),

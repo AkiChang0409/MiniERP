@@ -24,6 +24,15 @@ export {
 export { ProjectQmsService, type QmsTemplateInput } from './services/qms-service';
 export { ProjectNotificationService } from './services/notification-service';
 export {
+	ProjectCalendarService,
+	CalendarEventsInputSchema,
+	type CalendarEventsInput,
+	type CalendarTaskEvent,
+	type CalendarEventType,
+	type CalendarBadge,
+	type CalendarQuickFilter
+} from './services/calendar-service';
+export {
 	ProjectAutoAssignService,
 	type AutoAssignInput,
 	type AutoAssignResult

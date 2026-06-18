@@ -144,6 +144,7 @@
 	// --------------------------------------------------------------- timeline
 	type Scale = 'day' | 'week' | 'month';
 	let scale = $state<Scale>('day');
+	let showBaselineDrift = $state(false);
 	const PX_PER_DAY: Record<Scale, number> = { day: 30, week: 11, month: 4 };
 	const pxPerDay = $derived(PX_PER_DAY[scale]);
 
@@ -204,11 +205,15 @@
 	const inclusiveDayWidth = (startIso: string | null, endIso: string | null) => {
 		return Math.max(1, dayOffset(endIso) - dayOffset(startIso) + 1);
 	};
+	const hasBaselineDrift = (t: Task) =>
+		!!t.baselineStart &&
+		!!t.baselineEnd &&
+		(t.baselineStart !== t.startDate || t.baselineEnd !== t.endDate);
 	const todayX = $derived((Math.round((todayStart() - windowMs.from) / ONE_DAY)) * pxPerDay);
 
 	const TICK_HEIGHT = 36;
 	const ROW_HEIGHT = 28;
-	const BAR_HEIGHT = 12;
+	const BAR_HEIGHT = 18;
 
 	const ticks = $derived.by(() => {
 		const out: Array<{ x: number; label: string; major: boolean }> = [];
@@ -669,17 +674,17 @@
 
 	// ---------------------------------------------------------------- ISO 9001 QMS
 	const TASK_TYPES: Array<{ value: string; label: string }> = [
-		{ value: '', label: '— 无 —' },
-		{ value: 'design', label: '设计开发 Design' },
-		{ value: 'procurement', label: '采购 Procurement' },
-		{ value: 'production', label: '生产装配 Production' },
-		{ value: 'software', label: '软件/AI Software' },
-		{ value: 'sales', label: '销售/项目 Sales' },
-		{ value: 'inspection', label: '检验 Inspection' },
-		{ value: 'document_control', label: '文控 Doc Control' },
-		{ value: 'quality', label: '质量问题 Quality' },
-		{ value: 'handover', label: '交付 Handover' },
-		{ value: 'general', label: '通用 General' }
+		{ value: '', label: '— None —' },
+		{ value: 'design', label: 'Design development' },
+		{ value: 'procurement', label: 'Procurement' },
+		{ value: 'production', label: 'Production assembly' },
+		{ value: 'software', label: 'Software / AI' },
+		{ value: 'sales', label: 'Sales / project' },
+		{ value: 'inspection', label: 'Inspection' },
+		{ value: 'document_control', label: 'Document control' },
+		{ value: 'quality', label: 'Quality issue' },
+		{ value: 'handover', label: 'Handover' },
+		{ value: 'general', label: 'General' }
 	];
 	type QmsTemplate = {
 		id: string;
@@ -761,11 +766,11 @@
 	const taskStatusLabel = (s: string) =>
 		(
 			({
-				unassigned: '未分配',
-				ongoing: '进行中',
-				under_review: '待审核',
-				completed: '已完成',
-				blocked: '受阻（前置未完成）'
+				unassigned: 'Unassigned',
+				ongoing: 'In progress',
+				under_review: 'Pending review',
+				completed: 'Completed',
+				blocked: 'Blocked (predecessor incomplete)'
 			}) as { [k: string]: string }
 		)[s] ?? s;
 	const taskStatusBadge = (s: string) => {
@@ -857,11 +862,11 @@
 		}
 	}
 	function rejectRecord(recordId: string) {
-		const reason = prompt('退回原因（可选）：') ?? '';
+		const reason = prompt('Rejection reason (optional):') ?? '';
 		recordAction(recordId, 'reject', reason);
 	}
 	function waiveRecord(recordId: string) {
-		const reason = prompt('豁免原因（说明为何无需此记录）：');
+		const reason = prompt('Waiver reason (explain why this record is not needed):');
 		if (reason === null) return;
 		recordAction(recordId, 'waive', reason);
 	}
@@ -1095,8 +1100,8 @@
 	{@const tx = (sDay + mv + lf) * pxPerDay}
 	{@const tw = Math.max(6, (inclusiveDayWidth(t.startDate, t.endDate) + rt - lf) * pxPerDay)}
 	{@const bufW = (t.bufferDays ?? 0) * pxPerDay}
-	{#if t.baselineStart && t.baselineEnd}
-		<rect x={bx} y={rowY + ROW_HEIGHT / 2 + 5} width={bw} height="4" rx="2" fill="#cbd5e1" fill-opacity="0.7"></rect>
+	{#if showBaselineDrift && hasBaselineDrift(t)}
+		<rect x={bx} y={rowY + ROW_HEIGHT - 3} width={bw} height="2" rx="1" fill="#cbd5e1" fill-opacity="0.7"></rect>
 	{/if}
 	{#if t.kind === 'milestone' && t.startDate}
 		{@const myc = rowY + ROW_HEIGHT / 2}
@@ -1136,7 +1141,7 @@
 			<p class="mt-0.5 text-[13px] text-slate-600">
 				Switch <span class="font-medium">By stage</span> / <span class="font-medium">By assignee</span>.
 				Drag a bar to move it, drag its edges to resize, click it to edit, or drag on an empty row to
-				create a task. Ghost bar = baseline drift; yellow = critical path.
+				create a task. Optional baseline bars show original-plan drift; yellow = critical path.
 			</p>
 		</div>
 		<div class="flex shrink-0 items-center gap-2">
@@ -1197,21 +1202,30 @@
 			<span class="inline-flex items-center gap-1"><span class="h-2 w-3 rounded-sm bg-emerald-300"></span>Done</span>
 			<span class="inline-flex items-center gap-1"><span class="h-2 w-3 rounded-sm bg-rose-300"></span>Blocked</span>
 			<span class="inline-flex items-center gap-1"><span class="h-2 w-3 rounded-sm border border-amber-400 bg-amber-100"></span>Critical path</span>
+			{#if showBaselineDrift}
+				<span class="inline-flex items-center gap-1"><span class="h-1 w-3 rounded-sm bg-slate-300"></span>Baseline drift</span>
+			{/if}
 			<span class="inline-flex items-center gap-1"><span class="h-1.5 w-3 rounded-sm bg-emerald-200"></span>Free slack</span>
 			<span class="inline-flex items-center gap-1"><span class="h-2 w-3 rounded-sm ring-2 ring-rose-400"></span>Conflict</span>
 		</div>
-		<div class="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-			{#each ['day', 'week', 'month'] as const as opt}
-				<button
-					type="button"
-					class={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-						scale === opt ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-					}`}
-					onclick={() => (scale = opt as Scale)}
-				>
-					{opt[0].toUpperCase() + opt.slice(1)}
-				</button>
-			{/each}
+		<div class="flex items-center gap-2">
+			<label class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
+				<input type="checkbox" bind:checked={showBaselineDrift} class="h-3.5 w-3.5 rounded border-slate-300 text-[var(--sf-green)] focus:ring-[var(--sf-green)]" />
+				Baselines
+			</label>
+			<div class="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+				{#each ['day', 'week', 'month'] as const as opt}
+					<button
+						type="button"
+						class={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+							scale === opt ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+						}`}
+						onclick={() => (scale = opt as Scale)}
+					>
+						{opt[0].toUpperCase() + opt.slice(1)}
+					</button>
+				{/each}
+			</div>
 		</div>
 	</div>
 
@@ -1475,7 +1489,7 @@
 						</select>
 					</label>
 					<div class="block">
-						<span class="text-xs font-medium text-slate-500">Status（系统自动）</span>
+						<span class="text-xs font-medium text-slate-500">Status (system-managed)</span>
 						<div class="mt-1 flex h-[34px] items-center">
 							<span class="rounded-full px-2 py-0.5 text-[11px] {taskStatusBadge(editor.status)}">{taskStatusLabel(editor.status)}</span>
 						</div>
@@ -1498,7 +1512,7 @@
 					</label>
 				</div>
 				<label class="block">
-					<span class="text-xs font-medium text-slate-500">Task type（ISO 记录匹配键）</span>
+					<span class="text-xs font-medium text-slate-500">Task type (ISO record matching key)</span>
 					<select bind:value={editor.taskType} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5">
 						{#each TASK_TYPES as tt}<option value={tt.value}>{tt.label}</option>{/each}
 					</select>
@@ -1519,7 +1533,7 @@
 				</div>
 				{#if editor.status === 'blocked'}
 					<p class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-						受阻：存在未完成的前置（阻塞型）任务。前置完成后会自动解除。
+						Blocked: this task has an incomplete blocking predecessor. It will unblock automatically when the predecessor is completed.
 					</p>
 				{/if}
 
@@ -1598,9 +1612,9 @@
 
 					<!-- ISO 9001 records -->
 					<div class="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
-						<p class="text-xs font-semibold text-emerald-800">ISO 9001 记录</p>
+						<p class="text-xs font-semibold text-emerald-800">ISO 9001 Records</p>
 						{#if !editor.taskType}
-							<p class="mt-1 text-xs text-slate-500">选择上方 “Task type” 后，系统会建议本任务需要的 ISO 记录。</p>
+							<p class="mt-1 text-xs text-slate-500">Choose a Task type above to get suggested ISO records for this task.</p>
 						{:else}
 							{#if qmsRecords.length > 0}
 								<ul class="mt-2 space-y-2">
@@ -1609,12 +1623,12 @@
 											<div class="flex flex-wrap items-center gap-2">
 												<span class="rounded-full px-2 py-0.5 text-[10px] {qmsStatusColor(r.status)}">{r.status}</span>
 												<span class="truncate text-xs font-medium text-slate-700">{r.code ? r.code + ' · ' : ''}{r.name}</span>
-												{#if r.requiresApproval}<span class="text-[10px] text-amber-600">需审批</span>{/if}
-												{#if !r.isRequired}<span class="text-[10px] text-slate-400">非必需</span>{/if}
+												{#if r.requiresApproval}<span class="text-[10px] text-amber-600">Approval required</span>{/if}
+												{#if !r.isRequired}<span class="text-[10px] text-slate-400">Optional</span>{/if}
 												{#if r.version > 1}<span class="text-[10px] text-slate-400">v{r.version}</span>{/if}
 											</div>
 											{#if r.rejectedReason && r.status === 'rejected'}
-												<p class="mt-1 text-[11px] text-rose-600">退回：{r.rejectedReason}</p>
+												<p class="mt-1 text-[11px] text-rose-600">Rejected: {r.rejectedReason}</p>
 											{/if}
 											<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
 												<select
@@ -1622,19 +1636,19 @@
 													value={r.responsibleUserId ?? ''}
 													onchange={(e) => changeResponsible(r.id, (e.currentTarget as HTMLSelectElement).value)}
 												>
-													<option value="">— 责任人 —</option>
+													<option value="">— Owner —</option>
 													{#each users as u}<option value={u.id}>{assigneeLabel(u)}</option>{/each}
 												</select>
 												{#if r.status !== 'approved' && r.status !== 'waived'}
-													<button type="button" class="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] hover:bg-slate-50" disabled={qmsBusy} onclick={() => recordAction(r.id, 'submit')}>提交</button>
+													<button type="button" class="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] hover:bg-slate-50" disabled={qmsBusy} onclick={() => recordAction(r.id, 'submit')}>Submit</button>
 												{/if}
 												{#if canManage}
 													{#if r.status === 'submitted'}
-														<button type="button" class="rounded-md border border-emerald-300 px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-50" disabled={qmsBusy} onclick={() => recordAction(r.id, 'approve')}>通过</button>
-														<button type="button" class="rounded-md border border-rose-300 px-2 py-0.5 text-[11px] text-rose-700 hover:bg-rose-50" disabled={qmsBusy} onclick={() => rejectRecord(r.id)}>退回</button>
+														<button type="button" class="rounded-md border border-emerald-300 px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-50" disabled={qmsBusy} onclick={() => recordAction(r.id, 'approve')}>Approve</button>
+														<button type="button" class="rounded-md border border-rose-300 px-2 py-0.5 text-[11px] text-rose-700 hover:bg-rose-50" disabled={qmsBusy} onclick={() => rejectRecord(r.id)}>Reject</button>
 													{/if}
 													{#if r.status !== 'waived' && r.status !== 'approved'}
-														<button type="button" class="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-50" disabled={qmsBusy} onclick={() => waiveRecord(r.id)}>豁免</button>
+														<button type="button" class="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-50" disabled={qmsBusy} onclick={() => waiveRecord(r.id)}>Waive</button>
 													{/if}
 												{/if}
 											</div>
@@ -1642,17 +1656,17 @@
 									{/each}
 								</ul>
 							{:else}
-								<p class="mt-1 text-xs text-slate-400">尚未附加任何记录。</p>
+								<p class="mt-1 text-xs text-slate-400">No records attached yet.</p>
 							{/if}
 							{#if qmsSuggestions.filter((s) => !s.attached).length > 0}
-								<p class="mt-2 text-[11px] font-medium text-slate-500">建议附加：</p>
+								<p class="mt-2 text-[11px] font-medium text-slate-500">Suggested records:</p>
 								<div class="mt-1 flex flex-wrap gap-1.5">
 									{#each qmsSuggestions.filter((s) => !s.attached) as s (s.id)}
 										<button type="button" class="rounded-md border border-emerald-300 bg-white px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-50" disabled={qmsBusy} onclick={() => attachRecord(s.id)}>+ {s.code} {s.name}</button>
 									{/each}
 								</div>
 							{:else if qmsSuggestions.length === 0}
-								<p class="mt-2 text-[11px] text-slate-400">该 task type 暂无匹配的 ISO 模板。</p>
+								<p class="mt-2 text-[11px] text-slate-400">No ISO templates match this task type.</p>
 							{/if}
 						{/if}
 					</div>

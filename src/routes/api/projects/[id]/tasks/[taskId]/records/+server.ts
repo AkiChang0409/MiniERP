@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import { ProjectQmsService, ProjectPermissionError, ProjectValidationError } from '$modules/project';
+import { createProjectApi, ProjectPermissionError, ProjectValidationError } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -12,8 +12,8 @@ import { fail, ok } from '$platform/http';
 export const GET: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
-		const records = await svc.listRecordsForTask(event.params.id, event.params.taskId);
+		const project = createProjectApi(ctx);
+		const records = await project.listTaskRecords(event.params.id, event.params.taskId);
 		return ok({ records });
 	} catch (e) {
 		if (e instanceof NotFoundError) return fail(e.message, 404);
@@ -24,13 +24,13 @@ export const GET: RequestHandler = async (event) => {
 export const POST: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
+		const project = createProjectApi(ctx);
 		const body = (await event.request.json()) as { templateIds?: unknown };
 		const templateIds = Array.isArray(body.templateIds)
 			? body.templateIds.map((t) => String(t))
 			: [];
 		if (templateIds.length === 0) return fail('templateIds is required.', 400);
-		const result = await svc.attachRecordsToTask(
+		const result = await project.attachRecordsToTask(
 			event.params.id,
 			event.params.taskId,
 			templateIds

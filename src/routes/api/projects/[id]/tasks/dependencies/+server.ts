@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
 import {
-	ProjectTaskService,
+	createProjectApi,
 	ProjectPermissionError,
 	ProjectValidationError
 } from '$modules/project';
@@ -14,7 +14,7 @@ import { fail, ok } from '$platform/http';
 export const POST: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectTaskService(ctx);
+		const project = createProjectApi(ctx);
 		const body = (await event.request.json()) as {
 			fromTaskId?: string;
 			toTaskId?: string;
@@ -24,7 +24,7 @@ export const POST: RequestHandler = async (event) => {
 		if (!body.fromTaskId || !body.toTaskId) {
 			return fail('fromTaskId and toTaskId are required.', 400);
 		}
-		const result = await svc.addDependency({
+		const result = await project.addTaskDependency({
 			projectId: event.params.id,
 			fromTaskId: body.fromTaskId,
 			toTaskId: body.toTaskId,

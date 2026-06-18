@@ -57,13 +57,13 @@
 >
 	{#if data.linkState === 'unlinked'}
 		<div class="rounded-xl border border-amber-200 bg-amber-50 px-5 py-6 text-sm text-amber-800">
-			<p class="font-medium">账号尚未关联员工档案</p>
+			<p class="font-medium">Account is not linked to an employee profile</p>
 			<p class="mt-1 text-amber-700">
-				当前登录账号
-				<span class="font-mono font-semibold">{data.userEmail ?? '(未登录)'}</span>
-				尚未关联任何员工档案。请确认你登录的是 HR 已用员工邀请码绑定的那个账号;若需绑定,请在
+				The signed-in account
+				<span class="font-mono font-semibold">{data.userEmail ?? '(not signed in)'}</span>
+				is not linked to an employee profile. Make sure you are using the account registered with an HR employee invite code. To link this account, create an employee-bound invite in
 				<a href="/settings/invites" class="underline">Settings → Invite Codes</a>
-				生成绑定到该员工的邀请码并用它注册。
+				and register with that invite.
 			</p>
 			<p class="mt-1 text-amber-700">
 				Logged in as <span class="font-mono font-semibold">{data.userEmail ?? '(none)'}</span> —
@@ -72,10 +72,10 @@
 		</div>
 	{:else if data.linkState === 'inactive'}
 		<div class="rounded-xl border border-amber-200 bg-amber-50 px-5 py-6 text-sm text-amber-800">
-			<p class="font-medium">账号未启用</p>
+			<p class="font-medium">Account is inactive</p>
 			<p class="mt-1 text-amber-700">
-				账号 <span class="font-mono font-semibold">{data.userEmail ?? ''}</span>
-				关联的员工档案未处于 active 状态。请联系 HR 启用后再提交休假。
+				The employee profile linked to <span class="font-mono font-semibold">{data.userEmail ?? ''}</span>
+				is not active. Contact HR before submitting leave.
 			</p>
 		</div>
 	{:else}

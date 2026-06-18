@@ -19,7 +19,7 @@ import {
  */
 describe('project capability contract', () => {
 	it('every capability exposes serializable Zod input + output schemas', () => {
-		expect(projectCapabilities.length).toBe(6);
+		expect(projectCapabilities.length).toBe(7);
 		for (const capability of projectCapabilities) {
 			expect(capability.inputSchema, `${capability.id} missing inputSchema`).toBeDefined();
 			expect(capability.outputSchema, `${capability.id} missing outputSchema`).toBeDefined();

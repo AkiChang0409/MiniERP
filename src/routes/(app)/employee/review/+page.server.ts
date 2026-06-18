@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { createModuleContext } from '$platform/modules';
-import { ProjectQmsService } from '$modules/project';
+import { createProjectApi } from '$modules/project';
 
 /**
  * Review workspace — tasks submitted for review (`under_review`) that the
@@ -13,9 +13,9 @@ export const load: PageServerLoad = async (event) => {
 		return { queue: [], dataMessage: 'Sign in to review submissions.' };
 	}
 	const ctx = await createModuleContext(event);
-	const svc = new ProjectQmsService(ctx);
+	const project = createProjectApi(ctx);
 	try {
-		const queue = await svc.listReviewQueue(userId);
+		const queue = await project.listReviewQueue(userId);
 		return { queue, dataMessage: null as string | null };
 	} catch (err) {
 		const msg = (err as Error)?.message ?? '';

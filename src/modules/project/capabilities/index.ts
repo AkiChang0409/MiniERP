@@ -4,6 +4,7 @@ import { extractTasksCapability } from './extract-tasks';
 import { generatePlanCapability } from './generate-plan';
 import { processMeetingNotesCapability } from './meeting-notes';
 import { summarizeDashboardCapability } from './summarize-dashboard';
+import { viewCalendarCapability } from './view-calendar';
 
 export { projectActions } from './agent-actions';
 export type { ProjectCapability, PlatformCapabilityContext } from './types';
@@ -15,6 +16,10 @@ export type { ProjectCapability, PlatformCapabilityContext } from './types';
  * `outputSchema`, and forwards to the underlying function. All are read-only /
  * suggestive (R0-R1), so the route layer keeps calling the plain functions
  * directly for its existing status-code handling.
+ *
+ * `view-calendar` is the exception in KIND (not in risk): a data-read capability
+ * that forwards to the api facade (`createProjectApi(ctx.moduleContext)`) rather
+ * than an LLM function — still read-only.
  */
 export const projectCapabilities = [
 	generatePlanCapability,
@@ -22,7 +27,8 @@ export const projectCapabilities = [
 	answerQuestionCapability,
 	extractTasksCapability,
 	draftMeetingAgendaCapability,
-	processMeetingNotesCapability
+	processMeetingNotesCapability,
+	viewCalendarCapability
 ] as const;
 
 export const projectCapabilityIds = projectCapabilities.map((capability) => capability.id);

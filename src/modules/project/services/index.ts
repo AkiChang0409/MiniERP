@@ -5,3 +5,12 @@ export {
 	type TaskUpdateInput,
 	type TaskDependencyInput
 } from './task-service';
+export {
+	ProjectCalendarService,
+	CalendarEventsInputSchema,
+	type CalendarEventsInput,
+	type CalendarTaskEvent,
+	type CalendarEventType,
+	type CalendarBadge,
+	type CalendarQuickFilter
+} from './calendar-service';

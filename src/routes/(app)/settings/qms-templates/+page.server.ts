@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { createModuleContext } from '$platform/modules';
-import { ProjectQmsService } from '$modules/project';
+import { createProjectApi } from '$modules/project';
 
 /**
  * ISO 9001 QMS template library — company-level master data admin.
@@ -15,9 +15,9 @@ export const load: PageServerLoad = async (event) => {
 		};
 	}
 	const ctx = await createModuleContext(event);
-	const svc = new ProjectQmsService(ctx);
+	const project = createProjectApi(ctx);
 	try {
-		const templates = await svc.listTemplates({ includeInactive: true });
+		const templates = await project.listQmsTemplates({ includeInactive: true });
 		return { templates, dataMessage: null as string | null };
 	} catch (err) {
 		const msg = (err as Error)?.message ?? '';

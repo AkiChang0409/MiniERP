@@ -184,33 +184,75 @@ export class ProjectTaskRepository extends BaseRepository<typeof projectTasks> {
 			);
 	}
 
-	/** Tasks whose deadline falls inside the calendar window. */
-	async tasksForWindow(opts: { fromIso: string; toIso: string }) {
+	/**
+	 * Tasks whose start OR end date falls inside the calendar window, enriched
+	 * with project / assignee / stage context so the Calendar can render
+	 * execution event cards without N+1 lookups. This is the read seed for
+	 * `ProjectCalendarService` — the Calendar never owns its own task truth, it
+	 * only projects these rows onto a timeline. Optionally narrowed to a single
+	 * assignee (the "My tasks" filter).
+	 */
+	async calendarTasksForWindow(opts: { fromIso: string; toIso: string; assigneeId?: string }) {
+		const conds = [
+			isNull(projectTasks.deletedAt),
+			or(
+				and(gte(projectTasks.endDate, opts.fromIso), lte(projectTasks.endDate, opts.toIso)),
+				and(gte(projectTasks.startDate, opts.fromIso), lte(projectTasks.startDate, opts.toIso))
+			)!
+		];
+		if (opts.assigneeId) conds.push(eq(projectTasks.assigneeId, opts.assigneeId));
+
 		return this.db
 			.select({
 				id: projectTasks.id,
 				projectId: projectTasks.projectId,
+				projectName: projects.name,
+				projectOwnerId: projects.ownerId,
 				name: projectTasks.name,
 				status: projectTasks.status,
+				startDate: projectTasks.startDate,
 				endDate: projectTasks.endDate,
-				startDate: projectTasks.startDate
+				completedAt: projectTasks.completedAt,
+				kind: projectTasks.kind,
+				isMilestone: projectTasks.isMilestone,
+				taskType: projectTasks.taskType,
+				progressPct: projectTasks.progressPct,
+				blockedReason: projectTasks.blockedReason,
+				outsourcedPartnerId: projectTasks.outsourcedPartnerId,
+				workflowStageId: projectTasks.workflowStageId,
+				stageName: projectWorkflowStages.name,
+				stageColor: projectWorkflowStages.color,
+				assigneeId: projectTasks.assigneeId,
+				assigneeName: users.name,
+				assigneeEmail: users.email
 			})
+			.from(projectTasks)
+			.leftJoin(projects, eq(projectTasks.projectId, projects.id))
+			.leftJoin(users, eq(projectTasks.assigneeId, users.id))
+			.leftJoin(
+				projectWorkflowStages,
+				eq(projectTasks.workflowStageId, projectWorkflowStages.id)
+			)
+			.where(and(...conds))
+			.orderBy(asc(projectTasks.endDate), asc(projectTasks.startDate));
+	}
+
+	/** Distinct project ids that have at least one task touching the window —
+	 * used to scope the lazy status recompute the Calendar runs. */
+	async projectIdsWithTasksInWindow(opts: { fromIso: string; toIso: string }) {
+		const rows = await this.db
+			.selectDistinct({ projectId: projectTasks.projectId })
 			.from(projectTasks)
 			.where(
 				and(
 					isNull(projectTasks.deletedAt),
 					or(
-						and(
-							gte(projectTasks.endDate, opts.fromIso),
-							lte(projectTasks.endDate, opts.toIso)
-						),
-						and(
-							gte(projectTasks.startDate, opts.fromIso),
-							lte(projectTasks.startDate, opts.toIso)
-						)
+						and(gte(projectTasks.endDate, opts.fromIso), lte(projectTasks.endDate, opts.toIso)),
+						and(gte(projectTasks.startDate, opts.fromIso), lte(projectTasks.startDate, opts.toIso))
 					)!
 				)
 			);
+		return rows.map((r) => r.projectId);
 	}
 }
 

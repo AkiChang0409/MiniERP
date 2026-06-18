@@ -9,6 +9,10 @@ import { ProjectDashboardService } from './project-dashboard-service';
 import { ProjectFinancialsService } from './project-financials-service';
 import { ProjectDirectoryService } from './project-directory-service';
 import { ProjectLifecycleService } from './project-lifecycle-service';
+import { ProjectTaskService } from './task-service';
+import { ProjectQmsService } from './qms-service';
+import { ProjectNotificationService } from './notification-service';
+import { ProjectCalendarService } from './calendar-service';
 
 /**
  * `createProjectApi(ctx)` is the public SDK-for-code entry point for the project
@@ -20,6 +24,12 @@ import { ProjectLifecycleService } from './project-lifecycle-service';
  * The service split is intentionally fine-grained so a future agent layer can
  * map capabilities 1:1 onto these services (see each service's "Future
  * capability" note).
+ *
+ * Task / QMS / notification methods are exposed here too (renamed where they
+ * would collide with the project-level `list/create/update`, e.g. `listTasks`).
+ * Routes, capabilities and other modules MUST reach these through the api
+ * facade — never `new ProjectTaskService(ctx)` — so the module keeps a single
+ * business entry point (Architecture_rules R2).
  */
 export function createProjectApi(ctx: ModuleContext) {
 	const access = new ProjectAccessService(ctx);
@@ -32,6 +42,10 @@ export function createProjectApi(ctx: ModuleContext) {
 	const directory = new ProjectDirectoryService(ctx);
 	const attachment = new ProjectAttachmentService(ctx, { access });
 	const lifecycle = new ProjectLifecycleService(ctx, { access, collaboration, query });
+	const task = new ProjectTaskService(ctx);
+	const qms = new ProjectQmsService(ctx);
+	const notification = new ProjectNotificationService(ctx);
+	const calendar = new ProjectCalendarService(ctx);
 
 	return {
 		// Reads
@@ -74,7 +88,49 @@ export function createProjectApi(ctx: ModuleContext) {
 		getProjectFinancials: financials.getProjectFinancials.bind(financials),
 		// User directory (collaborator picker)
 		searchUsers: directory.searchUsers.bind(directory),
-		listUsers: directory.listUsers.bind(directory)
+		listUsers: directory.listUsers.bind(directory),
+		// Tasks / Gantt (ProjectTaskService — renamed to avoid project-level collisions)
+		listTasks: task.list.bind(task),
+		createTask: task.create.bind(task),
+		updateTask: task.update.bind(task),
+		removeTask: task.remove.bind(task),
+		listTaskHistory: task.listTaskHistory.bind(task),
+		addTaskDependency: task.addDependency.bind(task),
+		removeTaskDependency: task.removeDependency.bind(task),
+		getTaskSchedule: task.schedule.bind(task),
+		getCriticalPath: task.criticalPath.bind(task),
+		getGanttPortfolio: task.portfolio.bind(task),
+		listStages: task.listStages.bind(task),
+		setStages: task.setStages.bind(task),
+		advanceStages: task.autoAdvanceStages.bind(task),
+		// ISO 9001 QMS templates (ProjectQmsService)
+		listQmsTemplates: qms.listTemplates.bind(qms),
+		createQmsTemplate: qms.createTemplate.bind(qms),
+		updateQmsTemplate: qms.updateTemplate.bind(qms),
+		archiveQmsTemplate: qms.archiveTemplate.bind(qms),
+		// QMS records
+		suggestQmsForTask: qms.suggestForTask.bind(qms),
+		listTaskRecords: qms.listRecordsForTask.bind(qms),
+		listProjectRecords: qms.listRecordsForProject.bind(qms),
+		attachRecordsToTask: qms.attachRecordsToTask.bind(qms),
+		updateRecord: qms.updateRecord.bind(qms),
+		submitRecord: qms.submitRecord.bind(qms),
+		approveRecord: qms.approveRecord.bind(qms),
+		rejectRecord: qms.rejectRecord.bind(qms),
+		waiveRecord: qms.waiveRecord.bind(qms),
+		// QMS-driven task workflow (workplace / review)
+		getWorkplace: qms.getWorkplace.bind(qms),
+		listReviewQueue: qms.listReviewQueue.bind(qms),
+		approveTask: qms.approveTask.bind(qms),
+		rejectTask: qms.rejectTask.bind(qms),
+		getTaskDetail: qms.getTaskDetail.bind(qms),
+		assigneeSubmitTask: qms.assigneeSubmitTask.bind(qms),
+		// In-app notifications (ProjectNotificationService)
+		listNotifications: notification.list.bind(notification),
+		markNotificationRead: notification.markRead.bind(notification),
+		markAllNotificationsRead: notification.markAllRead.bind(notification),
+		// Task execution calendar (time-based projection of project tasks)
+		getCalendarEvents: calendar.getCalendarEvents.bind(calendar)
 	};
 }
 

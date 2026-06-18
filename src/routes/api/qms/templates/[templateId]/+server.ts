@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import { ProjectQmsService, ProjectPermissionError, ProjectValidationError } from '$modules/project';
+import { createProjectApi, ProjectPermissionError, ProjectValidationError } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -11,7 +11,7 @@ import { fail, ok } from '$platform/http';
 export const PATCH: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
+		const project = createProjectApi(ctx);
 		const body = (await event.request.json()) as Record<string, unknown>;
 		const allowed = [
 			'code',
@@ -32,7 +32,7 @@ export const PATCH: RequestHandler = async (event) => {
 		for (const k of allowed) {
 			if (Object.prototype.hasOwnProperty.call(body, k)) patch[k] = body[k];
 		}
-		const result = await svc.updateTemplate(event.params.templateId, patch);
+		const result = await project.updateQmsTemplate(event.params.templateId, patch);
 		return ok(result);
 	} catch (e) {
 		if (e instanceof ProjectValidationError) {
@@ -47,8 +47,8 @@ export const PATCH: RequestHandler = async (event) => {
 export const DELETE: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
-		const result = await svc.archiveTemplate(event.params.templateId);
+		const project = createProjectApi(ctx);
+		const result = await project.archiveQmsTemplate(event.params.templateId);
 		return ok(result);
 	} catch (e) {
 		if (e instanceof ProjectPermissionError) return fail(e.message, 403);

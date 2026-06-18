@@ -19,6 +19,7 @@ export const projectIntentBinding: Record<ProjectIntent, ProjectDispatchBinding 
 	extract_tasks: { capabilityId: 'project.extract-tasks' },
 	draft_meeting_agenda: { capabilityId: 'project.draft-meeting-agenda' },
 	process_meeting_notes: { capabilityId: 'project.process-meeting-notes' },
+	view_calendar: { capabilityId: 'project.view-calendar' },
 	unknown: null
 };
 

@@ -31,7 +31,7 @@ export const projectAgentManifest: ProjectAgentManifest = {
 	domain: 'project',
 	version: '0.1.0',
 	description:
-		'Domain-bounded agent for project delivery: generate a draft plan, summarise portfolio health, answer questions about a project, extract tasks from documents, and draft meeting agendas/notes. Suggestive only — never persists.',
+		'Domain-bounded agent for project delivery: generate a draft plan, summarise portfolio health, answer questions about a project, extract tasks from documents, draft meeting agendas/notes, and read the task execution calendar. Suggestive / read-only — never persists.',
 	owns: [
 		'project',
 		'task',
@@ -47,7 +47,8 @@ export const projectAgentManifest: ProjectAgentManifest = {
 		'answer_project_question',
 		'extract_tasks',
 		'draft_meeting_agenda',
-		'process_meeting_notes'
+		'process_meeting_notes',
+		'view_calendar'
 	],
 	cannotHandle: [
 		'delete_project',

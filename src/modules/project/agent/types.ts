@@ -5,6 +5,7 @@ export type ProjectIntent =
 	| 'extract_tasks'
 	| 'draft_meeting_agenda'
 	| 'process_meeting_notes'
+	| 'view_calendar'
 	| 'unknown';
 
 export type ProjectOwnedDomain =

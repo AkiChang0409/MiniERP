@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
-import { ProjectQmsService, ProjectPermissionError, ProjectValidationError } from '$modules/project';
+import { createProjectApi, ProjectPermissionError, ProjectValidationError } from '$modules/project';
 import { fail, ok } from '$platform/http';
 
 /**
@@ -15,7 +15,7 @@ import { fail, ok } from '$platform/http';
 export const POST: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectQmsService(ctx);
+		const project = createProjectApi(ctx);
 		const body = (await event.request.json().catch(() => ({}))) as {
 			decision?: unknown;
 			reason?: unknown;
@@ -24,9 +24,9 @@ export const POST: RequestHandler = async (event) => {
 		const reason = body.reason == null ? null : String(body.reason);
 		let result;
 		if (decision === 'approve') {
-			result = await svc.approveTask(event.params.id, event.params.taskId);
+			result = await project.approveTask(event.params.id, event.params.taskId);
 		} else if (decision === 'reject') {
-			result = await svc.rejectTask(event.params.id, event.params.taskId, reason);
+			result = await project.rejectTask(event.params.id, event.params.taskId, reason);
 		} else {
 			return fail(`Unknown decision "${decision}".`, 400);
 		}

@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import { createModuleContext } from '$platform/modules';
 import { NotFoundError } from '$platform/modules/errors';
 import {
-	ProjectTaskService,
+	createProjectApi,
 	ProjectPermissionError
 } from '$modules/project';
 import { fail, ok } from '$platform/http';
@@ -19,8 +19,8 @@ import { fail, ok } from '$platform/http';
 export const GET: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectTaskService(ctx);
-		const stages = await svc.listStages(event.params.id);
+		const project = createProjectApi(ctx);
+		const stages = await project.listStages(event.params.id);
 		return ok({ stages });
 	} catch (e) {
 		if (e instanceof NotFoundError) return fail(e.message, 404);
@@ -31,7 +31,7 @@ export const GET: RequestHandler = async (event) => {
 export const PUT: RequestHandler = async (event) => {
 	try {
 		const ctx = await createModuleContext(event);
-		const svc = new ProjectTaskService(ctx);
+		const project = createProjectApi(ctx);
 		const body = (await event.request.json()) as {
 			stages?: Array<{
 				id?: string;
@@ -47,7 +47,7 @@ export const PUT: RequestHandler = async (event) => {
 		if (stages.some((s) => !s.name || !s.name.trim())) {
 			return fail('Each stage needs a name.', 400);
 		}
-		await svc.setStages(event.params.id, stages);
+		await project.setStages(event.params.id, stages);
 		return ok({ updated: true, count: stages.length });
 	} catch (e) {
 		if (e instanceof ProjectPermissionError) return fail(e.message, 403);

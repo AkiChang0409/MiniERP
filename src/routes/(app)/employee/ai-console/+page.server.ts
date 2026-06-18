@@ -120,7 +120,7 @@ export const actions: Actions = {
 			return {
 				stage: 'error',
 				message,
-				error: '无法识别指令。试试：「查看待审批请假」/「提交请假 年假 2026-07-01 2026-07-03」/「批准请假 <id>」'
+				error: 'Command not recognized. Try: "Show pending leave approvals" / "Submit annual leave 2026-07-01 2026-07-03" / "Approve leave <id>".'
 			};
 		}
 
