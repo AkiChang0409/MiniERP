@@ -41,10 +41,14 @@ const registrations: CapabilityRegistration[] = financeCapabilities.map((capabil
 			requiresConfirmation: policyEntry.requiresConfirmation,
 			auditRequired: true,
 			enabled: true,
-			// All currently registered finance capabilities only read/analyze.
 			// A capability that requires confirmation is, by definition, a write;
 			// this keeps the write⇒requiresConfirmation invariant true by construction.
-			sideEffect: policyEntry.requiresConfirmation ? 'write' : 'read'
+			sideEffect: policyEntry.requiresConfirmation ? 'write' : 'read',
+			// Lift the capability's Zod input schema so the guarded executor can
+			// validate LLM / confirm-path tool input before dispatch, and the
+			// write target for audit/impact.
+			inputSchema: capability.inputSchema,
+			persistTarget: policyEntry.persistTarget
 		},
 		capability
 	};

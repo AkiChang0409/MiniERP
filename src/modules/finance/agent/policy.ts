@@ -5,6 +5,8 @@ export interface FinanceCapabilityPolicyEntry {
 	riskLevel: FinanceRiskLevel;
 	requiresConfirmation: boolean;
 	requiredUserPermissions: string[];
+	/** For write capabilities: the primary table/entity persisted to (audit only). */
+	persistTarget?: string;
 }
 
 /**
@@ -42,6 +44,29 @@ export const financeAgentAllowedCapabilities: FinanceCapabilityPolicyEntry[] = [
 		riskLevel: 'R1',
 		requiresConfirmation: false,
 		requiredUserPermissions: ['finance:view']
+	},
+	{
+		id: 'finance.answer-question',
+		riskLevel: 'R1',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['finance:view']
+	},
+	// R4 governed writes (plan Phase 8). sideEffect 'write' is derived from
+	// requiresConfirmation at registration; the write⇒requiresConfirmation
+	// invariant is enforced there. Used by confirmInbox via the governed runtime.
+	{
+		id: 'finance.create-expense-record',
+		riskLevel: 'R4',
+		requiresConfirmation: true,
+		requiredUserPermissions: ['finance:edit'],
+		persistTarget: 'expenses'
+	},
+	{
+		id: 'finance.create-revenue-record',
+		riskLevel: 'R4',
+		requiresConfirmation: true,
+		requiredUserPermissions: ['finance:edit'],
+		persistTarget: 'revenue'
 	}
 ];
 

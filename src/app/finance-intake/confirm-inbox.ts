@@ -22,9 +22,9 @@
 import type { ModuleContext } from '$platform/modules/types';
 import { hashConfirmationPayload } from '$platform/workflow/payload-hash';
 import { appendAgentAuditEntry } from '$platform/audit/audit-log';
+import { executeGuardedCapability } from '$platform/ai/execute-capability';
 import { createDocumentIntakeApi, createDocumentIntakeService } from '$modules/document-intake';
 import {
-	createFinanceApi,
 	findCategoryById,
 	financeAgentManifest,
 	validateExpenseRecord,
@@ -328,15 +328,20 @@ export async function confirmInbox(
 		return { ok: false, status: 400, error: `Unknown categoryId: ${params.categoryId}` };
 	}
 
-	// 3. Branch persistence by category.persistTarget.
-	const finance = createFinanceApi(ctx);
+	// 3. Branch persistence by category.persistTarget. Expense/revenue writes now
+	// go through the governed capability runtime (executeGuardedCapability =
+	// policy gate + input-schema validation + audit). The confirmationRef (the
+	// reviewed payload hash) satisfies the write confirmation gate, so an R4 write
+	// without it is denied before any side effect. Archive documents persist via
+	// the document-intake api (project archive) with their own manual audit.
 	const documentIntake = createDocumentIntakeApi(ctx);
+	const guardActor = { userId: actor.id, userEmail: actor.email, roles: ctx.user?.roles ?? null };
+	const capabilityCtx = { tenantId: 'default', userId: actor.id, env, moduleContext: ctx };
 
 	let entityId: string;
 	let entityRoute: string;
 	let entityType: string;
-	let toolId: string;
-	let finalAction: string;
+	let auditRef: string | undefined;
 
 	if (category.persistTarget === 'expenses') {
 		const expenseInput = buildExpenseInput(params, category, artifact.id);
@@ -366,19 +371,57 @@ export async function confirmInbox(
 			});
 			return { ok: false, status: 400, error: 'Validation failed', issues };
 		}
-		const created = await finance.expenses.create(expenseInput);
-		entityId = created.id;
+		const exec = await executeGuardedCapability<{ id: string }>({
+			db,
+			agentId: financeAgentManifest.id,
+			agentVersion: financeAgentManifest.version,
+			capabilityId: 'finance.create-expense-record',
+			input: expenseInput,
+			ctx: capabilityCtx,
+			actor: guardActor,
+			confirmationRef,
+			intent: 'record_expense',
+			finalAction: `expense.created.${category.expenseType}.${category.category}`,
+			workflowId: params.documentId,
+			workflowStep: 'inbox_confirm'
+		});
+		if (exec.status !== 'ok') {
+			return {
+				ok: false,
+				status: exec.status === 'denied' ? 403 : 400,
+				error: 'error' in exec ? exec.error : `Expense write failed (${exec.status})`
+			};
+		}
+		entityId = exec.output.id;
 		entityType = 'expense';
 		entityRoute = '/finance/expenses';
-		toolId = 'finance.create-expense-record';
-		finalAction = `expense.created.${category.expenseType}.${category.category}`;
+		auditRef = exec.auditId;
 	} else if (category.persistTarget === 'revenue') {
-		const created = await finance.revenue.createRevenue(buildRevenueInput(params, artifact.id));
-		entityId = created.id;
+		const exec = await executeGuardedCapability<{ id: string }>({
+			db,
+			agentId: financeAgentManifest.id,
+			agentVersion: financeAgentManifest.version,
+			capabilityId: 'finance.create-revenue-record',
+			input: buildRevenueInput(params, artifact.id),
+			ctx: capabilityCtx,
+			actor: guardActor,
+			confirmationRef,
+			intent: 'record_revenue',
+			finalAction: 'revenue.created',
+			workflowId: params.documentId,
+			workflowStep: 'inbox_confirm'
+		});
+		if (exec.status !== 'ok') {
+			return {
+				ok: false,
+				status: exec.status === 'denied' ? 403 : 400,
+				error: 'error' in exec ? exec.error : `Revenue write failed (${exec.status})`
+			};
+		}
+		entityId = exec.output.id;
 		entityType = 'revenue';
 		entityRoute = '/finance/revenue';
-		toolId = 'finance.create-revenue-record';
-		finalAction = 'revenue.created';
+		auditRef = exec.auditId;
 	} else {
 		const docType = archiveDocTypeForPersistTarget(category.persistTarget);
 		if (!docType) {
@@ -448,33 +491,32 @@ export async function confirmInbox(
 		entityRoute = `/projects/${encodeURIComponent(projectId)}/documents/${
 			docType === 'purchase_order' ? 'purchase-orders' : `${docType}s`
 		}/${encodeURIComponent(entityId)}`;
-		toolId = 'finance.create-document-archive';
-		finalAction = `${entityType}.created`;
+
+		// Archive isn't a registered capability — write its own success audit.
+		const archiveAudit = await appendAgentAuditEntry(db, {
+			agentId: financeAgentManifest.id,
+			agentVersion: financeAgentManifest.version,
+			userId: actor.id,
+			userEmail: actor.email,
+			tenantId: 'default',
+			workflowId: params.documentId,
+			workflowStep: 'inbox_confirm',
+			toolId: 'finance.create-document-archive',
+			riskLevel: 'R4',
+			permissionResult: 'allowed',
+			confirmationRequired: true,
+			confirmationRef,
+			modelId: 'inbox-confirm-v1',
+			promptVersion: 'inbox-confirm-v1',
+			schemaVersion: 'v1',
+			outputRefs: { entityType, entityId, categoryId: category.id },
+			finalAction: `${entityType}.created`,
+			status: 'ok'
+		});
+		auditRef = archiveAudit.auditId;
 	}
 
-	// 4. Audit success.
-	const audit = await appendAgentAuditEntry(db, {
-		agentId: financeAgentManifest.id,
-		agentVersion: financeAgentManifest.version,
-		userId: actor.id,
-		userEmail: actor.email,
-		tenantId: 'default',
-		workflowId: params.documentId,
-		workflowStep: 'inbox_confirm',
-		toolId,
-		riskLevel: 'R4',
-		permissionResult: 'allowed',
-		confirmationRequired: true,
-		confirmationRef,
-		modelId: 'inbox-confirm-v1',
-		promptVersion: 'inbox-confirm-v1',
-		schemaVersion: 'v1',
-		outputRefs: { entityType, entityId, categoryId: category.id },
-		finalAction,
-		status: 'ok'
-	});
-
-	// 5. Mark artifact confirmed (drops it out of inbox listing).
+	// 4. Mark artifact confirmed (drops it out of inbox listing).
 	await intake.markConfirmed({
 		tenantId: 'default',
 		documentId: params.documentId,
@@ -483,5 +525,5 @@ export async function confirmInbox(
 		categoryId: category.id
 	});
 
-	return { ok: true, entityId, entityType, entityRoute, categoryId: category.id, auditRef: audit.auditId };
+	return { ok: true, entityId, entityType, entityRoute, categoryId: category.id, auditRef };
 }

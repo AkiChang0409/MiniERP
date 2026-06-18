@@ -1,13 +1,33 @@
 import { answerQuestionCapability } from './answer-question';
+import { createTaskCapability } from './create-task';
+import { detectScheduleConflictsCapability } from './detect-schedule-conflicts';
 import { draftMeetingAgendaCapability } from './meeting-agenda';
 import { extractTasksCapability } from './extract-tasks';
 import { generatePlanCapability } from './generate-plan';
 import { processMeetingNotesCapability } from './meeting-notes';
+import { proposeAssignmentCapability } from './propose-assignment';
+import { proposeRescheduleCapability } from './propose-reschedule';
+import { proposeTaskPlanCapability } from './propose-task-plan';
 import { summarizeDashboardCapability } from './summarize-dashboard';
+import { updateTaskCapability } from './update-task';
 import { viewCalendarCapability } from './view-calendar';
 
 export { projectActions } from './agent-actions';
 export type { ProjectCapability, PlatformCapabilityContext } from './types';
+export {
+	ProjectDraftActionSchema,
+	ProjectChangeSchema,
+	DraftTaskRefSchema,
+	type ProjectDraftAction,
+	type ProjectChange,
+	type DraftTaskRef
+} from './draft-action';
+export { type ProposeTaskPlanInput } from './propose-task-plan';
+export { type ProposeRescheduleInput } from './propose-reschedule';
+export { type ProposeAssignmentInput } from './propose-assignment';
+export { type DetectScheduleConflictsInput } from './detect-schedule-conflicts';
+export { type CreateTaskInput, type CreateTaskOutput } from './create-task';
+export { type UpdateTaskInput, type UpdateTaskOutput } from './update-task';
 
 /**
  * Registered (SDK-for-agent) project capabilities. Each is a thin governance
@@ -28,7 +48,16 @@ export const projectCapabilities = [
 	extractTasksCapability,
 	draftMeetingAgendaCapability,
 	processMeetingNotesCapability,
-	viewCalendarCapability
+	viewCalendarCapability,
+	// Stage-2 draft proposals (R3, read-only — reviewed before any write).
+	proposeTaskPlanCapability,
+	proposeRescheduleCapability,
+	proposeAssignmentCapability,
+	detectScheduleConflictsCapability,
+	// Stage-3 governed writes (R4, require confirmation). update-task also covers
+	// reschedule + assignment via its patch fields.
+	createTaskCapability,
+	updateTaskCapability
 ] as const;
 
 export const projectCapabilityIds = projectCapabilities.map((capability) => capability.id);

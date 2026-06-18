@@ -20,6 +20,8 @@ import '$app-layer/bootstrap/register-modules';
 import '$app-layer/bootstrap/register-ai-capabilities';
 // Register workflow definitions into the platform workflow registry (side-effect import)
 import '$app-layer/bootstrap/register-workflows';
+// Register domain-agent plugins into the platform agent registry (side-effect import)
+import '$app-layer/bootstrap/register-agents';
 
 function isPublicAppPath(pathname: string) {
 	return (

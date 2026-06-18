@@ -71,6 +71,55 @@ export const projectAgentAllowedCapabilities: ProjectCapabilityPolicyEntry[] = [
 		sideEffect: 'read',
 		requiresConfirmation: false,
 		requiredUserPermissions: ['project:view']
+	},
+	// Stage-2 draft proposals (design §12): R3, read-only — they output a
+	// reviewable change set, never a write. `requiresConfirmation` stays false
+	// (nothing is persisted); the eventual *apply* is a separate R4 write
+	// capability that requires confirmation (plan Phase 8).
+	{
+		id: 'project.propose-task-plan',
+		riskLevel: 'R3',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:edit']
+	},
+	{
+		id: 'project.propose-reschedule',
+		riskLevel: 'R3',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:edit']
+	},
+	{
+		id: 'project.propose-assignment',
+		riskLevel: 'R3',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:edit']
+	},
+	{
+		id: 'project.detect-schedule-conflicts',
+		riskLevel: 'R3',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:edit']
+	},
+	// Stage-3 governed writes (design §12): R4, write, require confirmation. The
+	// write⇒requiresConfirmation invariant is enforced at registration. update-task
+	// also serves reschedule + assignment via its patch fields.
+	{
+		id: 'project.create-task',
+		riskLevel: 'R4',
+		sideEffect: 'write',
+		requiresConfirmation: true,
+		requiredUserPermissions: ['project:edit']
+	},
+	{
+		id: 'project.update-task',
+		riskLevel: 'R4',
+		sideEffect: 'write',
+		requiresConfirmation: true,
+		requiredUserPermissions: ['project:edit']
 	}
 ];
 

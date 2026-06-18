@@ -1,4 +1,5 @@
 export { projectAgentManifest, type ProjectAgentManifest } from './manifest';
+export { projectAgentPlugin } from './plugin';
 export { classifyProjectIntent, type ClassifyProjectIntentInput } from './intent-classifier';
 export {
 	projectIntentBinding,

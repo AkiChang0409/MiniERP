@@ -1,4 +1,5 @@
 export { hrAgentManifest, type HrAgentManifest } from './manifest';
+export { hrAgentPlugin } from './plugin';
 export {
 	HR_AGENT_ID,
 	hrAgentAllowedCapabilities,

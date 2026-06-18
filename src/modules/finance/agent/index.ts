@@ -1,4 +1,5 @@
 export { financeAgentManifest, type FinanceAgentManifest } from './manifest';
+export { financeAgentPlugin } from './plugin';
 export { classifyFinanceIntent, type ClassifyFinanceIntentInput } from './intent-classifier';
 export { financeWorkflowBinding, resolveWorkflowForIntent } from './workflow-binding';
 export {
