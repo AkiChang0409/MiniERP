@@ -14,6 +14,7 @@ import {
 	bitableCreateRecord,
 	bitableGetRecord,
 	bitableListFieldNames,
+	bitableListFields,
 	bitableUploadMedia,
 	type BitableFields
 } from '$platform/integrations/lark/bitable';
@@ -161,6 +162,17 @@ async function notifyPmForReview(
 			if (supplier) supplierName = cellText(supplier.fields['Name']);
 		}
 
+		// Pull the Doc Hub Category / File Type option labels so the PM can pick
+		// them right on the review card (single-selects defined in the table).
+		let categoryOptions: string[] = [];
+		let fileTypeOptions: string[] = [];
+		const dochubTable = env.LARK_DOCHUB_TABLE_ID;
+		if (dochubTable) {
+			const defs = await bitableListFields(env, { appToken, tableId: dochubTable }).catch(() => []);
+			categoryOptions = defs.find((f) => f.name === 'Category')?.options ?? [];
+			fileTypeOptions = defs.find((f) => f.name === 'File Type')?.options ?? [];
+		}
+
 		await sendInteractiveCard(
 			env,
 			openId,
@@ -171,7 +183,9 @@ async function notifyPmForReview(
 				supplierName,
 				fileName: args.fileName,
 				source: 'Link',
-				confidence: 'High'
+				confidence: 'High',
+				categoryOptions,
+				fileTypeOptions
 			})
 		);
 	} catch (err) {

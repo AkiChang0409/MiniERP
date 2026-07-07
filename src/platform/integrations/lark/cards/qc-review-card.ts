@@ -1,10 +1,11 @@
 /**
- * Lark interactive card for a QC checklist that arrived in Doc Hub and awaits
- * PM review. Shows project / supplier / file and offers Confirm / Reject.
+ * Lark interactive card (schema 2.0 form) for a QC checklist awaiting PM review.
+ * Shows project / supplier / file, and lets the PM pick Category + File Type
+ * (options pulled from the Doc Hub field definitions) before confirming. On
+ * Confirm (form_submit) the callback receives `form_value` with the selections.
  *
  * Platform layer — no `$modules/*` import (boundary rule 3). Button `value`s
- * carry only routing data (`{ action, record_id }`); the card-callback route
- * updates the Doc Hub record's status by that record_id.
+ * carry only routing data (`{ action, record_id }`).
  */
 
 export interface QcReviewCardInput {
@@ -13,57 +14,100 @@ export interface QcReviewCardInput {
 	projectName: string;
 	supplierName: string;
 	fileName: string;
-	/** How the association was matched — e.g. "Link" (upload) / "Email". */
 	source?: string;
-	/** Match confidence — High / Medium / Low. Low → nudge PM to double-check. */
 	confidence?: string;
+	/** Single-select option labels from the Doc Hub `Category` / `File Type` fields. */
+	categoryOptions?: string[];
+	fileTypeOptions?: string[];
+}
+
+const MAX_OPTIONS = 50; // Lark select_static caps; File Type can have many.
+
+function selectStatic(name: string, placeholder: string, options: string[]): Record<string, unknown> {
+	return {
+		tag: 'select_static',
+		name,
+		placeholder: { tag: 'plain_text', content: placeholder },
+		options: options.slice(0, MAX_OPTIONS).map((o) => ({
+			text: { tag: 'plain_text', content: o },
+			value: o
+		}))
+	};
 }
 
 export function buildQcReviewCard(input: QcReviewCardInput): Record<string, unknown> {
 	const lowConf = input.confidence && input.confidence.toLowerCase() !== 'high';
-	const fields = [
-		{ is_short: true, text: { tag: 'lark_md', content: `**Project**\n${input.projectName || '—'}` } },
-		{ is_short: true, text: { tag: 'lark_md', content: `**Supplier**\n${input.supplierName || '—'}` } },
-		{ is_short: false, text: { tag: 'lark_md', content: `**File**\n${input.fileName}` } }
-	];
-	if (input.source || input.confidence) {
-		fields.push({
-			is_short: false,
-			text: {
-				tag: 'lark_md',
-				content: `**Match**\n${input.source ?? '—'} · confidence ${input.confidence ?? '—'}${
-					lowConf ? ' ⚠️ please double-check the project/supplier' : ''
+
+	const context = [
+		`**Project**: ${input.projectName || '—'}`,
+		`**Supplier**: ${input.supplierName || '—'}`,
+		`**File**: ${input.fileName}`,
+		input.source || input.confidence
+			? `**Match**: ${input.source ?? '—'} · confidence ${input.confidence ?? '—'}${
+					lowConf ? ' ⚠️ please double-check' : ''
 				}`
-			}
-		});
+			: ''
+	]
+		.filter(Boolean)
+		.join('\n');
+
+	const elements: Array<Record<string, unknown>> = [
+		{ tag: 'markdown', content: context },
+		{ tag: 'hr' }
+	];
+
+	if (input.categoryOptions?.length) {
+		elements.push({ tag: 'markdown', content: '**Category**' });
+		elements.push(selectStatic('category', 'Select category…', input.categoryOptions));
+	}
+	if (input.fileTypeOptions?.length) {
+		elements.push({ tag: 'markdown', content: '**File Type**' });
+		elements.push(selectStatic('file_type', 'Select file type…', input.fileTypeOptions));
 	}
 
-	return {
-		config: { wide_screen_mode: true },
-		header: {
-			template: lowConf ? 'orange' : 'blue',
-			title: { tag: 'plain_text', content: '🔍 QC checklist — please review' }
-		},
-		elements: [
-			{ tag: 'div', fields },
-			{ tag: 'hr' },
+	elements.push({
+		tag: 'column_set',
+		horizontal_spacing: 'default',
+		columns: [
 			{
-				tag: 'action',
-				actions: [
+				tag: 'column',
+				width: 'weighted',
+				weight: 1,
+				elements: [
 					{
 						tag: 'button',
 						text: { tag: 'plain_text', content: '✅ Confirm' },
 						type: 'primary',
+						action_type: 'form_submit',
+						name: 'qc_confirm',
 						value: { action: 'qc_confirm', record_id: input.recordId }
-					},
+					}
+				]
+			},
+			{
+				tag: 'column',
+				width: 'weighted',
+				weight: 1,
+				elements: [
 					{
 						tag: 'button',
 						text: { tag: 'plain_text', content: '🚫 Reject' },
 						type: 'danger',
+						name: 'qc_reject',
 						value: { action: 'qc_reject', record_id: input.recordId }
 					}
 				]
 			}
 		]
+	});
+
+	return {
+		schema: '2.0',
+		config: { wide_screen_mode: true, update_multi: true },
+		header: {
+			template: lowConf ? 'orange' : 'blue',
+			title: { tag: 'plain_text', content: '🔍 QC checklist — please review' }
+		},
+		body: { elements }
 	};
 }

@@ -212,6 +212,42 @@ export async function bitableListFieldNames(
 	return (data.items ?? []).map((f) => f.field_name ?? '').filter(Boolean);
 }
 
+export interface BitableFieldDef {
+	name: string;
+	type: number;
+	/** Option labels for single/multi-select fields (empty otherwise). */
+	options: string[];
+}
+
+/**
+ * List a table's fields with their single/multi-select option labels — used to
+ * populate card dropdowns (Category / File Type) from the real schema.
+ * Docs: GET /open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/fields
+ */
+export async function bitableListFields(
+	env: Env,
+	args: { appToken: string; tableId: string }
+): Promise<BitableFieldDef[]> {
+	const data = await bitableCall<{
+		items?: Array<{
+			field_name?: string;
+			type?: number;
+			property?: { options?: Array<{ name?: string }> };
+		}>;
+	}>(
+		env,
+		`/open-apis/bitable/v1/apps/${enc(args.appToken)}/tables/${enc(args.tableId)}/fields?page_size=200`,
+		{ method: 'GET' }
+	);
+	return (data.items ?? [])
+		.map((f) => ({
+			name: f.field_name ?? '',
+			type: f.type ?? 0,
+			options: (f.property?.options ?? []).map((o) => o.name ?? '').filter(Boolean)
+		}))
+		.filter((f) => f.name);
+}
+
 /** Convenience: equality filter on one field (`field is value`). */
 export function eqFilter(fieldName: string, value: string): BitableFilter {
 	return { conjunction: 'and', conditions: [{ field_name: fieldName, operator: 'is', value: [value] }] };

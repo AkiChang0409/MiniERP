@@ -158,11 +158,20 @@ export const POST: RequestHandler = async (event) => {
 		if (!appToken || !tableId) return toast('error', 'Doc Hub 未配置。');
 
 		const newStatus = kind === 'qc_confirm' ? 'Effective' : 'Rejected';
+		const fields: Record<string, unknown> = { 'Doc Status': newStatus };
+		if (kind === 'qc_confirm') {
+			// Category / File Type the PM picked on the card ride back in form_value.
+			const fv = readFormValue(body);
+			const category = asString(fv.category);
+			const fileType = asString(fv.file_type);
+			if (category) fields['Category'] = category;
+			if (fileType) fields['File Type'] = fileType;
+		}
 		const work = bitableUpdateRecord(env, {
 			appToken,
 			tableId,
 			recordId,
-			fields: { 'Doc Status': newStatus }
+			fields
 		})
 			.then(() => {
 				if (!openId) return;
