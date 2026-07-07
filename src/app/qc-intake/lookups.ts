@@ -74,6 +74,46 @@ export async function listProjectsForSend(env: Env): Promise<ProjectOption[]> {
 	return out;
 }
 
+export interface DocClassification {
+	/** Dictionary row record_id — written into the Doc Hub `File Type` link field. */
+	recordId: string;
+	/** Secondary Category (the "File Type"). */
+	fileType: string;
+	/** Primary Category. */
+	category: string;
+}
+
+/**
+ * Read the classification dictionary (one row per File Type, with its Category)
+ * so the send page can offer a Category → File Type cascade. Not hardcoded —
+ * driven by the `LARK_DICT_TABLE_ID` table's `Secondary Category` /
+ * `Primary Category` fields.
+ */
+export async function listDocClassifications(env: Env): Promise<DocClassification[]> {
+	const appToken = baseAppToken(env);
+	const tableId = env.LARK_DICT_TABLE_ID;
+	if (!tableId) throw new Error('LARK_DICT_TABLE_ID is not configured');
+
+	const out: DocClassification[] = [];
+	let pageToken: string | undefined;
+	do {
+		const res = await bitableSearchRecords(env, {
+			appToken,
+			tableId,
+			fieldNames: ['Secondary Category', 'Primary Category'],
+			pageSize: 200,
+			pageToken
+		});
+		for (const r of res.records) {
+			const fileType = cellText(r.fields['Secondary Category']);
+			const category = cellText(r.fields['Primary Category']);
+			if (fileType) out.push({ recordId: r.record_id, fileType, category });
+		}
+		pageToken = res.hasMore ? res.pageToken : undefined;
+	} while (pageToken);
+	return out;
+}
+
 export async function listSuppliersForSend(env: Env): Promise<SupplierOption[]> {
 	const appToken = baseAppToken(env);
 	const tableId = env.LARK_SUPPLIER_TABLE_ID;

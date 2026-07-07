@@ -134,6 +134,9 @@ jobs:
           if [ -n "${LARK_SUPPLIER_TABLE_ID:-}" ]; then
             printf '%s' "$LARK_SUPPLIER_TABLE_ID" | npx wrangler secret put LARK_SUPPLIER_TABLE_ID
           fi
+          if [ -n "${LARK_DICT_TABLE_ID:-}" ]; then
+            printf '%s' "$LARK_DICT_TABLE_ID" | npx wrangler secret put LARK_DICT_TABLE_ID
+          fi
           if [ -n "${QC_TOKEN_SECRET:-}" ]; then
             printf '%s' "$QC_TOKEN_SECRET" | npx wrangler secret put QC_TOKEN_SECRET
           fi
@@ -156,6 +159,7 @@ jobs:
           LARK_DOCHUB_TABLE_ID: ${{ secrets.LARK_DOCHUB_TABLE_ID }}
           LARK_PROJECT_TABLE_ID: ${{ secrets.LARK_PROJECT_TABLE_ID }}
           LARK_SUPPLIER_TABLE_ID: ${{ secrets.LARK_SUPPLIER_TABLE_ID }}
+          LARK_DICT_TABLE_ID: ${{ secrets.LARK_DICT_TABLE_ID }}
           QC_TOKEN_SECRET: ${{ secrets.QC_TOKEN_SECRET }}
           QC_INBOX_EMAIL: ${{ secrets.QC_INBOX_EMAIL }}
 

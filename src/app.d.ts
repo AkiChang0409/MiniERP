@@ -72,6 +72,8 @@ declare global {
 		/** Projects + Business Partner tables live in the same Base (share LARK_DOCHUB_APP_TOKEN). */
 		LARK_PROJECT_TABLE_ID?: string;
 		LARK_SUPPLIER_TABLE_ID?: string;
+		/** Classification dictionary table (Secondary Category → Primary Category), same Base. */
+		LARK_DICT_TABLE_ID?: string;
 		/** HMAC secret for QC intake signed upload tokens (see src/app/qc-intake/token.ts). */
 		QC_TOKEN_SECRET?: string;
 		/** Monitored inbox that supplier email replies go to (fallback channel B). Defaults to EMAIL_FROM. */

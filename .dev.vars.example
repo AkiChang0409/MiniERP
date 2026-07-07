@@ -14,6 +14,8 @@
 # Projects + Business Partner tables (same Base, share LARK_DOCHUB_APP_TOKEN):
 # LARK_PROJECT_TABLE_ID=tblQzG5SD2URlzs6
 # LARK_SUPPLIER_TABLE_ID=tblsYri9cgxgfYrB
+# Classification dictionary (Secondary Category → Primary Category):
+# LARK_DICT_TABLE_ID=
 # HMAC secret for QC intake signed upload tokens (any long random string, e.g. openssl rand -hex 32).
 # QC_TOKEN_SECRET=
 # Monitored inbox for supplier email replies (fallback channel B). Defaults to EMAIL_FROM if unset.

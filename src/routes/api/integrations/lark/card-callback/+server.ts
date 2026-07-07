@@ -157,21 +157,14 @@ export const POST: RequestHandler = async (event) => {
 		const tableId = env.LARK_DOCHUB_TABLE_ID;
 		if (!appToken || !tableId) return toast('error', 'Doc Hub 未配置。');
 
+		// Category / File Type are relation fields classified in the record itself
+		// (native cascade); the card only drives status.
 		const newStatus = kind === 'qc_confirm' ? 'Effective' : 'Rejected';
-		const fields: Record<string, unknown> = { 'Doc Status': newStatus };
-		if (kind === 'qc_confirm') {
-			// Category / File Type the PM picked on the card ride back in form_value.
-			const fv = readFormValue(body);
-			const category = asString(fv.category);
-			const fileType = asString(fv.file_type);
-			if (category) fields['Category'] = category;
-			if (fileType) fields['File Type'] = fileType;
-		}
 		const work = bitableUpdateRecord(env, {
 			appToken,
 			tableId,
 			recordId,
-			fields
+			fields: { 'Doc Status': newStatus }
 		})
 			.then(() => {
 				if (!openId) return;

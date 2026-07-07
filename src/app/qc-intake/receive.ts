@@ -14,7 +14,6 @@ import {
 	bitableCreateRecord,
 	bitableGetRecord,
 	bitableListFieldNames,
-	bitableListFields,
 	bitableUploadMedia,
 	type BitableFields
 } from '$platform/integrations/lark/bitable';
@@ -67,7 +66,10 @@ export async function receiveQcUpload(
 			'Customer/Supplier': [ids.supplierId],
 			'Doc Status': DOC_STATUS_PENDING,
 			Source: SOURCE_UPLOAD_LINK,
-			'Match Confidence': MATCH_CONFIDENCE_HIGH
+			'Match Confidence': MATCH_CONFIDENCE_HIGH,
+			// File Type is a link to the classification dictionary; Category derives
+			// from it (lookup). Written as [record_id]. Skipped if not chosen.
+			...(ids.fileTypeId ? { 'File Type': [ids.fileTypeId] } : {})
 		};
 
 		// Only write fields that actually exist in the table — guards against a
@@ -163,31 +165,6 @@ async function notifyPmForReview(
 			if (supplier) supplierName = cellText(supplier.fields['Name']);
 		}
 
-		// Pull the Doc Hub Category / File Type option labels so the PM can pick
-		// them right on the review card (single-selects defined in the table).
-		let categoryOptions: string[] = [];
-		let fileTypeOptions: string[] = [];
-		const dochubTable = env.LARK_DOCHUB_TABLE_ID;
-		if (dochubTable) {
-			const defs = await bitableListFields(env, { appToken, tableId: dochubTable }).catch((e) => {
-				console.error('[qc] listFields failed:', e);
-				return [];
-			});
-			categoryOptions = defs.find((f) => f.name === 'Category')?.options ?? [];
-			fileTypeOptions = defs.find((f) => f.name === 'File Type')?.options ?? [];
-			console.log(
-				`[qc] options: category=${categoryOptions.length} fileType=${fileTypeOptions.length} (fields=${defs.length})`
-			);
-			// Which fields actually carry options + their exact names (to spot a name/type mismatch).
-			console.log(
-				'[qc] fields with options:',
-				defs
-					.filter((f) => f.options.length)
-					.map((f) => `${f.name}(t${f.type}:${f.options.length})`)
-					.join(', ') || 'NONE'
-			);
-		}
-
 		await sendInteractiveCard(
 			env,
 			openId,
@@ -198,9 +175,7 @@ async function notifyPmForReview(
 				supplierName,
 				fileName: args.fileName,
 				source: 'Link',
-				confidence: 'High',
-				categoryOptions,
-				fileTypeOptions
+				confidence: 'High'
 			})
 		);
 		console.log('[qc] review card sent to', openId);

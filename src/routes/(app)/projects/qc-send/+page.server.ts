@@ -1,6 +1,10 @@
 import type { PageServerLoad, Actions } from './$types';
 import { fail } from '@sveltejs/kit';
-import { listProjectsForSend, listSuppliersForSend } from '$app-layer/qc-intake/lookups';
+import {
+	listProjectsForSend,
+	listSuppliersForSend,
+	listDocClassifications
+} from '$app-layer/qc-intake/lookups';
 import { startQcSend } from '$app-layer/qc-intake/send-gateway';
 
 /**
@@ -13,13 +17,20 @@ export const load: PageServerLoad = async (event) => {
 	const env = event.platform?.env;
 	if (!env) return { projects: [], suppliers: [], configured: false };
 	try {
-		const [projects, suppliers] = await Promise.all([
+		const [projects, suppliers, classifications] = await Promise.all([
 			listProjectsForSend(env),
-			listSuppliersForSend(env)
+			listSuppliersForSend(env),
+			listDocClassifications(env).catch(() => [])
 		]);
-		return { projects, suppliers, configured: true };
+		return { projects, suppliers, classifications, configured: true };
 	} catch (err) {
-		return { projects: [], suppliers: [], configured: false, loadError: (err as Error).message };
+		return {
+			projects: [],
+			suppliers: [],
+			classifications: [],
+			configured: false,
+			loadError: (err as Error).message
+		};
 	}
 };
 
@@ -31,6 +42,7 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const projectId = String(form.get('projectId') ?? '').trim();
 		const supplierId = String(form.get('supplierId') ?? '').trim();
+		const fileTypeId = String(form.get('fileTypeId') ?? '').trim() || undefined;
 		const recipientEmail = String(form.get('recipientEmail') ?? '').trim();
 		const file = form.get('file');
 
@@ -46,6 +58,7 @@ export const actions: Actions = {
 			const result = await startQcSend(env, {
 				projectId,
 				supplierId,
+				fileTypeId,
 				recipientEmail,
 				file: {
 					fileName: file.name,

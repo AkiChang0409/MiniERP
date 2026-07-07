@@ -22,12 +22,16 @@ const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export interface QcTokenPayload {
 	projectId: string;
 	supplierId: string;
+	/** Doc Hub `File Type` = link to the classification dictionary; this is the dict row's record_id. */
+	fileTypeId?: string;
 }
 
 interface WirePayload {
 	p: string;
 	s: string;
 	e: number;
+	/** File Type dictionary record_id (optional). */
+	ft?: string;
 }
 
 function resolveSecret(env: Env): string {
@@ -81,7 +85,8 @@ export async function signQcToken(
 	const wire: WirePayload = {
 		p: payload.projectId,
 		s: payload.supplierId,
-		e: now + (opts?.ttlMs ?? DEFAULT_TTL_MS)
+		e: now + (opts?.ttlMs ?? DEFAULT_TTL_MS),
+		...(payload.fileTypeId ? { ft: payload.fileTypeId } : {})
 	};
 	const payloadB64 = bytesToB64Url(encoder.encode(JSON.stringify(wire)));
 	const sig = await hmac(secret, payloadB64);
@@ -117,5 +122,9 @@ export async function verifyQcToken(
 	const now = opts?.now ?? Date.now();
 	if (typeof wire.e !== 'number' || wire.e < now) return null;
 
-	return { projectId: wire.p, supplierId: wire.s };
+	return {
+		projectId: wire.p,
+		supplierId: wire.s,
+		...(typeof wire.ft === 'string' ? { fileTypeId: wire.ft } : {})
+	};
 }

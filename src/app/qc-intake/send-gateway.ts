@@ -21,6 +21,8 @@ import { signQcToken } from './token';
 export interface QcSendInput {
 	projectId: string;
 	supplierId: string;
+	/** Dictionary record_id of the chosen File Type (optional); written to Doc Hub on receipt. */
+	fileTypeId?: string;
 	/** Supplier recipient address (prefilled from the supplier record on the page). */
 	recipientEmail: string;
 	/** The blank checklist to attach. */
@@ -49,7 +51,8 @@ function bytesToBase64(bytes: Uint8Array): string {
 export async function startQcSend(env: Env, input: QcSendInput): Promise<QcSendResult> {
 	const token = await signQcToken(env, {
 		projectId: input.projectId,
-		supplierId: input.supplierId
+		supplierId: input.supplierId,
+		fileTypeId: input.fileTypeId
 	});
 	const base = (input.appBaseUrl ?? env.BETTER_AUTH_URL ?? '').replace(/\/+$/, '');
 	const uploadUrl = `${base}/qc/submit/${token}`;
