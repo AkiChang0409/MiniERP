@@ -30,7 +30,10 @@
 	{#if form?.ok}
 		<div class="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
 			✅ Sent. Subject <code>{form.subject}</code>{form.emailSent ? '' : ' (email not dispatched — check RESEND_API_KEY)'}.
-			<br />Upload link: <a class="text-blue-600 underline" href={form.uploadUrl}>{form.uploadUrl}</a>
+			<br />Upload link:
+			<a class="text-blue-600 underline" style="word-break:break-all;overflow-wrap:anywhere;" href={form.uploadUrl}>
+				{form.uploadUrl}
+			</a>
 		</div>
 	{:else if form?.error}
 		<div class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -101,14 +104,7 @@
 
 		<div>
 			<label for="file" class="block text-sm font-medium text-gray-700">QC checklist file</label>
-			<input
-				id="file"
-				name="file"
-				type="file"
-				required
-				accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-				class="mt-1 w-full text-sm"
-			/>
+			<input id="file" name="file" type="file" required class="mt-1 w-full text-sm" />
 		</div>
 
 		<button

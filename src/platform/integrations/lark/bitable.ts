@@ -195,6 +195,23 @@ export async function bitableUploadMedia(
 	return data.data.file_token;
 }
 
+/**
+ * List a table's field names (for validating a write payload against the real
+ * schema before create/update).
+ * Docs: GET /open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/fields
+ */
+export async function bitableListFieldNames(
+	env: Env,
+	args: { appToken: string; tableId: string }
+): Promise<string[]> {
+	const data = await bitableCall<{ items?: Array<{ field_name?: string }> }>(
+		env,
+		`/open-apis/bitable/v1/apps/${enc(args.appToken)}/tables/${enc(args.tableId)}/fields?page_size=200`,
+		{ method: 'GET' }
+	);
+	return (data.items ?? []).map((f) => f.field_name ?? '').filter(Boolean);
+}
+
 /** Convenience: equality filter on one field (`field is value`). */
 export function eqFilter(fieldName: string, value: string): BitableFilter {
 	return { conjunction: 'and', conditions: [{ field_name: fieldName, operator: 'is', value: [value] }] };

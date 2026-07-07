@@ -13,7 +13,9 @@ import { verifyQcToken } from './token';
 import {
 	bitableCreateRecord,
 	bitableGetRecord,
-	bitableUploadMedia
+	bitableListFieldNames,
+	bitableUploadMedia,
+	type BitableFields
 } from '$platform/integrations/lark/bitable';
 import { sendInteractiveCard } from '$platform/integrations/lark/client';
 import { buildQcReviewCard } from '$platform/integrations/lark/cards/qc-review-card';
@@ -55,20 +57,33 @@ export async function receiveQcUpload(
 			bytes: args.file.bytes
 		});
 
-		const record = await bitableCreateRecord(env, {
-			appToken,
-			tableId,
-			fields: {
-				'Doc Title': args.file.fileName,
-				'Attachment File': [{ file_token: fileToken }],
-				// Link fields take an array of record_ids.
-				Projects: [ids.projectId],
-				'Customer/Supplier': [ids.supplierId],
-				'Doc Status': DOC_STATUS_PENDING,
-				Source: SOURCE_UPLOAD_LINK,
-				'Match Confidence': MATCH_CONFIDENCE_HIGH
-			}
-		});
+		// Desired payload. Link fields take an array of record_ids; attachment
+		// takes [{ file_token }]; single-selects take the option label string.
+		const desired: BitableFields = {
+			'Doc Title': args.file.fileName,
+			'Attachment File': [{ file_token: fileToken }],
+			Projects: [ids.projectId],
+			'Customer/Supplier': [ids.supplierId],
+			'Doc Status': DOC_STATUS_PENDING,
+			Source: SOURCE_UPLOAD_LINK,
+			'Match Confidence': MATCH_CONFIDENCE_HIGH
+		};
+
+		// Only write fields that actually exist in the table — guards against a
+		// name mismatch failing the whole insert (Lark code 1254045). Skipped
+		// fields are logged so the mismatch is easy to spot in `wrangler tail`.
+		const existing = new Set(await bitableListFieldNames(env, { appToken, tableId }).catch(() => []));
+		const fields: BitableFields = {};
+		const skipped: string[] = [];
+		for (const [key, value] of Object.entries(desired)) {
+			if (existing.size === 0 || existing.has(key)) fields[key] = value;
+			else skipped.push(key);
+		}
+		if (skipped.length) {
+			console.warn(`[qc] Doc Hub fields not found, skipped: ${skipped.join(', ')}`);
+		}
+
+		const record = await bitableCreateRecord(env, { appToken, tableId, fields });
 
 		// Best-effort: notify the project PM to review (never fails the upload).
 		await notifyPmForReview(env, {
