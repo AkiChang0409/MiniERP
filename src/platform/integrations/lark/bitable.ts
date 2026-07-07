@@ -105,6 +105,24 @@ export async function bitableUpdateRecord(
 }
 
 /**
+ * Get a single record by id.
+ * Docs: GET /open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/{record_id}
+ */
+export async function bitableGetRecord(
+	env: Env,
+	args: { appToken: string; tableId: string; recordId: string }
+): Promise<BitableRecord> {
+	const data = await bitableCall<{ record: BitableRecord }>(
+		env,
+		`/open-apis/bitable/v1/apps/${enc(args.appToken)}/tables/${enc(args.tableId)}/records/${enc(
+			args.recordId
+		)}`,
+		{ method: 'GET' }
+	);
+	return data.record;
+}
+
+/**
  * Search records (up to 500/page, with an optional native filter).
  * Docs: POST /open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/search
  * Pass `pageToken` from a previous call to page; `hasMore` signals more pages.
@@ -142,6 +160,39 @@ export async function bitableSearchRecords(
 		hasMore: Boolean(data.has_more),
 		pageToken: data.page_token
 	};
+}
+
+/**
+ * Upload a file as Bitable attachment media → returns a `file_token`.
+ * Two-step attachment flow: upload here, then write `[{ file_token }]` into the
+ * attachment field via create/update record.
+ * Docs: POST /open-apis/drive/v1/medias/upload_all (multipart/form-data, <20MB).
+ * Scope: one of [bitable:app, drive:drive, …] — bitable:app suffices.
+ */
+export async function bitableUploadMedia(
+	env: Env,
+	args: { appToken: string; fileName: string; mimeType: string; bytes: Uint8Array }
+): Promise<string> {
+	const token = await getTenantAccessToken(env);
+	const fd = new FormData();
+	fd.append('file_name', args.fileName);
+	fd.append('parent_type', 'bitable_file');
+	fd.append('parent_node', args.appToken);
+	fd.append('size', String(args.bytes.length));
+	// Uint8Array is a valid BlobPart at runtime; cast around the strict lib type.
+	fd.append('file', new Blob([args.bytes as unknown as BlobPart], { type: args.mimeType }), args.fileName);
+
+	// No manual Content-Type — fetch sets the multipart boundary.
+	const res = await fetch(`${larkBaseUrl(env)}/open-apis/drive/v1/medias/upload_all`, {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${token}` },
+		body: fd
+	});
+	const data = (await res.json()) as BitableEnvelope<{ file_token?: string }>;
+	if (data.code !== 0 || !data.data?.file_token) {
+		throw new Error(`Lark upload_all failed: code=${data.code} msg=${data.msg ?? 'unknown'}`);
+	}
+	return data.data.file_token;
 }
 
 /** Convenience: equality filter on one field (`field is value`). */

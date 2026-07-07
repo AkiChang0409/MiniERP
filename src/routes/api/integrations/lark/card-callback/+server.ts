@@ -10,6 +10,7 @@ import {
 import { resolveUserByExternalIdentity } from '$platform/auth/resolve-external-identity';
 import { createWorkerContext } from '$platform/context';
 import { sendInteractiveCard } from '$platform/integrations/lark/client';
+import { bitableUpdateRecord } from '$platform/integrations/lark/bitable';
 import { buildResultCard } from '$platform/integrations/lark/cards/intake-review-card';
 import {
 	createDocumentIntakeService,
@@ -47,6 +48,8 @@ interface CardAction {
 	document_id?: string;
 	category_id?: string;
 	project_id?: string;
+	/** QC intake: the Doc Hub (Bitable) record_id to confirm/reject. */
+	record_id?: string;
 }
 
 /** Lark `{ toast: { type, content } }` response (card 2.0 callback). */
@@ -143,6 +146,45 @@ export const POST: RequestHandler = async (event) => {
 	const documentId = action?.document_id;
 	const kind = action?.action;
 	console.log(`[lark] card action=${kind ?? 'n/a'} doc=${documentId ?? 'n/a'} by=${openId ?? '(unknown)'}`);
+
+	// --- QC intake (Doc Hub in Lark Bitable): confirm/reject by record_id ---
+	// Runs before the finance documentId guard + MiniERP-user resolution: QC
+	// writes to Bitable as the app, so no D1 user attribution is needed.
+	if (kind === 'qc_confirm' || kind === 'qc_reject') {
+		const recordId = action?.record_id;
+		if (!recordId) return toast('info', '无法识别记录。');
+		const appToken = env.LARK_DOCHUB_APP_TOKEN;
+		const tableId = env.LARK_DOCHUB_TABLE_ID;
+		if (!appToken || !tableId) return toast('error', 'Doc Hub 未配置。');
+
+		const newStatus = kind === 'qc_confirm' ? 'Effective' : 'Rejected';
+		const work = bitableUpdateRecord(env, {
+			appToken,
+			tableId,
+			recordId,
+			fields: { 'Doc Status': newStatus }
+		})
+			.then(() => {
+				if (!openId) return;
+				return sendInteractiveCard(
+					env,
+					openId,
+					'open_id',
+					buildResultCard(
+						kind === 'qc_confirm' ? '✅ Confirmed' : '🚫 Rejected',
+						kind === 'qc_confirm'
+							? 'QC file marked Effective in Doc Hub.'
+							: 'QC file marked Rejected.',
+						kind === 'qc_confirm' ? 'green' : 'red'
+					)
+				);
+			})
+			.catch((e) => console.error('[lark] qc action failed:', e));
+		const qcExec = event.platform?.ctx;
+		if (qcExec?.waitUntil) qcExec.waitUntil(work);
+		else void work;
+		return toast('info', kind === 'qc_confirm' ? '正在确认…' : '正在驳回…');
+	}
 
 	if (!action || !kind || !documentId) {
 		return toast('info', '无法识别的卡片操作。');
