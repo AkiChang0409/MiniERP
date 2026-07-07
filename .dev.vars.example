@@ -10,7 +10,14 @@
 # Doc Hub Base (多维表格) target for QC/document intake. From the Base URL:
 # feishu.cn/base/<APP_TOKEN>?table=<TABLE_ID>. The app must be a collaborator on this Base.
 # LARK_DOCHUB_APP_TOKEN=
-# LARK_DOCHUB_TABLE_ID=
+# LARK_DOCHUB_TABLE_ID=tblQ4XMPWLVALfrF
+# Projects + Business Partner tables (same Base, share LARK_DOCHUB_APP_TOKEN):
+# LARK_PROJECT_TABLE_ID=tblQzG5SD2URlzs6
+# LARK_SUPPLIER_TABLE_ID=tblsYri9cgxgfYrB
+# HMAC secret for QC intake signed upload tokens (any long random string, e.g. openssl rand -hex 32).
+# QC_TOKEN_SECRET=
+# Monitored inbox for supplier email replies (fallback channel B). Defaults to EMAIL_FROM if unset.
+# QC_INBOX_EMAIL=
 
 # Required for better-auth (generate a new random string, e.g. openssl rand -hex 32)
 BETTER_AUTH_SECRET=
