@@ -144,6 +144,7 @@ async function notifyPmForReview(
 			tableId: projectTable,
 			recordId: args.projectId
 		});
+		console.log('[qc] PM field raw:', JSON.stringify(project.fields['PM'] ?? null));
 		const openId = personOpenId(project.fields['PM']);
 		if (!openId) {
 			console.log('[qc] project has no PM person → skip review card');
@@ -188,6 +189,7 @@ async function notifyPmForReview(
 				fileTypeOptions
 			})
 		);
+		console.log('[qc] review card sent to', openId);
 	} catch (err) {
 		console.error('[qc] PM review card notify failed (non-fatal):', err);
 	}
