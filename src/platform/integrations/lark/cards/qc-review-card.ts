@@ -1,11 +1,15 @@
 /**
  * Lark interactive card (schema 2.0 form) for a QC checklist awaiting PM review.
  * Shows project / supplier / file, and lets the PM pick Category + File Type
- * (options pulled from the Doc Hub field definitions) before confirming. On
- * Confirm (form_submit) the callback receives `form_value` with the selections.
+ * (options pulled from the Doc Hub field definitions) before confirming.
+ *
+ * Card 2.0 rule: a `form_submit` button must live inside a `form` container, and
+ * the named inputs it collects must be inside that same form. So the selects +
+ * Confirm live in a `form`; Reject is a plain callback button outside it.
  *
  * Platform layer — no `$modules/*` import (boundary rule 3). Button `value`s
- * carry only routing data (`{ action, record_id }`).
+ * carry only routing data (`{ action, record_id }`); selections ride in
+ * `form_value` keyed by each select's `name`.
  */
 
 export interface QcReviewCardInput {
@@ -51,54 +55,21 @@ export function buildQcReviewCard(input: QcReviewCardInput): Record<string, unkn
 		.filter(Boolean)
 		.join('\n');
 
-	const elements: Array<Record<string, unknown>> = [
-		{ tag: 'markdown', content: context },
-		{ tag: 'hr' }
-	];
-
+	// Everything the Confirm button submits must be inside the `form`.
+	const formElements: Array<Record<string, unknown>> = [];
 	if (input.categoryOptions?.length) {
-		elements.push({ tag: 'markdown', content: '**Category**' });
-		elements.push(selectStatic('category', 'Select category…', input.categoryOptions));
+		formElements.push(selectStatic('category', 'Category — select…', input.categoryOptions));
 	}
 	if (input.fileTypeOptions?.length) {
-		elements.push({ tag: 'markdown', content: '**File Type**' });
-		elements.push(selectStatic('file_type', 'Select file type…', input.fileTypeOptions));
+		formElements.push(selectStatic('file_type', 'File Type — select…', input.fileTypeOptions));
 	}
-
-	elements.push({
-		tag: 'column_set',
-		horizontal_spacing: 'default',
-		columns: [
-			{
-				tag: 'column',
-				width: 'weighted',
-				weight: 1,
-				elements: [
-					{
-						tag: 'button',
-						text: { tag: 'plain_text', content: '✅ Confirm' },
-						type: 'primary',
-						action_type: 'form_submit',
-						name: 'qc_confirm',
-						value: { action: 'qc_confirm', record_id: input.recordId }
-					}
-				]
-			},
-			{
-				tag: 'column',
-				width: 'weighted',
-				weight: 1,
-				elements: [
-					{
-						tag: 'button',
-						text: { tag: 'plain_text', content: '🚫 Reject' },
-						type: 'danger',
-						name: 'qc_reject',
-						value: { action: 'qc_reject', record_id: input.recordId }
-					}
-				]
-			}
-		]
+	formElements.push({
+		tag: 'button',
+		text: { tag: 'plain_text', content: '✅ Confirm' },
+		type: 'primary',
+		action_type: 'form_submit',
+		name: 'qc_confirm',
+		value: { action: 'qc_confirm', record_id: input.recordId }
 	});
 
 	return {
@@ -108,6 +79,23 @@ export function buildQcReviewCard(input: QcReviewCardInput): Record<string, unkn
 			template: lowConf ? 'orange' : 'blue',
 			title: { tag: 'plain_text', content: '🔍 QC checklist — please review' }
 		},
-		body: { elements }
+		body: {
+			elements: [
+				{ tag: 'markdown', content: context },
+				{ tag: 'hr' },
+				{ tag: 'form', name: 'qc_form', elements: formElements },
+				{
+					tag: 'action',
+					actions: [
+						{
+							tag: 'button',
+							text: { tag: 'plain_text', content: '🚫 Reject' },
+							type: 'danger',
+							value: { action: 'qc_reject', record_id: input.recordId }
+						}
+					]
+				}
+			]
+		}
 	};
 }

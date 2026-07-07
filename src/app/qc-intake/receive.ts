@@ -169,9 +169,15 @@ async function notifyPmForReview(
 		let fileTypeOptions: string[] = [];
 		const dochubTable = env.LARK_DOCHUB_TABLE_ID;
 		if (dochubTable) {
-			const defs = await bitableListFields(env, { appToken, tableId: dochubTable }).catch(() => []);
+			const defs = await bitableListFields(env, { appToken, tableId: dochubTable }).catch((e) => {
+				console.error('[qc] listFields failed:', e);
+				return [];
+			});
 			categoryOptions = defs.find((f) => f.name === 'Category')?.options ?? [];
 			fileTypeOptions = defs.find((f) => f.name === 'File Type')?.options ?? [];
+			console.log(
+				`[qc] options: category=${categoryOptions.length} fileType=${fileTypeOptions.length} (fields=${defs.length})`
+			);
 		}
 
 		await sendInteractiveCard(
