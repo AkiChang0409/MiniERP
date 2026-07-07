@@ -125,6 +125,11 @@
 				</select>
 				<p class="mt-1 text-xs text-gray-400">Filtered by the selected category.</p>
 			</div>
+		{:else}
+			<p class="text-xs text-amber-600">
+				Category / File Type unavailable — set <code>LARK_DICT_TABLE_ID</code> (classification
+				dictionary table) to enable the picker.
+			</p>
 		{/if}
 
 		<div>

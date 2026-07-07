@@ -94,19 +94,32 @@ export async function listDocClassifications(env: Env): Promise<DocClassificatio
 	const tableId = env.LARK_DICT_TABLE_ID;
 	if (!tableId) throw new Error('LARK_DICT_TABLE_ID is not configured');
 
+	// Tolerant field lookup (handles trailing spaces / case differences).
+	const pick = (fields: Record<string, unknown>, name: string): unknown => {
+		if (name in fields) return fields[name];
+		const target = name.trim().toLowerCase();
+		for (const k of Object.keys(fields)) if (k.trim().toLowerCase() === target) return fields[k];
+		return undefined;
+	};
+
 	const out: DocClassification[] = [];
 	let pageToken: string | undefined;
+	let logged = false;
 	do {
-		const res = await bitableSearchRecords(env, {
-			appToken,
-			tableId,
-			fieldNames: ['Secondary Category', 'Primary Category'],
-			pageSize: 200,
-			pageToken
-		});
+		// No field_names filter → return all fields so a name hair-difference can't
+		// silently drop the columns; we match tolerantly below.
+		const res = await bitableSearchRecords(env, { appToken, tableId, pageSize: 200, pageToken });
+		if (!logged) {
+			console.log(
+				`[qc] dict rows=${res.records.length}; first-row fields: ${
+					res.records[0] ? Object.keys(res.records[0].fields).join(' | ') : '(none)'
+				}`
+			);
+			logged = true;
+		}
 		for (const r of res.records) {
-			const fileType = cellText(r.fields['Secondary Category']);
-			const category = cellText(r.fields['Primary Category']);
+			const fileType = cellText(pick(r.fields, 'Secondary Category'));
+			const category = cellText(pick(r.fields, 'Primary Category'));
 			if (fileType) out.push({ recordId: r.record_id, fileType, category });
 		}
 		pageToken = res.hasMore ? res.pageToken : undefined;

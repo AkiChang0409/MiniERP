@@ -20,8 +20,14 @@ export const load: PageServerLoad = async (event) => {
 		const [projects, suppliers, classifications] = await Promise.all([
 			listProjectsForSend(env),
 			listSuppliersForSend(env),
-			listDocClassifications(env).catch(() => [])
+			listDocClassifications(env).catch((e) => {
+				console.error('[qc] classifications load failed:', (e as Error).message);
+				return [];
+			})
 		]);
+		console.log(
+			`[qc] send-page loaded: projects=${projects.length} suppliers=${suppliers.length} classifications=${classifications.length}`
+		);
 		return { projects, suppliers, classifications, configured: true };
 	} catch (err) {
 		return {
