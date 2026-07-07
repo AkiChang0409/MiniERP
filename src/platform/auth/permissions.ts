@@ -90,6 +90,8 @@ export function isRouteAllowed(pathname: string, roles: AuthRole[]): boolean {
 			(r) => r === 'owner' || r === 'hr' || r === 'project_manager' || r === 'finance' || r === 'admin'
 		);
 	}
+	if (pathname.startsWith('/projects/qc-send'))
+		return roles.some((r) => r === 'owner' || r === 'admin' || r === 'project_manager');
 	if (pathname.startsWith('/settings')) return roles.some((r) => r === 'owner' || r === 'admin');
 	if (pathname.startsWith('/finance/tax'))
 		return roles.some((r) => r === 'owner' || r === 'finance' || r === 'admin');

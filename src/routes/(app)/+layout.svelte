@@ -229,7 +229,8 @@
 						icon: 'A',
 						badge: c?.active
 					},
-					{ href: '/projects/new', label: 'New Project', moduleId: 'project', icon: '+' }
+					{ href: '/projects/new', label: 'New Project', moduleId: 'project', icon: '+' },
+					{ href: '/projects/qc-send', label: 'QC Send', moduleId: 'project', icon: 'Q' }
 				]
 			}
 		];
