@@ -10,7 +10,7 @@
 
 const DEFAULT_BASE_URL = 'https://open.feishu.cn';
 
-function larkBaseUrl(env: Env): string {
+export function larkBaseUrl(env: Env): string {
 	const configured = env.LARK_BASE_URL?.replace(/\/+$/, '');
 	return configured && configured.length > 0 ? configured : DEFAULT_BASE_URL;
 }

@@ -7,6 +7,10 @@
 # LARK_APP_SECRET=
 # LARK_VERIFICATION_TOKEN=
 # LARK_ENCRYPT_KEY=        # optional; leave unset unless Encrypt Key is enabled in the console
+# Doc Hub Base (多维表格) target for QC/document intake. From the Base URL:
+# feishu.cn/base/<APP_TOKEN>?table=<TABLE_ID>. The app must be a collaborator on this Base.
+# LARK_DOCHUB_APP_TOKEN=
+# LARK_DOCHUB_TABLE_ID=
 
 # Required for better-auth (generate a new random string, e.g. openssl rand -hex 32)
 BETTER_AUTH_SECRET=

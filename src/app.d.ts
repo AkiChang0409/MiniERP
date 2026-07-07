@@ -61,6 +61,14 @@ declare global {
 		LARK_VERIFICATION_TOKEN?: string;
 		/** Optional: API base. Default https://open.feishu.cn; international Lark = https://open.larksuite.com */
 		LARK_BASE_URL?: string;
+		/**
+		 * Lark Bitable (多维表格) target for the Doc Hub record store. The app
+		 * (LARK_APP_ID) must be added as an editor/manager collaborator on this
+		 * Base, otherwise record read/write returns empty / permission errors.
+		 * app_token + table_id come from the Base URL (feishu.cn/base/<app_token>?table=<table_id>).
+		 */
+		LARK_DOCHUB_APP_TOKEN?: string;
+		LARK_DOCHUB_TABLE_ID?: string;
 	}
 
 	namespace App {

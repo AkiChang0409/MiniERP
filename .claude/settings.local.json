@@ -140,7 +140,23 @@
       "Bash(echo \"exit=$?\")",
       "Bash(cd /c/Users/akiwc/Documents/Axiom/MiniERP; npm run check > /tmp/chk.txt 2>&1; echo \"exit=$?\"; tail -1 /tmp/chk.txt; grep -c \"ERROR\" /tmp/chk.txt)",
       "Bash(echo \"tsc=$?\")",
-      "Bash(echo \"done=$?\")"
+      "Bash(echo \"done=$?\")",
+      "Bash(python -c \"import markdown; print\\('py-markdown OK'\\)\")",
+      "Bash(node build-html.mjs)",
+      "Bash(xxd)",
+      "Bash(grep -n \"OPEN = \\\\|CLOSE = \\\\|match\\(/\\\\[\" build-html.mjs)",
+      "WebSearch",
+      "WebFetch(domain:www.feishu.cn)",
+      "Bash(node build-html.mjs \"./角色权限矩阵-RBAC蓝图.md\")",
+      "Bash(node build-html.mjs \"./应用搭建-01-项目模块.md\")",
+      "Bash(node build-html.mjs \"./应用搭建-02-DocHub文档中心.md\")",
+      "Bash(node build-html.mjs \"./应用搭建-02b-文档分类字典.md\")",
+      "Bash(node build-html.mjs \"./App-02b-Document-Classification-Dictionary-EN.md\")",
+      "Bash(node build-html.mjs \"./App-02b-Doc-Classification-Full-EN.md\")",
+      "Bash(node build-html.mjs \"./App-02-DocHub-EN.md\")",
+      "Bash(node gen-dictionary.mjs)",
+      "Bash(node build-html.mjs \"./App-02c-DocHub-Form-Logic-EN.md\")",
+      "Bash(node build-html.mjs \"./应用搭建-03-QC邮件回传AI匹配-实施方案.md\")"
     ]
   }
 }
