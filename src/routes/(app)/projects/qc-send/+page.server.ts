@@ -48,7 +48,8 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const projectId = String(form.get('projectId') ?? '').trim();
 		const supplierId = String(form.get('supplierId') ?? '').trim();
-		const fileTypeId = String(form.get('fileTypeId') ?? '').trim() || undefined;
+		const category = String(form.get('category') ?? '').trim() || undefined;
+		const fileType = String(form.get('fileType') ?? '').trim() || undefined;
 		const recipientEmail = String(form.get('recipientEmail') ?? '').trim();
 		const file = form.get('file');
 
@@ -64,7 +65,8 @@ export const actions: Actions = {
 			const result = await startQcSend(env, {
 				projectId,
 				supplierId,
-				fileTypeId,
+				category,
+				fileType,
 				recipientEmail,
 				file: {
 					fileName: file.name,

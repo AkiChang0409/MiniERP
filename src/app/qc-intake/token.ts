@@ -22,15 +22,17 @@ const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export interface QcTokenPayload {
 	projectId: string;
 	supplierId: string;
-	/** Doc Hub `File Type` = link to the classification dictionary; this is the dict row's record_id. */
-	fileTypeId?: string;
+	/** Doc Hub `Category` / `File Type` are single-selects → carry the option labels. */
+	category?: string;
+	fileType?: string;
 }
 
 interface WirePayload {
 	p: string;
 	s: string;
 	e: number;
-	/** File Type dictionary record_id (optional). */
+	/** Category / File Type single-select labels (optional). */
+	ct?: string;
 	ft?: string;
 }
 
@@ -86,7 +88,8 @@ export async function signQcToken(
 		p: payload.projectId,
 		s: payload.supplierId,
 		e: now + (opts?.ttlMs ?? DEFAULT_TTL_MS),
-		...(payload.fileTypeId ? { ft: payload.fileTypeId } : {})
+		...(payload.category ? { ct: payload.category } : {}),
+		...(payload.fileType ? { ft: payload.fileType } : {})
 	};
 	const payloadB64 = bytesToB64Url(encoder.encode(JSON.stringify(wire)));
 	const sig = await hmac(secret, payloadB64);
@@ -125,6 +128,7 @@ export async function verifyQcToken(
 	return {
 		projectId: wire.p,
 		supplierId: wire.s,
-		...(typeof wire.ft === 'string' ? { fileTypeId: wire.ft } : {})
+		...(typeof wire.ct === 'string' ? { category: wire.ct } : {}),
+		...(typeof wire.ft === 'string' ? { fileType: wire.ft } : {})
 	};
 }

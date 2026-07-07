@@ -67,9 +67,10 @@ export async function receiveQcUpload(
 			'Doc Status': DOC_STATUS_PENDING,
 			Source: SOURCE_UPLOAD_LINK,
 			'Match Confidence': MATCH_CONFIDENCE_HIGH,
-			// File Type is a link to the classification dictionary; Category derives
-			// from it (lookup). Written as [record_id]. Skipped if not chosen.
-			...(ids.fileTypeId ? { 'File Type': [ids.fileTypeId] } : {})
+			// Category / File Type are single-select fields → write the option label
+			// (string), not an array. Skipped if not chosen.
+			...(ids.category ? { Category: ids.category } : {}),
+			...(ids.fileType ? { 'File Type': ids.fileType } : {})
 		};
 
 		// Only write fields that actually exist in the table — guards against a

@@ -100,6 +100,7 @@
 				<label for="category" class="block text-sm font-medium text-gray-700">Category</label>
 				<select
 					id="category"
+					name="category"
 					bind:value={selectedCategory}
 					class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
 				>
@@ -113,14 +114,14 @@
 			<div>
 				<label for="fileTypeId" class="block text-sm font-medium text-gray-700">File Type</label>
 				<select
-					id="fileTypeId"
-					name="fileTypeId"
+					id="fileType"
+					name="fileType"
 					disabled={!selectedCategory}
 					class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100"
 				>
 					<option value="" selected>{selectedCategory ? 'Select a file type…' : 'Pick a category first'}</option>
 					{#each fileTypes as ft (ft.recordId)}
-						<option value={ft.recordId}>{ft.fileType}</option>
+						<option value={ft.fileType}>{ft.fileType}</option>
 					{/each}
 				</select>
 				<p class="mt-1 text-xs text-gray-400">Filtered by the selected category.</p>
