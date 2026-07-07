@@ -178,6 +178,14 @@ async function notifyPmForReview(
 			console.log(
 				`[qc] options: category=${categoryOptions.length} fileType=${fileTypeOptions.length} (fields=${defs.length})`
 			);
+			// Which fields actually carry options + their exact names (to spot a name/type mismatch).
+			console.log(
+				'[qc] fields with options:',
+				defs
+					.filter((f) => f.options.length)
+					.map((f) => `${f.name}(t${f.type}:${f.options.length})`)
+					.join(', ') || 'NONE'
+			);
 		}
 
 		await sendInteractiveCard(

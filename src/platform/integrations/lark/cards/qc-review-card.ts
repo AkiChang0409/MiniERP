@@ -55,7 +55,17 @@ export function buildQcReviewCard(input: QcReviewCardInput): Record<string, unkn
 		.filter(Boolean)
 		.join('\n');
 
-	// Everything the Confirm button submits must be inside the `form`.
+	// Card 2.0: no `action` tag. Both buttons are `form_submit` inside the form
+	// (reject just ignores the form_value). Selects must be in the same form.
+	const btn = (content: string, type: string, action: string) => ({
+		tag: 'button',
+		text: { tag: 'plain_text', content },
+		type,
+		action_type: 'form_submit',
+		name: action,
+		value: { action, record_id: input.recordId }
+	});
+
 	const formElements: Array<Record<string, unknown>> = [];
 	if (input.categoryOptions?.length) {
 		formElements.push(selectStatic('category', 'Category — select…', input.categoryOptions));
@@ -64,12 +74,12 @@ export function buildQcReviewCard(input: QcReviewCardInput): Record<string, unkn
 		formElements.push(selectStatic('file_type', 'File Type — select…', input.fileTypeOptions));
 	}
 	formElements.push({
-		tag: 'button',
-		text: { tag: 'plain_text', content: '✅ Confirm' },
-		type: 'primary',
-		action_type: 'form_submit',
-		name: 'qc_confirm',
-		value: { action: 'qc_confirm', record_id: input.recordId }
+		tag: 'column_set',
+		horizontal_spacing: 'default',
+		columns: [
+			{ tag: 'column', width: 'weighted', weight: 1, elements: [btn('✅ Confirm', 'primary', 'qc_confirm')] },
+			{ tag: 'column', width: 'weighted', weight: 1, elements: [btn('🚫 Reject', 'danger', 'qc_reject')] }
+		]
 	});
 
 	return {
@@ -83,18 +93,7 @@ export function buildQcReviewCard(input: QcReviewCardInput): Record<string, unkn
 			elements: [
 				{ tag: 'markdown', content: context },
 				{ tag: 'hr' },
-				{ tag: 'form', name: 'qc_form', elements: formElements },
-				{
-					tag: 'action',
-					actions: [
-						{
-							tag: 'button',
-							text: { tag: 'plain_text', content: '🚫 Reject' },
-							type: 'danger',
-							value: { action: 'qc_reject', record_id: input.recordId }
-						}
-					]
-				}
+				{ tag: 'form', name: 'qc_form', elements: formElements }
 			]
 		}
 	};
