@@ -3,196 +3,91 @@
 
 	let { data, form } = $props();
 	let submitting = $state(false);
+	let dragActive = $state(false);
 	let fileName = $state('');
 
 	function onFileChange(e: Event) {
-		const input = e.target as HTMLInputElement;
-		fileName = input.files?.[0]?.name ?? '';
+		fileName = (e.target as HTMLInputElement).files?.[0]?.name ?? '';
 	}
 </script>
 
-<div class="page">
-	<div class="card">
-		<div class="brand">
-			<span class="logo">A</span>
-			<span class="brand-name">Axiom&nbsp;·&nbsp;QC Portal</span>
+<div class="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+	<div class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+		<!-- Brand header -->
+		<div class="flex items-center gap-2.5 border-b border-slate-100 px-6 py-4">
+			<span
+				class="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--sf-green)] text-sm font-bold text-white"
+				>SF</span
+			>
+			<span class="text-sm font-semibold text-slate-800">SmartFin&nbsp;·&nbsp;QC Portal</span>
 		</div>
 
-		<h1>Upload QC Checklist</h1>
+		<div class="p-6">
+			{#if !data.valid}
+				<h1 class="text-lg font-semibold text-slate-900">Link expired</h1>
+				<p class="mt-2 text-sm text-rose-600">
+					This upload link is invalid or has expired. Please contact your Axiom contact for a new one.
+				</p>
+			{:else if form?.ok}
+				<h1 class="text-lg font-semibold text-slate-900">Upload received</h1>
+				<div class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+					✓ Thank you — your checklist has been submitted for review. You can close this page.
+				</div>
+			{:else}
+				<h1 class="text-lg font-semibold text-slate-900">Upload QC Checklist</h1>
+				<p class="mt-1.5 text-sm text-slate-500">
+					Attach the filled checklist below and submit. It's routed to the right project automatically.
+				</p>
 
-		{#if !data.valid}
-			<p class="muted err">
-				This upload link is invalid or has expired. Please contact your Axiom contact for a new link.
-			</p>
-		{:else if form?.ok}
-			<div class="banner ok">
-				✅ Received — thank you. Your checklist has been submitted for review. You can close this page.
-			</div>
-		{:else}
-			<p class="muted">
-				Attach the filled QC checklist below and submit. It will be routed to the right project
-				automatically.
-			</p>
+				{#if form?.error}
+					<p class="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+						{form.error}
+					</p>
+				{/if}
 
-			{#if form?.error}
-				<div class="banner err">{form.error}</div>
+				<form
+					method="POST"
+					action="?/upload"
+					enctype="multipart/form-data"
+					class="mt-5 space-y-4"
+					use:enhance={() => {
+						submitting = true;
+						return async ({ update }) => {
+							await update();
+							submitting = false;
+						};
+					}}
+				>
+					<label
+						class="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-8 text-center transition {dragActive
+							? 'border-[var(--sf-green)] bg-[var(--sf-green-soft)]'
+							: 'border-slate-300 bg-slate-50/50 hover:border-[var(--sf-green)] hover:bg-slate-50'}"
+						ondragover={(e) => {
+							e.preventDefault();
+							dragActive = true;
+						}}
+						ondragleave={() => (dragActive = false)}
+						ondrop={() => (dragActive = false)}
+					>
+						<input name="file" type="file" required class="hidden" onchange={onFileChange} />
+						<span class="text-2xl">📄</span>
+						<span class="text-sm font-medium text-slate-700">{fileName || 'Choose a file to upload'}</span>
+						<span class="text-xs text-slate-400">Any file type · click to browse</span>
+					</label>
+
+					<button
+						type="submit"
+						disabled={submitting}
+						class="w-full rounded-md bg-[var(--sf-green)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#2f5e2c] disabled:opacity-50"
+					>
+						{submitting ? 'Uploading…' : 'Submit checklist'}
+					</button>
+				</form>
 			{/if}
 
-			<form
-				method="POST"
-				action="?/upload"
-				enctype="multipart/form-data"
-				use:enhance={() => {
-					submitting = true;
-					return async ({ update }) => {
-						await update();
-						submitting = false;
-					};
-				}}
-			>
-				<label class="dropzone">
-					<input name="file" type="file" required onchange={onFileChange} />
-					<span class="dz-icon">📄</span>
-					<span class="dz-text">{fileName || 'Choose a file to upload'}</span>
-					<span class="dz-hint">Any file type · click to browse</span>
-				</label>
-
-				<button type="submit" disabled={submitting}>
-					{submitting ? 'Uploading…' : 'Submit checklist'}
-				</button>
-			</form>
-		{/if}
-
-		<p class="foot">Secured upload · this link is unique to your submission.</p>
+			<p class="mt-6 text-center text-[11px] text-slate-400">
+				Secured upload · this link is unique to your submission.
+			</p>
+		</div>
 	</div>
 </div>
-
-<style>
-	.page {
-		min-height: 100vh;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: linear-gradient(160deg, #eef2fb, #f4f5f7);
-		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-		padding: 16px;
-	}
-	.card {
-		width: 100%;
-		max-width: 460px;
-		background: #fff;
-		border: 1px solid #e5e6eb;
-		border-radius: 16px;
-		box-shadow: 0 8px 30px rgba(31, 35, 41, 0.08);
-		padding: 30px;
-	}
-	.brand {
-		display: flex;
-		align-items: center;
-		gap: 9px;
-		margin-bottom: 22px;
-	}
-	.logo {
-		width: 30px;
-		height: 30px;
-		border-radius: 8px;
-		background: linear-gradient(135deg, #3370ff, #5b8cff);
-		color: #fff;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-weight: 700;
-		font-size: 16px;
-	}
-	.brand-name {
-		font-weight: 600;
-		color: #1f2329;
-		font-size: 14px;
-	}
-	h1 {
-		margin: 0 0 6px;
-		font-size: 20px;
-		color: #1f2329;
-	}
-	.muted {
-		color: #646a73;
-		font-size: 13.5px;
-		margin: 0 0 20px;
-	}
-	.err {
-		color: #c4302b;
-	}
-	.banner {
-		padding: 12px 14px;
-		border-radius: 10px;
-		font-size: 13.5px;
-		margin-bottom: 16px;
-	}
-	.banner.ok {
-		background: #e4f7e4;
-		border: 1px solid #b7e6b7;
-		color: #1a8a1a;
-	}
-	.banner.err {
-		background: #fdeaea;
-		border: 1px solid #f5c6c5;
-		color: #c4302b;
-	}
-	.dropzone {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 4px;
-		padding: 26px 16px;
-		border: 1.5px dashed #c4cbd6;
-		border-radius: 12px;
-		cursor: pointer;
-		text-align: center;
-		transition: border-color 0.15s, background 0.15s;
-	}
-	.dropzone:hover {
-		border-color: #3370ff;
-		background: #f7f9ff;
-	}
-	.dropzone input {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		opacity: 0;
-	}
-	.dz-icon {
-		font-size: 26px;
-	}
-	.dz-text {
-		font-size: 14px;
-		color: #1f2329;
-		font-weight: 500;
-		word-break: break-all;
-	}
-	.dz-hint {
-		font-size: 12px;
-		color: #8f959e;
-	}
-	button {
-		width: 100%;
-		margin-top: 18px;
-		padding: 12px;
-		background: #3370ff;
-		color: #fff;
-		border: none;
-		border-radius: 10px;
-		font-size: 14px;
-		font-weight: 600;
-		cursor: pointer;
-	}
-	button:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-	.foot {
-		margin: 22px 0 0;
-		text-align: center;
-		font-size: 11.5px;
-		color: #a5abb3;
-	}
-</style>
