@@ -1,18 +1,21 @@
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import { createProjectApi } from '../../api';
+import { compactTasks, ProjectDraftActionSchema, type ProjectDraftAction } from '../draft-action';
 import type { ProjectCapability } from '../types';
-import { ProjectDraftActionSchema, type ProjectDraftAction } from '../draft-action';
 import { ProposeAssignmentInputSchema, type ProposeAssignmentInput } from './schema';
 
 /**
  * Stage-2 draft (design §12): propose task assignments as a reviewable change
- * set. R3, read-only — never persisted.
+ * set. R3, read-only — self-fetches the project's tasks and the assignable user
+ * directory, then proposes assignments only from those candidates.
  */
 const SYSTEM_PROMPT = `You propose task assignments as a CHANGE SET. Return JSON
 matching the schema: type="project.task_change.proposal", the given projectId,
 and a "changes" array where each item has action="assign", "taskId", an "after"
 ({assigneeId, assigneeName}), optional "before" ({assignee}), and a "reason".
-Only assign from the provided candidates; never invent people. Flag overload or
-skill-mismatch "risks". Always set requiresConfirmation=true. Output JSON only.`;
+Only assign from the provided candidates; use their exact id — never invent
+people. Use the exact taskId from the task list. Flag overload/skill-mismatch
+"risks". Always set requiresConfirmation=true. Output JSON only.`;
 
 export const proposeAssignmentCapability: ProjectCapability<
 	ProposeAssignmentInput,
@@ -20,13 +23,21 @@ export const proposeAssignmentCapability: ProjectCapability<
 > = {
 	id: 'project.propose-assignment',
 	description:
-		'Propose task assignments (from a candidate list) as a reviewable change set. Draft / suggestive — never persisted.',
+		'Propose task assignments (from the project user directory) as a reviewable change set. Draft / suggestive — never persisted.',
 	riskLevel: 'R3',
 	inputSchema: ProposeAssignmentInputSchema,
 	outputSchema: ProjectDraftActionSchema,
 
 	async execute(input, ctx): Promise<ProjectDraftAction> {
 		if (!ctx.env) throw new Error('project.propose-assignment requires Workers AI env');
+		if (!ctx.moduleContext) throw new Error('project.propose-assignment requires a module context');
+
+		const api = createProjectApi(ctx.moduleContext);
+		const [{ tasks }, candidates] = await Promise.all([
+			api.listTasks(input.projectId),
+			api.listUsers()
+		]);
+
 		const result = await runStructuredOutput({
 			task: 'project.propose-assignment',
 			messages: [
@@ -34,8 +45,8 @@ export const proposeAssignmentCapability: ProjectCapability<
 				{
 					role: 'user',
 					content: `projectId: ${input.projectId}\nGoal: ${input.goal}\n\nTasks:\n${JSON.stringify(
-						input.tasks
-					)}\n\nCandidates:\n${JSON.stringify(input.candidates)}\n\nReturn the proposal JSON.`
+						compactTasks(tasks)
+					)}\n\nCandidates:\n${JSON.stringify(candidates)}\n\nReturn the proposal JSON.`
 				}
 			],
 			schema: ProjectDraftActionSchema,

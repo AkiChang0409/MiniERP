@@ -6,8 +6,10 @@
 	import ActiveFlow from './layers/ActiveFlow.svelte';
 	import QuickActions from './layers/QuickActions.svelte';
 	import TaskLine from './layers/TaskLine.svelte';
+	import AgentChat from './layers/AgentChat.svelte';
 
 	let scrimEl: HTMLDivElement | null = $state(null);
+	let bodyTab: 'brief' | 'ask' = $state('brief');
 
 	onMount(() => {
 		const onKey = (e: KeyboardEvent) => {
@@ -43,7 +45,7 @@
 			aria-label="AI task panel"
 		>
 			<!-- Left edge: animated wave ribbon. It IS the panel's visual left
-			     boundary â€?there is no straight border-left beneath it. The two
+			     boundary ï¿½?there is no straight border-left beneath it. The two
 			     paths drift at different periods so the boundary breathes. -->
 			<svg
 				class="wave-edge"
@@ -118,7 +120,29 @@
 					{#if panel.activeWorkflow}
 						<ActiveFlow />
 					{:else}
-						<TodayBrief />
+						<div class="sf-body-tabs">
+							<button
+								type="button"
+								class="sf-body-tab"
+								class:is-active={bodyTab === 'brief'}
+								onclick={() => (bodyTab = 'brief')}
+							>
+								Today
+							</button>
+							<button
+								type="button"
+								class="sf-body-tab"
+								class:is-active={bodyTab === 'ask'}
+								onclick={() => (bodyTab = 'ask')}
+							>
+								Ask
+							</button>
+						</div>
+						{#if bodyTab === 'brief'}
+							<TodayBrief />
+						{:else}
+							<AgentChat />
+						{/if}
 					{/if}
 				</div>
 				<TaskLine />
@@ -151,7 +175,7 @@
 		background-color: rgba(6, 12, 5, 0.66);
 	}
 
-	/* Panel shell â€?opens as a portal from the bottom-right orb.
+	/* Panel shell ï¿½?opens as a portal from the bottom-right orb.
 	 * clip-path circle() is set relative to the orb's position. */
 	.sf-panel-shell {
 		position: fixed;
@@ -166,7 +190,7 @@
 			radial-gradient(circle at 0% 100%, rgba(95, 181, 94, 0.11) 0%, transparent 54%),
 			var(--panel-bg);
 		color: var(--panel-fg);
-		/* No border-left â€?the wave ribbon IS the left edge. */
+		/* No border-left ï¿½?the wave ribbon IS the left edge. */
 		box-shadow: -30px 0 70px -22px rgba(0, 0, 0, 0.6);
 		transition:
 			clip-path var(--panel-dur-portal) var(--panel-ease),
@@ -191,7 +215,7 @@
 		}
 	}
 
-	/* Wave edge ribbon â€?this IS the panel's left boundary. Wider than
+	/* Wave edge ribbon ï¿½?this IS the panel's left boundary. Wider than
 	   before and positioned so the gold curve reads as luminous rather
 	   than as a straight vertical border. */
 	.wave-edge {
@@ -214,7 +238,7 @@
 		animation-direction: reverse;
 	}
 	/* Shift by exactly one wave period (320 units in viewBox space) so
-	   the loop is seamless â€?no visible reset/snap. */
+	   the loop is seamless ï¿½?no visible reset/snap. */
 	@keyframes wave-rise {
 		0% {
 			transform: translateY(0);
@@ -312,6 +336,25 @@
 		min-width: 0;
 		overflow-y: auto;
 		padding: 28px 24px 20px 46px;
+	}
+	.sf-body-tabs {
+		display: flex;
+		gap: 6px;
+		margin-bottom: 16px;
+	}
+	.sf-body-tab {
+		padding: 5px 12px;
+		border-radius: 999px;
+		border: 1px solid var(--panel-border);
+		background: transparent;
+		color: var(--panel-fg-muted);
+		cursor: pointer;
+		font-size: 12px;
+	}
+	.sf-body-tab.is-active {
+		color: var(--panel-gold-bright);
+		border-color: var(--panel-gold);
+		background: rgba(234, 188, 60, 0.08);
 	}
 
 	.sf-panel-footer {

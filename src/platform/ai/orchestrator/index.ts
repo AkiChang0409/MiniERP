@@ -15,7 +15,9 @@ export type {
 	DomainAgentPlugin,
 	OrchestratorResultKind,
 	OrchestratorCandidate,
-	OrchestratorResult
+	OrchestratorResult,
+	ApplyRequest,
+	BuildApplyRequestArgs
 } from './contracts';
 
 export {

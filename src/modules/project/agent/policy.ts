@@ -120,6 +120,13 @@ export const projectAgentAllowedCapabilities: ProjectCapabilityPolicyEntry[] = [
 		sideEffect: 'write',
 		requiresConfirmation: true,
 		requiredUserPermissions: ['project:edit']
+	},
+	{
+		id: 'project.apply-task-change-set',
+		riskLevel: 'R4',
+		sideEffect: 'write',
+		requiresConfirmation: true,
+		requiredUserPermissions: ['project:edit']
 	}
 ];
 

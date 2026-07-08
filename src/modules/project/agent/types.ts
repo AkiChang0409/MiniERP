@@ -6,6 +6,11 @@ export type ProjectIntent =
 	| 'draft_meeting_agenda'
 	| 'process_meeting_notes'
 	| 'view_calendar'
+	// Stage-2 draft intents (R3): produce a reviewable change-set proposal that
+	// the orchestrator stages for confirmation before any write.
+	| 'propose_task_plan'
+	| 'propose_reschedule'
+	| 'propose_assignment'
 	| 'unknown';
 
 export type ProjectOwnedDomain =

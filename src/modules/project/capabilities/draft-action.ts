@@ -37,3 +37,25 @@ export const DraftTaskRefSchema = z.object({
 });
 
 export type DraftTaskRef = z.infer<typeof DraftTaskRefSchema>;
+
+/** Project the full task rows (from `listTasks`) into the compact refs the
+ *  draft prompts consume. Keeps the LLM context small and stable. */
+export function compactTasks(
+	tasks: ReadonlyArray<{
+		id: string;
+		name: string;
+		status?: string | null;
+		startDate?: string | null;
+		endDate?: string | null;
+		assigneeId?: string | null;
+	}>
+): DraftTaskRef[] {
+	return tasks.map((t) => ({
+		id: t.id,
+		name: t.name,
+		status: t.status ?? undefined,
+		startDate: t.startDate ?? null,
+		endDate: t.endDate ?? null,
+		assignee: t.assigneeId ?? null
+	}));
+}

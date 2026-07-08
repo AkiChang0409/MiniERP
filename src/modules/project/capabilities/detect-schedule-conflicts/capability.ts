@@ -1,15 +1,13 @@
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import { createProjectApi } from '../../api';
+import { compactTasks, ProjectDraftActionSchema, type ProjectDraftAction } from '../draft-action';
 import type { ProjectCapability } from '../types';
-import { ProjectDraftActionSchema, type ProjectDraftAction } from '../draft-action';
-import {
-	DetectScheduleConflictsInputSchema,
-	type DetectScheduleConflictsInput
-} from './schema';
+import { DetectScheduleConflictsInputSchema, type DetectScheduleConflictsInput } from './schema';
 
 /**
  * Stage-2 draft (design §12): detect scheduling conflicts (dependency order
- * violations, assignee overlaps, gaps) and optionally propose reschedules to fix
- * them. R3, read-only — the proposal is reviewed; nothing is persisted.
+ * violations, assignee overlaps, bad dates) and optionally propose reschedules
+ * to fix them. R3, read-only — self-fetches tasks + dependencies.
  */
 const SYSTEM_PROMPT = `You analyse a project schedule for conflicts: a task
 starting before a dependency finishes, the same assignee double-booked across
@@ -33,6 +31,14 @@ export const detectScheduleConflictsCapability: ProjectCapability<
 
 	async execute(input, ctx): Promise<ProjectDraftAction> {
 		if (!ctx.env) throw new Error('project.detect-schedule-conflicts requires Workers AI env');
+		if (!ctx.moduleContext) {
+			throw new Error('project.detect-schedule-conflicts requires a module context');
+		}
+
+		const { tasks, dependencies } = await createProjectApi(ctx.moduleContext).listTasks(
+			input.projectId
+		);
+
 		const result = await runStructuredOutput({
 			task: 'project.detect-schedule-conflicts',
 			messages: [
@@ -40,8 +46,8 @@ export const detectScheduleConflictsCapability: ProjectCapability<
 				{
 					role: 'user',
 					content: `projectId: ${input.projectId}\n\nTasks:\n${JSON.stringify(
-						input.tasks
-					)}\n\nReturn the proposal JSON.`
+						compactTasks(tasks)
+					)}\n\nDependencies:\n${JSON.stringify(dependencies)}\n\nReturn the proposal JSON.`
 				}
 			],
 			schema: ProjectDraftActionSchema,

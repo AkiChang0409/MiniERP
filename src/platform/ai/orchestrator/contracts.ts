@@ -58,6 +58,12 @@ export interface InboundAgentMessage {
 	};
 	/** UI / channel-supplied context hints (route, selected ids). */
 	routeContext?: RouteContext;
+	/** Structured confirmation of a previously staged pending action (design §10).
+	 *  Primary confirm path across channels; natural-language "confirm" is a
+	 *  fallback handled in the runtime. */
+	confirm?: { actionId: string };
+	/** Cancel the pending action for this conversation. */
+	cancel?: boolean;
 	metadata?: Record<string, unknown>;
 }
 
@@ -141,6 +147,26 @@ export interface ContextProvider {
 }
 
 /**
+ * A confirmed-write request the orchestrator stages + executes. The domain
+ * plugin builds it from a draft so the platform stays free of domain shapes.
+ */
+export interface ApplyRequest {
+	/** Registered R4 write capability id to run on confirmation. */
+	capabilityId: string;
+	/** Validated input for that capability (domain-shaped; opaque to platform). */
+	input: unknown;
+	/** Human-readable summary for the confirmation prompt + audit. */
+	summary: string;
+}
+
+export interface BuildApplyRequestArgs {
+	intent: AgentIntentResult;
+	/** The draft capability's output (e.g. a project ProjectDraftAction). */
+	draft: unknown;
+	context: RuntimeContextEnvelope;
+}
+
+/**
  * The public "agent plugin" a module exposes. Consumed by the orchestrator only
  * through the generic registry — the platform never deep-imports the module.
  */
@@ -154,6 +180,13 @@ export interface DomainAgentPlugin {
 	 * module's existing classifier; never executes a tool.
 	 */
 	classifyIntent(input: IntentClassificationInput): AgentIntentResult | null;
+	/**
+	 * Map a draft (R3) capability's output into a confirmed R4 write request.
+	 * Returns null when there is nothing to apply (empty change set). Keeps all
+	 * domain-shaped mapping inside the module; the orchestrator only stages +
+	 * executes the returned request behind confirmation.
+	 */
+	buildApplyRequest?(args: BuildApplyRequestArgs): ApplyRequest | null;
 }
 
 export type OrchestratorResultKind =
@@ -180,6 +213,11 @@ export interface OrchestratorResult {
 	intent?: AgentIntentResult;
 	context?: RuntimeContextEnvelope;
 	candidates?: OrchestratorCandidate[];
+	/** For `kind: 'confirmation'` — the proposed change set / preview payload
+	 *  (e.g. a project `ProjectDraftAction` with before/after diff + risks). */
+	draft?: unknown;
+	/** For `kind: 'confirmation'` — the id the client echoes back to confirm. */
+	actionId?: string;
 	/** Free-form trace surfaced to the AI Panel / logged for audit. */
 	trace?: Record<string, unknown>;
 }

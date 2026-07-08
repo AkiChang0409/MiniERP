@@ -20,6 +20,11 @@ export const projectIntentBinding: Record<ProjectIntent, ProjectDispatchBinding 
 	draft_meeting_agenda: { capabilityId: 'project.draft-meeting-agenda' },
 	process_meeting_notes: { capabilityId: 'project.process-meeting-notes' },
 	view_calendar: { capabilityId: 'project.view-calendar' },
+	// Draft intents dispatch to the R3 proposal capabilities; the orchestrator
+	// then stages the R4 apply (`project.apply-task-change-set`) for confirmation.
+	propose_task_plan: { capabilityId: 'project.propose-task-plan' },
+	propose_reschedule: { capabilityId: 'project.propose-reschedule' },
+	propose_assignment: { capabilityId: 'project.propose-assignment' },
 	unknown: null
 };
 

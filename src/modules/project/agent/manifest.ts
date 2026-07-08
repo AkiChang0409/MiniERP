@@ -48,7 +48,10 @@ export const projectAgentManifest: ProjectAgentManifest = {
 		'extract_tasks',
 		'draft_meeting_agenda',
 		'process_meeting_notes',
-		'view_calendar'
+		'view_calendar',
+		'propose_task_plan',
+		'propose_reschedule',
+		'propose_assignment'
 	],
 	cannotHandle: [
 		'delete_project',

@@ -8,6 +8,31 @@ export interface ClassifyProjectIntentInput {
 }
 
 const INTENT_KEYWORDS: Array<{ intent: ProjectIntent; patterns: RegExp[] }> = [
+	// Stage-2 draft (write-intent) patterns first, so concrete change verbs win
+	// over the read intents below.
+	{
+		intent: 'propose_reschedule',
+		patterns: [
+			/reschedul/i,
+			/改期|改到|挪到|推迟|提前/,
+			/move\s+.*\b(task|deadline|date)/i,
+			/(push|pull)\s+.*\b(task|deadline)/i,
+			/change\s+.*\b(due|start|end)\s*date/i
+		]
+	},
+	{
+		intent: 'propose_assignment',
+		patterns: [/\bassign\b|\breassign\b/i, /分配|指派|派给|交给/, /give\s+.*\bto\s+\w+/i]
+	},
+	{
+		intent: 'propose_task_plan',
+		patterns: [
+			/add\s+tasks?/i,
+			/propose\s+tasks?/i,
+			/规划任务|加任务|新增任务|拆任务/,
+			/create\s+tasks?\s+for/i
+		]
+	},
 	{
 		intent: 'generate_plan',
 		patterns: [
@@ -77,6 +102,11 @@ const INTENT_RISK: Record<ProjectIntent, ProjectRiskLevel> = {
 	draft_meeting_agenda: 'R0',
 	process_meeting_notes: 'R1',
 	view_calendar: 'R1',
+	// Draft proposals are R3: they produce a preview, the orchestrator gates the
+	// actual write behind confirmation.
+	propose_task_plan: 'R3',
+	propose_reschedule: 'R3',
+	propose_assignment: 'R3',
 	unknown: 'R0'
 };
 
@@ -88,6 +118,11 @@ const INTENT_REQUIRED_INPUTS: Record<ProjectIntent, string[]> = {
 	draft_meeting_agenda: ['project', 'objective'],
 	process_meeting_notes: ['transcript'],
 	view_calendar: ['fromIso', 'toIso'],
+	// Need a concrete project + the user's goal; project_context triggers entity
+	// resolution in the orchestrator.
+	propose_task_plan: ['project_context', 'goal'],
+	propose_reschedule: ['project_context', 'goal'],
+	propose_assignment: ['project_context', 'goal'],
 	unknown: []
 };
 

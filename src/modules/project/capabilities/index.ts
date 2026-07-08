@@ -1,4 +1,5 @@
 import { answerQuestionCapability } from './answer-question';
+import { applyTaskChangeSetCapability } from './apply-task-change-set';
 import { createTaskCapability } from './create-task';
 import { detectScheduleConflictsCapability } from './detect-schedule-conflicts';
 import { draftMeetingAgendaCapability } from './meeting-agenda';
@@ -28,6 +29,10 @@ export { type ProposeAssignmentInput } from './propose-assignment';
 export { type DetectScheduleConflictsInput } from './detect-schedule-conflicts';
 export { type CreateTaskInput, type CreateTaskOutput } from './create-task';
 export { type UpdateTaskInput, type UpdateTaskOutput } from './update-task';
+export {
+	type ApplyTaskChangeSetInput,
+	type ApplyTaskChangeSetOutput
+} from './apply-task-change-set';
 
 /**
  * Registered (SDK-for-agent) project capabilities. Each is a thin governance
@@ -55,9 +60,11 @@ export const projectCapabilities = [
 	proposeAssignmentCapability,
 	detectScheduleConflictsCapability,
 	// Stage-3 governed writes (R4, require confirmation). update-task also covers
-	// reschedule + assignment via its patch fields.
+	// reschedule + assignment via its patch fields; apply-task-change-set applies
+	// a confirmed draft change set (the "apply" end of the write loop).
 	createTaskCapability,
-	updateTaskCapability
+	updateTaskCapability,
+	applyTaskChangeSetCapability
 ] as const;
 
 export const projectCapabilityIds = projectCapabilities.map((capability) => capability.id);

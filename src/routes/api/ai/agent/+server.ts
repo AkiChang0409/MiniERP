@@ -10,6 +10,8 @@ interface AgentMessageBody {
 	conversationId?: string;
 	routeContext?: RouteContext;
 	intentHint?: string;
+	confirm?: { actionId: string };
+	cancel?: boolean;
 }
 
 /**
@@ -27,7 +29,9 @@ export const POST: RequestHandler = async (event) => {
 	if (!body) return fail('Invalid JSON body', 400);
 
 	const text = (body.message ?? '').trim();
-	if (!text) return fail('Missing message', 400);
+	// A confirm/cancel action may carry no text (button click), so only require
+	// text when it isn't a confirm/cancel.
+	if (!text && !body.confirm && !body.cancel) return fail('Missing message', 400);
 
 	const inbound: InboundAgentMessage = {
 		source: 'ai_panel',
@@ -36,6 +40,8 @@ export const POST: RequestHandler = async (event) => {
 		conversationId: body.conversationId ?? `ai_panel:${user.id}`,
 		text,
 		routeContext: body.routeContext,
+		confirm: body.confirm,
+		cancel: body.cancel,
 		metadata: body.intentHint ? { intentHint: body.intentHint } : undefined
 	};
 

@@ -13,9 +13,17 @@
  */
 import type { ModuleContext } from '../../modules/types';
 import type { PlatformRiskLevel } from '../capability-registry';
+import { executeGuardedCapability } from '../execute-capability';
 import { buildRuntimeContext } from './context-builder';
 import { routeMessage } from './agent-router';
+import { lookupAgent } from './agent-registry';
 import { lookupEntityResolver, resolveEntities } from './entity-resolver';
+import {
+	clearConversationState,
+	consumePendingConfirmation,
+	getConversationState,
+	setPendingConfirmation
+} from './conversation-state';
 import { listReadOnlyToolSpecs, runWithTools } from './run-with-tools';
 import type {
 	ContextProvider,
@@ -25,6 +33,23 @@ import type {
 
 /** Intent risk levels that may run the read-only dynamic tool loop. */
 const READ_RISK: ReadonlySet<PlatformRiskLevel> = new Set<PlatformRiskLevel>(['R0', 'R1', 'R2']);
+
+/** Natural-language confirm / cancel fallbacks (structured actionId is primary). */
+const AFFIRM = /^(confirm|yes|ok(ay)?|y|确认|确定|好的?|同意|是的?)\s*$/i;
+const NEGATE = /^(cancel|no|n|取消|不用了?|算了)\s*$/i;
+
+function confirmFailMessage(reason: 'none_pending' | 'expired' | 'hash_mismatch' | 'action_mismatch'): string {
+	switch (reason) {
+		case 'expired':
+			return 'That confirmation has expired — please ask again and I will re-propose.';
+		case 'hash_mismatch':
+			return 'The proposal changed since it was shown — please review the new proposal before confirming.';
+		case 'action_mismatch':
+			return 'That confirmation no longer matches the pending action.';
+		default:
+			return 'There is nothing pending to confirm.';
+	}
+}
 
 export interface OrchestratorRuntimeOptions {
 	contextProviders?: readonly ContextProvider[];
@@ -47,6 +72,77 @@ export async function handleMessage(
 			context,
 			trace: { reason: 'identity_unresolved', source: message.source }
 		};
+	}
+
+	// --- Confirm / cancel a staged write (design §10) — before routing so an
+	// affirmative reply resumes the pending action instead of being re-classified.
+	const mc = options.moduleContext;
+	const kv = mc?.env.KV;
+	if (kv && mc) {
+		const trimmed = message.text.trim();
+		const wantsConfirm = !!message.confirm?.actionId || AFFIRM.test(trimmed);
+		const wantsCancel = message.cancel === true || NEGATE.test(trimmed);
+		if (message.confirm || message.cancel || wantsConfirm || wantsCancel) {
+			const state = await getConversationState(kv, message.conversationId);
+			const pending = state?.pendingConfirmation;
+			if (pending) {
+				if (wantsCancel && !message.confirm) {
+					await clearConversationState(kv, message.conversationId);
+					return {
+						kind: 'answer',
+						message: 'Okay — cancelled. Nothing was changed.',
+						context,
+						trace: { stage: 'confirm', action: 'cancelled' }
+					};
+				}
+				if (wantsConfirm) {
+					const actionId = message.confirm?.actionId ?? pending.actionId;
+					const outcome = await consumePendingConfirmation(kv, message.conversationId, { actionId });
+					if (!outcome.ok) {
+						return {
+							kind: 'answer',
+							message: confirmFailMessage(outcome.reason),
+							context,
+							trace: { stage: 'confirm', reason: outcome.reason }
+						};
+					}
+					const p = outcome.confirmation;
+					const agentVersion = lookupAgent(p.agentId)?.manifest.version ?? '0.1.0';
+					const exec = await executeGuardedCapability({
+						db: mc.db,
+						agentId: p.agentId,
+						agentVersion,
+						capabilityId: p.capabilityId,
+						input: p.input,
+						ctx: {
+							tenantId: context.tenantId ?? 'default',
+							userId: message.userId,
+							env: mc.env,
+							moduleContext: mc
+						},
+						actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
+						confirmationRef: p.payloadHash,
+						intent: 'apply_confirmed',
+						finalAction: 'agent.apply_confirmed'
+					});
+					if (exec.status !== 'ok') {
+						return {
+							kind: exec.status === 'denied' ? 'denied' : 'error',
+							message: `I could not apply the change (${exec.status}).`,
+							context,
+							trace: { stage: 'confirm', status: exec.status }
+						};
+					}
+					return {
+						kind: 'answer',
+						message: `Done — applied: ${p.summary}.`,
+						context,
+						trace: { stage: 'confirm', applied: exec.output, auditId: exec.auditId }
+					};
+				}
+			}
+			// No pending action: fall through to normal routing (don't hijack the message).
+		}
 	}
 
 	const decision = routeMessage(
@@ -133,14 +229,113 @@ export async function handleMessage(
 		}
 	}
 
+	// --- Draft tier (R3): propose a change set, preview it, and stage it for
+	// confirmation (design §11/§12). No business write happens here — the write is
+	// the separate R4 apply capability, run only after the user confirms.
+	if (mc && intent!.riskLevel === 'R3' && intent!.suggestedCapabilityId) {
+		const projectId = context.routeContext?.projectId;
+		if (!projectId) {
+			return {
+				kind: 'clarification',
+				message: "Which project is this about? I couldn't determine one.",
+				agentId: agent!.manifest.id,
+				domain: agent!.manifest.domain,
+				intent,
+				context,
+				trace: { stage: 'draft', missing: ['projectId'] }
+			};
+		}
+		const draftExec = await executeGuardedCapability({
+			db: mc.db,
+			agentId: agent!.manifest.id,
+			agentVersion: agent!.manifest.version,
+			capabilityId: intent!.suggestedCapabilityId,
+			input: { projectId, goal: message.text },
+			ctx: {
+				tenantId: context.tenantId ?? 'default',
+				userId: message.userId,
+				env: mc.env,
+				moduleContext: mc
+			},
+			actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
+			intent: intent!.intent
+		});
+		if (draftExec.status !== 'ok') {
+			return {
+				kind: draftExec.status === 'denied' ? 'denied' : 'error',
+				message: `I couldn't prepare a proposal (${draftExec.status}).`,
+				agentId: agent!.manifest.id,
+				domain: agent!.manifest.domain,
+				intent,
+				context,
+				trace: { stage: 'draft', status: draftExec.status }
+			};
+		}
+		const draft = draftExec.output;
+		const applyReq = agent!.buildApplyRequest?.({ intent: intent!, draft, context });
+		if (!applyReq) {
+			return {
+				kind: 'answer',
+				message: 'I reviewed it but found no changes to apply.',
+				agentId: agent!.manifest.id,
+				domain: agent!.manifest.domain,
+				intent,
+				context,
+				draft,
+				trace: { stage: 'draft', changes: 0 }
+			};
+		}
+		if (!kv) {
+			return {
+				kind: 'confirmation',
+				message:
+					'Here is the proposed change set (open the app to apply — confirmation store unavailable).',
+				agentId: agent!.manifest.id,
+				domain: agent!.manifest.domain,
+				intent,
+				context,
+				draft,
+				trace: { stage: 'draft', staged: false }
+			};
+		}
+		const actionId = crypto.randomUUID();
+		await setPendingConfirmation(
+			kv,
+			{
+				conversationId: message.conversationId,
+				source: message.source,
+				userId: message.userId,
+				tenantId: context.tenantId
+			},
+			{
+				actionId,
+				agentId: agent!.manifest.id,
+				capabilityId: applyReq.capabilityId,
+				riskLevel: 'R4',
+				summary: applyReq.summary,
+				input: applyReq.input
+			}
+		);
+		return {
+			kind: 'confirmation',
+			message: `I propose the following changes — review and confirm to apply. (${applyReq.summary})`,
+			agentId: agent!.manifest.id,
+			domain: agent!.manifest.domain,
+			intent,
+			context,
+			draft,
+			actionId,
+			trace: { stage: 'draft', staged: true }
+		};
+	}
+
 	// Phase 5: dynamic read-only tool loop. Runs only for read-risk intents and
 	// only when a module context (env/db) is available. The catalog is read-only
 	// and tool-policy denies un-confirmed writes, so this loop cannot mutate
 	// business data — confirmed writes land in a later phase.
-	if (options.moduleContext && READ_RISK.has(intent!.riskLevel)) {
+	if (mc && READ_RISK.has(intent!.riskLevel)) {
 		const tools = listReadOnlyToolSpecs(agent!.manifest.id);
 		if (tools.length > 0) {
-			const mc = options.moduleContext;
 			const loop = await runWithTools({
 				agentId: agent!.manifest.id,
 				agentVersion: agent!.manifest.version,

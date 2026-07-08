@@ -6,6 +6,8 @@
  */
 import type {
 	AgentIntentResult,
+	ApplyRequest,
+	BuildApplyRequestArgs,
 	DomainAgentPlugin,
 	IntentClassificationInput
 } from '$platform/ai/orchestrator';
@@ -43,6 +45,21 @@ export const projectAgentPlugin: DomainAgentPlugin = {
 			requiredInputs: result.requiredInputs,
 			suggestedCapabilityId: result.suggestedCapabilityId,
 			suggestedWorkflowId: null
+		};
+	},
+	/**
+	 * Map a project draft (ProjectDraftAction) into the confirmed R4 apply. All
+	 * project-shaped knowledge stays here; the orchestrator only stages + runs it
+	 * behind confirmation. Returns null when there's nothing to apply.
+	 */
+	buildApplyRequest({ draft, context }: BuildApplyRequestArgs): ApplyRequest | null {
+		const projectId = context.routeContext?.projectId;
+		const changes = (draft as { changes?: unknown[] } | null)?.changes;
+		if (!projectId || !Array.isArray(changes) || changes.length === 0) return null;
+		return {
+			capabilityId: 'project.apply-task-change-set',
+			input: { projectId, changes },
+			summary: `${changes.length} change(s) to project ${projectId}`
 		};
 	}
 };
