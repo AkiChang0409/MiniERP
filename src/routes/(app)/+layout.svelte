@@ -245,11 +245,11 @@
 	const path = $derived(page.url.pathname);
 
 	// Project detail pages use their own sidebar; shell sidebar is hidden.
-	// `/projects/new`, `/projects/dashboard`, `/projects/calendar` are top-level
-	// project pages and should stay inside the default centered max-w-6xl
-	// container along with `/projects` itself.
+	// `/projects/new`, `/projects/dashboard`, `/projects/calendar`, `/projects/gantt`,
+	// `/projects/qc-send` are top-level project pages and should stay inside the
+	// default centered max-w-6xl container (with the shell sidebar) like `/projects`.
 	const isProjectDetailPage = $derived(
-		/^\/projects\/(?!new$|dashboard(\/|$)|calendar(\/|$)|gantt(\/|$))[^/]+/.test(path)
+		/^\/projects\/(?!new$|dashboard(\/|$)|calendar(\/|$)|gantt(\/|$)|qc-send(\/|$))[^/]+/.test(path)
 	);
 
 	// Determine which primary section the route belongs to

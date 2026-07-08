@@ -158,7 +158,8 @@
       "Bash(node build-html.mjs \"./App-02c-DocHub-Form-Logic-EN.md\")",
       "Bash(node build-html.mjs \"./应用搭建-03-QC邮件回传AI匹配-实施方案.md\")",
       "Bash(curl -s -m 15 \"https://smartfin-v4.aki-wang.workers.dev/api/integrations/lark/card-callback\")",
-      "Bash(curl -s -m 15 -X POST \"https://smartfin-v4.aki-wang.workers.dev/api/integrations/lark/card-callback\" -H \"Content-Type: application/json\" -d '{\"type\":\"url_verification\",\"challenge\":\"testchallenge123\",\"token\":\"whatever\"}')"
+      "Bash(curl -s -m 15 -X POST \"https://smartfin-v4.aki-wang.workers.dev/api/integrations/lark/card-callback\" -H \"Content-Type: application/json\" -d '{\"type\":\"url_verification\",\"challenge\":\"testchallenge123\",\"token\":\"whatever\"}')",
+      "Bash(grep -nE \"isProjectDetailPage|projects/\\\\\\(\\\\?!|new\\\\\\\\$|/projects/|detail\" \"src/routes/\\(app\\)/+layout.svelte\")"
     ]
   }
 }

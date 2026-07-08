@@ -54,7 +54,12 @@
 			</p>
 			<p class="mt-1 break-all text-xs text-emerald-700">
 				Upload link:
-				<a class="font-medium underline hover:text-emerald-900" href={form.uploadUrl}>{form.uploadUrl}</a>
+				<a
+					class="font-medium underline hover:text-emerald-900"
+					href={form.uploadUrl}
+					target="_blank"
+					rel="noopener noreferrer">{form.uploadUrl} ↗</a
+				>
 			</p>
 		</div>
 	{:else if form?.error}
