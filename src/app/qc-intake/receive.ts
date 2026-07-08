@@ -14,6 +14,7 @@ import {
 	bitableCreateRecord,
 	bitableGetRecord,
 	bitableListFieldNames,
+	bitableUpdateRecord,
 	bitableUploadMedia,
 	type BitableFields
 } from '$platform/integrations/lark/bitable';
@@ -57,37 +58,48 @@ export async function receiveQcUpload(
 			bytes: args.file.bytes
 		});
 
-		// Desired payload. Link fields take an array of record_ids; attachment
-		// takes [{ file_token }]; single-selects take the option label string.
-		const desired: BitableFields = {
-			'Doc Title': args.file.fileName,
-			'Attachment File': [{ file_token: fileToken }],
-			Projects: [ids.projectId],
-			'Customer/Supplier': [ids.supplierId],
-			'Doc Status': DOC_STATUS_PENDING,
-			Source: SOURCE_UPLOAD_LINK,
-			'Match Confidence': MATCH_CONFIDENCE_HIGH,
-			// Category / File Type are single-select fields → write the option label
-			// (string), not an array. Skipped if not chosen.
-			...(ids.category ? { Category: ids.category } : {}),
-			...(ids.fileType ? { 'File Type': ids.fileType } : {})
+		// Keep only fields that exist in the table (guards against a name mismatch,
+		// Lark code 1254045). If we couldn't read the schema, keep everything.
+		const existing = new Set(await bitableListFieldNames(env, { appToken, tableId }).catch(() => []));
+		const keep = (obj: BitableFields): BitableFields => {
+			const out: BitableFields = {};
+			for (const [k, v] of Object.entries(obj)) {
+				if (existing.size === 0 || existing.has(k)) out[k] = v;
+			}
+			return out;
 		};
 
-		// Only write fields that actually exist in the table — guards against a
-		// name mismatch failing the whole insert (Lark code 1254045). Skipped
-		// fields are logged so the mismatch is easy to spot in `wrangler tail`.
-		const existing = new Set(await bitableListFieldNames(env, { appToken, tableId }).catch(() => []));
-		const fields: BitableFields = {};
-		const skipped: string[] = [];
-		for (const [key, value] of Object.entries(desired)) {
-			if (existing.size === 0 || existing.has(key)) fields[key] = value;
-			else skipped.push(key);
-		}
-		if (skipped.length) {
-			console.warn(`[qc] Doc Hub fields not found, skipped: ${skipped.join(', ')}`);
-		}
+		// 1) Core fields — proven to insert. Create with these FIRST so the file /
+		//    record is never lost to a classification hiccup.
+		const record = await bitableCreateRecord(env, {
+			appToken,
+			tableId,
+			fields: keep({
+				'Doc Title': args.file.fileName,
+				'Attachment File': [{ file_token: fileToken }],
+				Projects: [ids.projectId],
+				'Customer/Supplier': [ids.supplierId],
+				'Doc Status': DOC_STATUS_PENDING,
+				Source: SOURCE_UPLOAD_LINK,
+				'Match Confidence': MATCH_CONFIDENCE_HIGH
+			})
+		});
 
-		const record = await bitableCreateRecord(env, { appToken, tableId, fields });
+		// 2) Category / File Type are single-selects whose options are referenced
+		//    from the dictionary. A value Lark can't resolve raises
+		//    SingleSelectFieldConvFail — so set them as a BEST-EFFORT follow-up
+		//    update that never loses the already-saved record.
+		const classify = keep({
+			...(ids.category ? { Category: ids.category } : {}),
+			...(ids.fileType ? { 'File Type': ids.fileType } : {})
+		});
+		if (Object.keys(classify).length) {
+			await bitableUpdateRecord(env, { appToken, tableId, recordId: record.record_id, fields: classify })
+				.then(() => console.log('[qc] classification set:', Object.keys(classify).join(', ')))
+				.catch((e) =>
+					console.warn('[qc] classification not set (record saved without it):', (e as Error).message)
+				);
+		}
 
 		// Best-effort: notify the project PM to review (never fails the upload).
 		await notifyPmForReview(env, {
