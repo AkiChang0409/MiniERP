@@ -2,21 +2,13 @@ import { json, type RequestEvent, type RequestHandler } from '@sveltejs/kit';
 import { fail } from '$platform/http';
 import { createModuleContext } from '$platform/modules';
 import type { ModuleContext } from '$platform/modules/types';
-import {
-	resolveUserByExternalIdentity,
-	type ResolvedExternalUser
-} from '$platform/auth/resolve-external-identity';
-import {
-	executeGuardedCapability,
-	type GuardedCapabilityResult
-} from '$platform/ai/execute-capability';
-import { hashConfirmationPayload } from '$platform/workflow/payload-hash';
+import { resolveUserByExternalIdentity } from '$platform/auth/resolve-external-identity';
+import type { OrchestratorResult } from '$platform/ai/orchestrator';
 import {
 	sendTextMessage,
 	sendInteractiveCard,
 	downloadMessageResource
 } from '$platform/integrations/lark/client';
-import { parseLarkCommand, type LarkCommand } from '$platform/integrations/lark/commands';
 import {
 	asString,
 	handleUrlVerification,
@@ -30,17 +22,9 @@ import {
 	buildNoticeCard,
 	type ProjectOption
 } from '$platform/integrations/lark/cards/finance-intake-cards';
-import {
-	createLeaveApi,
-	hrAgentManifest,
-	hrAgentAllowedCapabilities,
-	classifyHrIntentLlm,
-	summarizeHrResult,
-	resolveLeaveType,
-	type HrLlmIntent
-} from '$modules/hr';
 import { createDocumentIntakeService } from '$modules/document-intake';
 import { createProjectApi } from '$modules/project';
+import { runSmartFinOrchestrator } from '$app-layer/ai/orchestrator/create-smartfin-orchestrator';
 
 /** Lark bot menu event_key that starts the finance document-intake flow. */
 const FINANCE_INTAKE_MENU_KEY = 'space_ocr_start';
@@ -67,44 +51,19 @@ function isSelectableProjectStatus(status: unknown): boolean {
  */
 
 const LARK_PROVIDER = 'lark';
-const PENDING_TTL_SECONDS = 600;
 /** Inbound-event dedup window (seconds) — must cover Lark's retry schedule. */
 const LARK_EVENT_DEDUP_TTL = 300;
-/** Below this LLM confidence we fall back to the deterministic rule-based parser. */
-const LLM_MIN_CONFIDENCE = 0.6;
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** System-authoritative allow-list (LLM-proposed ids are validated against this). */
-const ALLOWED_CAPABILITY_IDS = new Set(hrAgentAllowedCapabilities.map((e) => e.id));
-
-const FINAL_ACTION: Record<string, string> = {
-	'hr.list-pending-leave': 'hr.leave.listed',
-	'hr.submit-leave-request': 'leave.submitted',
-	'hr.approve-leave-request': 'leave.approved'
-};
-
-function pendingKey(openId: string): string {
-	return `lark:pending:${openId}`;
-}
-
-interface PendingAction {
-	capabilityId: string;
-	input: Record<string, unknown>;
-	confirmationRef: string;
-	summary: string;
-}
-
-interface Dispatch {
-	capabilityId: string | null;
-	input: {
-		leaveTypeRef?: string;
-		startDate?: string;
-		endDate?: string;
-		reason?: string;
-		leaveRequestId?: string;
-		comment?: string;
-	};
-	missingFields: string[];
+/** Render a channel-agnostic orchestrator result into a Lark text reply. */
+function renderResultForLark(result: OrchestratorResult): string {
+	if (result.kind === 'clarification' && result.candidates?.length) {
+		const opts = result.candidates.map((c, i) => `${i + 1}. ${c.label}`).join('\n');
+		return `${result.message}\n${opts}`;
+	}
+	if (result.kind === 'confirmation') {
+		return `${result.message}\n（回复「确认」执行，或「取消」放弃）`;
+	}
+	return result.message;
 }
 
 /**
@@ -120,128 +79,6 @@ function eventDedupId(body: Record<string, unknown>): string | undefined {
 	const msg = ev?.message as Record<string, unknown> | undefined;
 	return asString(msg?.message_id);
 }
-
-/** Today in Asia/Singapore (UTC+8, no DST) — anchors relative-date parsing. */
-function currentDateInfo(): { currentDate: string; timezone: string } {
-	const sg = new Date(Date.now() + 8 * 60 * 60 * 1000);
-	return { currentDate: sg.toISOString().slice(0, 10), timezone: 'Asia/Singapore (UTC+8)' };
-}
-
-function llmToDispatch(llm: HrLlmIntent): Dispatch {
-	return {
-		capabilityId: llm.capabilityId,
-		input: {
-			leaveTypeRef: llm.input.leaveTypeRef ?? undefined,
-			startDate: llm.input.startDate ?? undefined,
-			endDate: llm.input.endDate ?? undefined,
-			reason: llm.input.reason ?? undefined,
-			leaveRequestId: llm.input.leaveRequestId ?? undefined,
-			comment: llm.input.comment ?? undefined
-		},
-		missingFields: llm.missingFields ?? []
-	};
-}
-
-/** Rule-based fallback → dispatch (confirm/cancel are handled before this). */
-function commandToDispatch(cmd: LarkCommand): Dispatch | null {
-	switch (cmd.kind) {
-		case 'list_pending':
-			return { capabilityId: 'hr.list-pending-leave', input: {}, missingFields: [] };
-		case 'submit':
-			return {
-				capabilityId: 'hr.submit-leave-request',
-				input: {
-					leaveTypeRef: cmd.leaveTypeRef,
-					startDate: cmd.startDate,
-					endDate: cmd.endDate,
-					reason: cmd.reason
-				},
-				missingFields: []
-			};
-		case 'approve':
-			return {
-				capabilityId: 'hr.approve-leave-request',
-				input: { leaveRequestId: cmd.leaveRequestId, comment: cmd.comment },
-				missingFields: []
-			};
-		default:
-			return null;
-	}
-}
-
-async function runCapability(
-	mc: ModuleContext,
-	actor: ResolvedExternalUser,
-	capabilityId: string,
-	input: unknown,
-	confirmationRef: string | undefined
-): Promise<GuardedCapabilityResult> {
-	return executeGuardedCapability({
-		db: mc.db,
-		agentId: hrAgentManifest.id,
-		agentVersion: hrAgentManifest.version,
-		capabilityId,
-		input,
-		ctx: { tenantId: 'default', userId: actor.id, moduleContext: mc },
-		actor: { userId: actor.id, userEmail: actor.email, roles: actor.roles },
-		confirmationRef,
-		finalAction: FINAL_ACTION[capabilityId]
-	});
-}
-
-/** Fixed-template rendering — used for non-ok results and as the summarizer fallback. */
-function formatResult(capabilityId: string, res: GuardedCapabilityResult): string {
-	if (res.status === 'denied') {
-		const missing = res.decision.missingUserPermissions;
-		return `操作被拒绝（${res.decision.blockedBy.join(', ')}）${
-			missing.length ? `，缺少权限：${missing.join(', ')}` : ''
-		}。`;
-	}
-	if (res.status !== 'ok') {
-		return `执行失败：${res.error}`;
-	}
-	const out = (res.output ?? {}) as Record<string, unknown>;
-	if (capabilityId === 'hr.list-pending-leave') {
-		const requests = (out.requests as Array<Record<string, unknown>>) ?? [];
-		if (requests.length === 0) return '当前没有待审批的请假。';
-		const lines = requests.map(
-			(r) =>
-				`• ${r.personName ?? r.personId} ${r.leaveTypeName ?? ''} ${r.startDate}~${r.endDate} (${r.totalDays}天) id=${r.id}`
-		);
-		return `待审批请假（${requests.length}）：\n${lines.join('\n')}`;
-	}
-	if (capabilityId === 'hr.submit-leave-request') {
-		return `已提交请假，单号 ${out.id}，共 ${out.totalDays} 天，状态 ${out.status}。`;
-	}
-	if (capabilityId === 'hr.approve-leave-request') {
-		return `已批准请假 ${out.leaveRequestId}。`;
-	}
-	return '完成。';
-}
-
-/**
- * Reply for an executed result: ok → LLM summary (grounded on result) with a
- * fixed-template fallback; denied / failed / validation → always fixed template.
- */
-async function replyForResult(
-	env: Env,
-	capabilityId: string,
-	res: GuardedCapabilityResult,
-	userText: string
-): Promise<string> {
-	if (res.status !== 'ok') return formatResult(capabilityId, res);
-	const summary = await summarizeHrResult(env, { capabilityId, result: res.output, userText }).catch(
-		() => null
-	);
-	return summary ?? formatResult(capabilityId, res);
-}
-
-const HELP_TEXT = [
-	'我可以帮你处理请假：',
-	'• 查看待审批请假',
-	'• 提交请假（说明类型/开始/结束日期，例如：我要请年假 2026-07-20 到 2026-07-22）',
-	'• 批准请假 <leaveRequestId>'
-].join('\n');
 
 /** Handle one im.message.receive_v1 event. Sends all replies via the Lark API. */
 async function handleLarkMessage(event: RequestEvent, body: Record<string, unknown>): Promise<void> {
@@ -291,138 +128,24 @@ async function handleLarkMessage(event: RequestEvent, body: Record<string, unkno
 	}
 	const mc: ModuleContext = { ...ctx, user: resolved };
 
-	// --- Deterministic confirm / cancel (never via LLM; fixed templates) ---
-	const quick = parseLarkCommand(userText);
-	if (quick.kind === 'cancel') {
-		await env.KV.delete(pendingKey(openId));
-		await send('已取消待确认的操作。');
-		return;
-	}
-	if (quick.kind === 'confirm') {
-		const raw = await env.KV.get(pendingKey(openId));
-		if (!raw) {
-			await send('没有待确认的操作。');
-			return;
-		}
-		const pending = JSON.parse(raw) as PendingAction;
-		const expectedCode = pending.confirmationRef.slice(0, 6);
-		if (!quick.code || quick.code.toLowerCase() !== expectedCode.toLowerCase()) {
-			// Wrong/missing token → never reaches the service.
-			await send(`确认码不正确，未执行。请回复「确认 ${expectedCode}」。`);
-			return;
-		}
-		// Consume the pending action FIRST so a duplicate/retried "确认" can't
-		// double-execute the write (a later confirm finds no pending → no-op).
-		await env.KV.delete(pendingKey(openId));
-		const res = await runCapability(
-			mc,
-			resolved,
-			pending.capabilityId,
-			pending.input,
-			pending.confirmationRef
-		);
-		await send(await replyForResult(env, pending.capabilityId, res, pending.summary));
-		return;
-	}
+	// Route through the unified orchestrator — the SAME path as the AI Panel. It
+	// resolves intent, runs read tools / stages writes for confirmation (HR leave,
+	// project changes, …), and returns a channel-agnostic result we render back to
+	// Lark text. Reply "确认" / "取消" to apply or drop a staged write.
+	const result = await runSmartFinOrchestrator(
+		{
+			source: 'lark',
+			userId: resolved.id,
+			externalUserId: openId,
+			roles: resolved.roles,
+			conversationId: `lark:${openId}`,
+			text: userText,
+			channel: { type: 'direct' }
+		},
+		{ moduleContext: mc }
+	);
 
-	// --- Tool-aware intent (LLM first, rule-based fallback) ---
-	const leaveTypes = await createLeaveApi(mc).listLeaveTypes();
-	const { currentDate, timezone } = currentDateInfo();
-	const llm = await classifyHrIntentLlm(env, userText, {
-		leaveTypes: leaveTypes.map((t) => ({ code: t.code, name: t.name })),
-		currentDate,
-		timezone
-	});
-
-	let dispatch: Dispatch | null;
-	if (llm && llm.confidence >= LLM_MIN_CONFIDENCE && llm.capabilityId) {
-		dispatch = llmToDispatch(llm);
-		console.log(
-			`[lark] LLM cap=${llm.capabilityId} conf=${llm.confidence} missing=[${llm.missingFields.join(',')}]`
-		);
-	} else {
-		dispatch = commandToDispatch(parseLarkCommand(userText));
-		console.log(
-			`[lark] rule-based fallback cap=${dispatch?.capabilityId ?? 'none'} (llm=${llm ? `${llm.intent}/${llm.confidence}` : 'null'})`
-		);
-	}
-
-	if (!dispatch?.capabilityId || !ALLOWED_CAPABILITY_IDS.has(dispatch.capabilityId)) {
-		await send(`暂不支持该操作。\n${HELP_TEXT}`);
-		return;
-	}
-
-	// Missing required fields (LLM-reported) → ask, do not execute.
-	if (dispatch.missingFields.length > 0) {
-		await send(`还需要补充：${dispatch.missingFields.join('、')}。请补充后再说一次。`);
-		return;
-	}
-
-	// --- list (read): execute now, summarize the result ---
-	if (dispatch.capabilityId === 'hr.list-pending-leave') {
-		const res = await runCapability(mc, resolved, 'hr.list-pending-leave', {}, undefined);
-		await send(await replyForResult(env, 'hr.list-pending-leave', res, userText));
-		return;
-	}
-
-	// --- submit (write): backend-resolve leave type, then confirmation loop ---
-	if (dispatch.capabilityId === 'hr.submit-leave-request') {
-		const ref = dispatch.input.leaveTypeRef ?? '';
-		const match = resolveLeaveType(leaveTypes, ref);
-		if (!match) {
-			await send(
-				`未找到请假类型「${ref || '(未提供)'}」。可用：${leaveTypes.map((t) => `${t.name}(${t.code})`).join('、')}`
-			);
-			return;
-		}
-		const start = dispatch.input.startDate ?? '';
-		const end = dispatch.input.endDate ?? '';
-		if (!ISO_DATE.test(start) || !ISO_DATE.test(end)) {
-			await send('提交请假需要开始/结束日期(YYYY-MM-DD)。例如：我要请年假 2026-07-20 到 2026-07-22');
-			return;
-		}
-		const input: Record<string, unknown> = {
-			leaveTypeId: match.id,
-			startDate: start,
-			endDate: end,
-			reason: dispatch.input.reason
-		};
-		const confirmationRef = await hashConfirmationPayload(input);
-		const summary = `提交请假：${match.name} ${start}~${end}${
-			dispatch.input.reason ? ` 原因:${dispatch.input.reason}` : ''
-		}`;
-		await env.KV.put(
-			pendingKey(openId),
-			JSON.stringify({ capabilityId: 'hr.submit-leave-request', input, confirmationRef, summary }),
-			{ expirationTtl: PENDING_TTL_SECONDS }
-		);
-		await send(`${summary}\n回复「确认 ${confirmationRef.slice(0, 6)}」执行，或「取消」放弃。`);
-		return;
-	}
-
-	// --- approve (write): confirmation loop ---
-	if (dispatch.capabilityId === 'hr.approve-leave-request') {
-		const leaveRequestId = (dispatch.input.leaveRequestId ?? '').trim();
-		if (!leaveRequestId) {
-			await send('请提供请假单号。例如：批准请假 lr-xxxxxx');
-			return;
-		}
-		const input: Record<string, unknown> = {
-			leaveRequestId,
-			comment: dispatch.input.comment
-		};
-		const confirmationRef = await hashConfirmationPayload(input);
-		const summary = `批准请假：${leaveRequestId}${dispatch.input.comment ? ` 备注:${dispatch.input.comment}` : ''}`;
-		await env.KV.put(
-			pendingKey(openId),
-			JSON.stringify({ capabilityId: 'hr.approve-leave-request', input, confirmationRef, summary }),
-			{ expirationTtl: PENDING_TTL_SECONDS }
-		);
-		await send(`${summary}\n回复「确认 ${confirmationRef.slice(0, 6)}」执行，或「取消」放弃。`);
-		return;
-	}
-
-	await send(`暂不支持该操作。\n${HELP_TEXT}`);
+	await send(renderResultForLark(result));
 }
 
 // ===========================================================================

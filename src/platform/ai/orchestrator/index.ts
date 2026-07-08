@@ -17,7 +17,10 @@ export type {
 	OrchestratorCandidate,
 	OrchestratorResult,
 	ApplyRequest,
-	BuildApplyRequestArgs
+	BuildApplyRequestArgs,
+	PlannedAction,
+	PlanActionArgs,
+	RenderResultArgs
 } from './contracts';
 
 export {

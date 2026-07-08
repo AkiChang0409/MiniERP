@@ -27,6 +27,7 @@ import {
 import { listReadOnlyToolSpecs, runWithTools } from './run-with-tools';
 import type {
 	ContextProvider,
+	DomainAgentPlugin,
 	InboundAgentMessage,
 	OrchestratorResult
 } from './contracts';
@@ -37,6 +38,22 @@ const READ_RISK: ReadonlySet<PlatformRiskLevel> = new Set<PlatformRiskLevel>(['R
 /** Natural-language confirm / cancel fallbacks (structured actionId is primary). */
 const AFFIRM = /^(confirm|yes|ok(ay)?|y|确认|确定|好的?|同意|是的?)\s*$/i;
 const NEGATE = /^(cancel|no|n|取消|不用了?|算了)\s*$/i;
+
+/** Render a capability result via the plugin's optional renderer, else fallback. */
+async function renderOrDefault(
+	agent: DomainAgentPlugin,
+	capabilityId: string,
+	output: unknown,
+	env: Env,
+	fallback: string
+): Promise<string> {
+	if (!agent.renderResult) return fallback;
+	try {
+		return (await agent.renderResult({ capabilityId, output, env })) || fallback;
+	} catch {
+		return fallback;
+	}
+}
 
 function confirmFailMessage(reason: 'none_pending' | 'expired' | 'hash_mismatch' | 'action_mismatch'): string {
 	switch (reason) {
@@ -107,11 +124,11 @@ export async function handleMessage(
 						};
 					}
 					const p = outcome.confirmation;
-					const agentVersion = lookupAgent(p.agentId)?.manifest.version ?? '0.1.0';
+					const agentPlugin = lookupAgent(p.agentId);
 					const exec = await executeGuardedCapability({
 						db: mc.db,
 						agentId: p.agentId,
-						agentVersion,
+						agentVersion: agentPlugin?.manifest.version ?? '0.1.0',
 						capabilityId: p.capabilityId,
 						input: p.input,
 						ctx: {
@@ -133,9 +150,18 @@ export async function handleMessage(
 							trace: { stage: 'confirm', status: exec.status }
 						};
 					}
+					const doneMessage = agentPlugin
+						? await renderOrDefault(
+								agentPlugin,
+								p.capabilityId,
+								exec.output,
+								mc.env,
+								`Done — applied: ${p.summary}.`
+							)
+						: `Done — applied: ${p.summary}.`;
 					return {
 						kind: 'answer',
-						message: `Done — applied: ${p.summary}.`,
+						message: doneMessage,
 						context,
 						trace: { stage: 'confirm', applied: exec.output, auditId: exec.auditId }
 					};
@@ -227,6 +253,101 @@ export async function handleMessage(
 				trace: { stage: 'entity_resolution', missing: resolution.missingSlots }
 			};
 		}
+	}
+
+	// --- Full domain planner (design §7): when the agent owns a `planAction`
+	// (async LLM intent + input extraction — e.g. HR leave), use it instead of the
+	// generic draft/tool-loop path. Read executes now (rendered by the plugin);
+	// write is staged for confirmation through the same mechanism as everything
+	// else. This is how a domain with rich, module-specific logic joins the
+	// unified agent without leaking that logic into the platform.
+	if (mc && agent!.planAction) {
+		const meta = {
+			agentId: agent!.manifest.id,
+			domain: agent!.manifest.domain,
+			intent,
+			context
+		};
+		const plan = await agent!.planAction({ message, context, moduleContext: mc, env: mc.env });
+
+		if (plan.kind === 'answer') {
+			return { kind: 'answer', message: plan.message, ...meta, trace: { stage: 'plan', kind: 'answer' } };
+		}
+		if (plan.kind === 'clarification') {
+			return { kind: 'clarification', message: plan.message, ...meta, trace: { stage: 'plan' } };
+		}
+		if (plan.kind === 'unknown') {
+			return {
+				kind: 'no_route',
+				message: plan.message ?? "I couldn't map that to something I can do.",
+				...meta,
+				trace: { stage: 'plan', kind: 'unknown' }
+			};
+		}
+		if (plan.kind === 'read') {
+			const exec = await executeGuardedCapability({
+				db: mc.db,
+				agentId: agent!.manifest.id,
+				agentVersion: agent!.manifest.version,
+				capabilityId: plan.capabilityId,
+				input: plan.input,
+				ctx: {
+					tenantId: context.tenantId ?? 'default',
+					userId: message.userId,
+					env: mc.env,
+					moduleContext: mc
+				},
+				actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
+				intent: intent!.intent,
+				finalAction: plan.finalAction
+			});
+			if (exec.status !== 'ok') {
+				return {
+					kind: exec.status === 'denied' ? 'denied' : 'error',
+					message: `That didn't work (${exec.status}).`,
+					...meta,
+					trace: { stage: 'plan', status: exec.status }
+				};
+			}
+			const rendered = await renderOrDefault(agent!, plan.capabilityId, exec.output, mc.env, 'Done.');
+			return { kind: 'answer', message: rendered, ...meta, trace: { stage: 'plan', kind: 'read' } };
+		}
+		// plan.kind === 'write' — stage for confirmation (no write yet).
+		if (kv) {
+			const actionId = crypto.randomUUID();
+			await setPendingConfirmation(
+				kv,
+				{
+					conversationId: message.conversationId,
+					source: message.source,
+					userId: message.userId,
+					tenantId: context.tenantId
+				},
+				{
+					actionId,
+					agentId: agent!.manifest.id,
+					capabilityId: plan.capabilityId,
+					riskLevel: 'R4',
+					summary: plan.summary,
+					input: plan.input
+				}
+			);
+			return {
+				kind: 'confirmation',
+				message: `${plan.summary} — reply to confirm, or cancel.`,
+				actionId,
+				draft: { summary: plan.summary },
+				...meta,
+				trace: { stage: 'plan', staged: true }
+			};
+		}
+		return {
+			kind: 'confirmation',
+			message: `${plan.summary} (confirmation store unavailable — open the app to apply).`,
+			draft: { summary: plan.summary },
+			...meta,
+			trace: { stage: 'plan', staged: false }
+		};
 	}
 
 	// --- Draft tier (R3): propose a change set, preview it, and stage it for

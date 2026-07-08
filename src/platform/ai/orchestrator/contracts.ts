@@ -14,6 +14,7 @@
  *   Service performs the actual business operation.
  */
 import type { AuthRole } from '../../auth/config';
+import type { ModuleContext } from '../../modules/types';
 import type { PlatformRiskLevel } from '../capability-registry';
 
 export type ChannelSource = 'ai_panel' | 'lark' | 'email' | 'mobile' | 'system';
@@ -167,6 +168,34 @@ export interface BuildApplyRequestArgs {
 }
 
 /**
+ * A domain-owned plan for a message (design §7). Returned by an agent plugin's
+ * async `planAction` — the module does its own LLM intent classification +
+ * input extraction; the orchestrator executes (read) or stages for confirmation
+ * (write) through the governed runtime. Keeps rich, domain-specific logic (e.g.
+ * HR leave-type resolution + date parsing) inside the module.
+ */
+export type PlannedAction =
+	| { kind: 'read'; capabilityId: string; input: unknown; finalAction?: string }
+	| { kind: 'write'; capabilityId: string; input: unknown; summary: string; finalAction?: string }
+	| { kind: 'answer'; message: string }
+	| { kind: 'clarification'; message: string }
+	| { kind: 'unknown'; message?: string };
+
+export interface PlanActionArgs {
+	message: InboundAgentMessage;
+	context: RuntimeContextEnvelope;
+	/** Request-scoped module context so the planner can call module api facades. */
+	moduleContext: ModuleContext;
+	env: Env;
+}
+
+export interface RenderResultArgs {
+	capabilityId: string;
+	output: unknown;
+	env: Env;
+}
+
+/**
  * The public "agent plugin" a module exposes. Consumed by the orchestrator only
  * through the generic registry — the platform never deep-imports the module.
  */
@@ -187,6 +216,18 @@ export interface DomainAgentPlugin {
 	 * executes the returned request behind confirmation.
 	 */
 	buildApplyRequest?(args: BuildApplyRequestArgs): ApplyRequest | null;
+	/**
+	 * Full domain planner: classify + extract input with the module's own logic
+	 * (typically LLM-backed) and return a `PlannedAction`. When present, the
+	 * orchestrator uses this instead of the generic draft/tool-loop path for this
+	 * agent. Async + needs env/moduleContext, so it runs after routing.
+	 */
+	planAction?(args: PlanActionArgs): Promise<PlannedAction>;
+	/**
+	 * Render a capability result into channel-appropriate text (e.g. format an HR
+	 * leave list). Optional — the orchestrator falls back to a generic message.
+	 */
+	renderResult?(args: RenderResultArgs): Promise<string> | string;
 }
 
 export type OrchestratorResultKind =
