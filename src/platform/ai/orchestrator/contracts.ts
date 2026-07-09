@@ -204,6 +204,13 @@ export interface DomainAgentPlugin {
 	/** Capability ids this agent may call (scopes the LLM tool catalog). */
 	allowedCapabilityIds: readonly string[];
 	/**
+	 * A single read capability that takes `{ question }` and self-fetches its own
+	 * snapshot (e.g. `inventory.answer-question`). When set, the orchestrator calls
+	 * it DIRECTLY for a read question instead of running the tool-selection loop —
+	 * deterministic and avoids the model declining to call a tool.
+	 */
+	answerCapabilityId?: string;
+	/**
 	 * Domain-level intent classifier. Returns null when the message clearly does
 	 * not belong to this domain so the router can compare candidates. Reuses the
 	 * module's existing classifier; never executes a tool.

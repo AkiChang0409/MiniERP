@@ -26,6 +26,7 @@ export const salesCrmAgentPlugin: DomainAgentPlugin = {
 		forbiddenActions: ['delete_customer', 'bypass_validation']
 	},
 	allowedCapabilityIds: ['sales-crm.answer-question'],
+	answerCapabilityId: 'sales-crm.answer-question',
 	classifyIntent(input: IntentClassificationInput): AgentIntentResult | null {
 		if (!input.message || !SALES_HINT.test(input.message)) return null;
 		return {

@@ -41,6 +41,7 @@ export {
 	handleMessage,
 	type OrchestratorRuntimeOptions
 } from './orchestrator-runtime';
+export { llmRouteMessage, type LlmRouteResult } from './llm-router';
 export {
 	registerEntityResolver,
 	lookupEntityResolver,

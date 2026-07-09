@@ -26,6 +26,7 @@ export const financeAgentPlugin: DomainAgentPlugin = {
 		forbiddenActions: financeAgentManifest.forbiddenActions
 	},
 	allowedCapabilityIds: financeAgentAllowedCapabilities.map((entry) => entry.id),
+	answerCapabilityId: 'finance.answer-question',
 	classifyIntent(input: IntentClassificationInput): AgentIntentResult | null {
 		const result = classifyFinanceIntent({
 			message: input.message,

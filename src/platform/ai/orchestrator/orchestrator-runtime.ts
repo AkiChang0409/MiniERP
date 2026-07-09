@@ -16,6 +16,7 @@ import type { PlatformRiskLevel } from '../capability-registry';
 import { executeGuardedCapability } from '../execute-capability';
 import { buildRuntimeContext } from './context-builder';
 import { routeMessage } from './agent-router';
+import { llmRouteMessage } from './llm-router';
 import { lookupAgent } from './agent-registry';
 import { lookupEntityResolver, resolveEntities } from './entity-resolver';
 import {
@@ -171,16 +172,48 @@ export async function handleMessage(
 		}
 	}
 
-	const decision = routeMessage(
+	let decision = routeMessage(
 		{ message: message.text, currentPath: context.routeContext?.route },
 		context
 	);
+
+	// Keyword routing missed → LLM fallback router (handles other languages /
+	// paraphrases / small talk). Only runs on the miss, so the common path is free.
+	if (decision.kind === 'no_route' && mc) {
+		const llm = await llmRouteMessage(message.text, mc.env);
+		if (llm.kind === 'smalltalk') {
+			return { kind: 'answer', message: llm.reply, context, trace: { stage: 'llm_route', smalltalk: true } };
+		}
+		if (llm.kind === 'agent') {
+			const routed = lookupAgent(llm.agentId);
+			if (routed) {
+				// Synthesize a routed decision. Force R1 (these are questions) and point
+				// at the agent's direct answer capability so the read tier can serve it.
+				decision = {
+					kind: 'routed',
+					agent: routed,
+					intent: {
+						agentId: routed.manifest.id,
+						domain: routed.manifest.domain,
+						intent: llm.intent,
+						confidence: llm.confidence,
+						reason: 'llm_route',
+						riskLevel: 'R1',
+						requiredInputs: [],
+						suggestedCapabilityId: routed.answerCapabilityId ?? null,
+						suggestedWorkflowId: null
+					},
+					candidates: []
+				};
+			}
+		}
+	}
 
 	if (decision.kind === 'no_route') {
 		return {
 			kind: 'no_route',
 			message:
-				"I couldn't tell which area this relates to (project, finance, or HR). Could you rephrase, or tell me which one?",
+				"I couldn't tell which area this relates to (project, finance, HR, inventory, or customers). Could you rephrase, or tell me which one?",
 			context,
 			trace: { source: message.source }
 		};
@@ -448,6 +481,52 @@ export async function handleMessage(
 			actionId,
 			trace: { stage: 'draft', staged: true }
 		};
+	}
+
+	// Direct read answer: single-tool read agents (inventory / sales-crm / finance)
+	// declare an `answerCapabilityId` that self-fetches its snapshot from `{question}`.
+	// Call it directly instead of the tool-selection loop — deterministic, and it
+	// avoids the model declining to call the tool.
+	if (mc && READ_RISK.has(intent!.riskLevel) && agent!.answerCapabilityId) {
+		const exec = await executeGuardedCapability<{ answer?: string }>({
+			db: mc.db,
+			agentId: agent!.manifest.id,
+			agentVersion: agent!.manifest.version,
+			capabilityId: agent!.answerCapabilityId,
+			input: { question: message.text },
+			ctx: {
+				tenantId: context.tenantId ?? 'default',
+				userId: message.userId,
+				env: mc.env,
+				moduleContext: mc
+			},
+			actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
+			intent: intent!.intent
+		});
+		if (exec.status === 'ok') {
+			const out = (exec.output ?? {}) as { answer?: unknown };
+			return {
+				kind: 'answer',
+				message: typeof out.answer === 'string' && out.answer.trim() ? out.answer : 'Done.',
+				agentId: agent!.manifest.id,
+				domain: agent!.manifest.domain,
+				intent,
+				context,
+				trace: { stage: 'direct_answer', capabilityId: agent!.answerCapabilityId }
+			};
+		}
+		if (exec.status === 'denied') {
+			return {
+				kind: 'denied',
+				message: 'You do not have access to that information.',
+				agentId: agent!.manifest.id,
+				domain: agent!.manifest.domain,
+				intent,
+				context,
+				trace: { stage: 'direct_answer', status: exec.status }
+			};
+		}
+		// Other failures (invalid input / runtime) fall through to the tool loop.
 	}
 
 	// Phase 5: dynamic read-only tool loop. Runs only for read-risk intents and

@@ -27,6 +27,7 @@ export const inventoryAgentPlugin: DomainAgentPlugin = {
 		forbiddenActions: ['adjust_stock', 'delete_item', 'bypass_validation']
 	},
 	allowedCapabilityIds: ['inventory.answer-question'],
+	answerCapabilityId: 'inventory.answer-question',
 	classifyIntent(input: IntentClassificationInput): AgentIntentResult | null {
 		if (!input.message || !INVENTORY_HINT.test(input.message)) return null;
 		return {
