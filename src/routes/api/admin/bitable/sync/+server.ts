@@ -10,10 +10,13 @@ import { BITABLE_TABLES, bitableAppToken, findBitableTable } from '$app-layer/bi
  * The scheduled Cron worker will call the same engine; this endpoint is for
  * on-demand runs + verification.
  *
- * POST /api/admin/bitable/sync?table=<id|key>   — sync one table
- * POST /api/admin/bitable/sync?all=true         — sync all "ready" tables
+ * POST/GET /api/admin/bitable/sync?table=<id|key>   — sync one table
+ * POST/GET /api/admin/bitable/sync?all=true         — sync all "ready" tables
+ *
+ * GET is allowed too (owner-gated admin tool) so it can be run by pasting the URL
+ * in a logged-in browser.
  */
-export const POST: RequestHandler = async (event) => {
+const handler: RequestHandler = async (event) => {
 	if (!event.platform) return fail('Cloudflare platform bindings are required', 500);
 	const user = event.locals.user;
 	if (!user) return fail('Unauthorized', 401);
@@ -58,3 +61,6 @@ export const POST: RequestHandler = async (event) => {
 		return fail(err instanceof Error ? err.message : 'Bitable sync failed', 502);
 	}
 };
+
+export const GET = handler;
+export const POST = handler;

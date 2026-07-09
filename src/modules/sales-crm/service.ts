@@ -1,12 +1,15 @@
 import type { ModuleContext } from '$platform/modules/types';
 import { NotFoundError } from '$platform/modules/errors';
 import { CustomerRepository } from './repository';
+import type { CustomerSource } from './customer-source';
 
 export class SalesCrmService {
-	private customers: CustomerRepository;
+	private customers: CustomerSource;
 
-	constructor(ctx: ModuleContext) {
-		this.customers = new CustomerRepository(ctx.db);
+	/** `source` lets the composition root inject a Bitable-backed reader (B5);
+	 *  defaults to the legacy D1 repository. */
+	constructor(ctx: ModuleContext, source?: CustomerSource) {
+		this.customers = source ?? new CustomerRepository(ctx.db);
 	}
 
 	async getCustomerById(id: string) {

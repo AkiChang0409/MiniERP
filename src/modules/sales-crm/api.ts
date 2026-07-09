@@ -1,10 +1,15 @@
 import type { ModuleContext } from '$platform/modules/types';
 import { SalesCrmService } from './service';
+import { BitableCustomerRepository } from './customer-source';
 
 export type SalesCrmApi = ReturnType<typeof createSalesCrmApi>;
 
 export function createSalesCrmApi(ctx: ModuleContext) {
-	const svc = new SalesCrmService(ctx);
+	// Bitable-as-source-of-truth: when the Business Partner table id is configured,
+	// read customers from the Bitable mirror; otherwise fall back to legacy D1.
+	const bpTable = ctx.env?.LARK_BP_TABLE_ID;
+	const source = bpTable ? new BitableCustomerRepository(ctx.db, bpTable) : undefined;
+	const svc = new SalesCrmService(ctx, source);
 
 	return {
 		getCustomerById: svc.getCustomerById.bind(svc),

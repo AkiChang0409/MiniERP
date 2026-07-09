@@ -74,6 +74,12 @@ declare global {
 		 * live in one Base). Falls back to LARK_DOCHUB_APP_TOKEN (same Base).
 		 */
 		LARK_BITABLE_APP_TOKEN?: string;
+		/**
+		 * Business Partner table id in the Bitable Base. When set, sales-crm (and
+		 * later procurement) read customer/supplier master from the Bitable mirror
+		 * instead of the legacy D1 `business_partners` table (facade repoint, B5).
+		 */
+		LARK_BP_TABLE_ID?: string;
 		/** Projects + Business Partner tables live in the same Base (share LARK_DOCHUB_APP_TOKEN). */
 		LARK_PROJECT_TABLE_ID?: string;
 		LARK_SUPPLIER_TABLE_ID?: string;

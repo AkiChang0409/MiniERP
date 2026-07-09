@@ -1,10 +1,11 @@
 import { desc, eq, isNull, and, inArray } from 'drizzle-orm';
 import type { DBClient } from '$infrastructure/db';
 import { businessPartners } from './repositories/customer.schema';
+import type { CustomerSource } from './customer-source';
 
 const CUSTOMER_TYPES = ['customer', 'both'] as const;
 
-export class CustomerRepository {
+export class CustomerRepository implements CustomerSource {
 	constructor(private db: DBClient) {}
 
 	async findById(id: string) {
