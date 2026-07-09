@@ -69,6 +69,11 @@ declare global {
 		 */
 		LARK_DOCHUB_APP_TOKEN?: string;
 		LARK_DOCHUB_TABLE_ID?: string;
+		/**
+		 * Base app_token for the Bitable-as-source-of-truth sync (all 25 tables
+		 * live in one Base). Falls back to LARK_DOCHUB_APP_TOKEN (same Base).
+		 */
+		LARK_BITABLE_APP_TOKEN?: string;
 		/** Projects + Business Partner tables live in the same Base (share LARK_DOCHUB_APP_TOKEN). */
 		LARK_PROJECT_TABLE_ID?: string;
 		LARK_SUPPLIER_TABLE_ID?: string;

@@ -59,6 +59,8 @@
     "OCR_IMAGE_PROVIDER": "openai",
     "OCR_PROMPT_VERSION": "v1",
     "OPENAI_VISION_MODEL": "gpt-4o",
+    // Bitable-as-source-of-truth Base app_token (not a secret — it's in Base URLs).
+    "LARK_BITABLE_APP_TOKEN": "HO6ebX2araSa7Xsw2Rrj17DYpsd",
     // OCR.space "OCR API" route (ocrStrategy=ocr_api). Engine 3 = auto-language LSTM.
     "OCR_SPACE_ENGINE": "3"
     // OPENAI_API_KEY: set via wrangler secret / .dev.vars — do not commit here

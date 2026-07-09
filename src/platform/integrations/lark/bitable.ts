@@ -253,6 +253,29 @@ export function eqFilter(fieldName: string, value: string): BitableFilter {
 	return { conjunction: 'and', conditions: [{ field_name: fieldName, operator: 'is', value: [value] }] };
 }
 
+/**
+ * Pull ALL records of a table (follows pagination). Used by the sync engine.
+ * Bitable search returns up to 500/page.
+ */
+export async function bitableListAllRecords(
+	env: Env,
+	args: { appToken: string; tableId: string; pageSize?: number }
+): Promise<BitableRecord[]> {
+	const all: BitableRecord[] = [];
+	let pageToken: string | undefined;
+	do {
+		const res = await bitableSearchRecords(env, {
+			appToken: args.appToken,
+			tableId: args.tableId,
+			pageSize: args.pageSize ?? 500,
+			pageToken
+		});
+		all.push(...res.records);
+		pageToken = res.hasMore ? res.pageToken : undefined;
+	} while (pageToken);
+	return all;
+}
+
 export interface BitableTableInfo {
 	tableId: string;
 	name: string;

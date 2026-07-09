@@ -20,6 +20,9 @@ export { userPersonLinks } from '$platform/auth/user-person-links.schema';
 // External channel identity ↔ MiniERP user binding (e.g. Lark open_id)
 export { externalIdentityLinks } from '$platform/auth/external-identity-links.schema';
 
+// Lark Bitable raw mirror (Bitable-as-source-of-truth sync)
+export { bitableRecords } from '$platform/integrations/lark/bitable-mirror.schema';
+
 // better-auth tables (sessions, accounts, verifications)
 export { sessions, accounts, verifications } from '../../platform/auth/auth-tables';
 
