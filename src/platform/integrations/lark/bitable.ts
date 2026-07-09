@@ -252,3 +252,39 @@ export async function bitableListFields(
 export function eqFilter(fieldName: string, value: string): BitableFilter {
 	return { conjunction: 'and', conditions: [{ field_name: fieldName, operator: 'is', value: [value] }] };
 }
+
+export interface BitableTableInfo {
+	tableId: string;
+	name: string;
+	revision?: number;
+}
+
+/**
+ * List all tables in a Base.
+ * Docs: GET /open-apis/bitable/v1/apps/{app_token}/tables (paged).
+ */
+export async function bitableListTables(
+	env: Env,
+	args: { appToken: string }
+): Promise<BitableTableInfo[]> {
+	const out: BitableTableInfo[] = [];
+	let pageToken: string | undefined;
+	do {
+		const qs = new URLSearchParams({ page_size: '100' });
+		if (pageToken) qs.set('page_token', pageToken);
+		const data = await bitableCall<{
+			items?: Array<{ table_id?: string; name?: string; revision?: number }>;
+			has_more?: boolean;
+			page_token?: string;
+		}>(
+			env,
+			`/open-apis/bitable/v1/apps/${enc(args.appToken)}/tables?${qs.toString()}`,
+			{ method: 'GET' }
+		);
+		for (const t of data.items ?? []) {
+			if (t.table_id) out.push({ tableId: t.table_id, name: t.name ?? '', revision: t.revision });
+		}
+		pageToken = data.has_more ? data.page_token : undefined;
+	} while (pageToken);
+	return out;
+}
