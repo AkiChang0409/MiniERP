@@ -7,7 +7,7 @@
 import { classifyDocumentCapability } from '$modules/document-intake/capabilities/classify-document';
 import { financeAgentAllowedCapabilities } from '$modules/finance/agent';
 import { financeCapabilities } from '$modules/finance/capabilities';
-import { HR_AGENT_ID, hrAgentAllowedCapabilities } from '$modules/hr/agent';
+import { HR_AGENT_ID, hrAgentAllowedCapabilities, hrAnswerQuestionCapability } from '$modules/hr/agent';
 import {
 	approveLeaveRequestCapability,
 	listPendingLeaveCapability,
@@ -16,6 +16,8 @@ import {
 } from '$modules/hr/capabilities';
 import { PROJECT_AGENT_ID, projectAgentAllowedCapabilities } from '$modules/project/agent';
 import { projectCapabilities, type ProjectCapability } from '$modules/project/capabilities';
+import { inventoryAiCapabilities } from '$modules/inventory/ai-capabilities';
+import { salesCrmAiCapabilities } from '$modules/sales-crm/ai-capabilities';
 import {
 	registerCapabilities,
 	type CapabilityRegistration
@@ -91,6 +93,25 @@ for (const capability of hrCapabilities) {
 	});
 }
 
+// HR general Q&A (Step 3): a read-only capability for attendance / overtime /
+// status questions. planHrAction routes non-leave-action HR messages here.
+registrations.push({
+	manifest: {
+		id: hrAnswerQuestionCapability.id,
+		ownerModule: 'hr',
+		description: hrAnswerQuestionCapability.description,
+		riskLevel: hrAnswerQuestionCapability.riskLevel,
+		allowedAgents: [HR_AGENT_ID],
+		requiredUserPermissions: ['hr:view'],
+		requiresConfirmation: false,
+		auditRequired: true,
+		enabled: true,
+		sideEffect: 'read',
+		inputSchema: hrAnswerQuestionCapability.inputSchema
+	},
+	capability: hrAnswerQuestionCapability
+});
+
 // Project Agent: the module's suggestive AI helpers (plan / dashboard summary /
 // project Q&A / task extraction / meeting agenda + notes). Each manifest lifts
 // the capability's Zod input/output schemas + the policy entry's risk /
@@ -138,5 +159,48 @@ registrations.push({
 	},
 	capability: classifyDocumentCapability
 });
+
+// Inventory + Sales-CRM agents (Step 3): read-only Q&A capabilities. Each is a
+// single answer-question tool scoped to its agent; the orchestrator's read-only
+// tool loop exposes them. Module-access roles gate them (owner/admin).
+const INVENTORY_AGENT_ID = 'inventory-agent';
+for (const capability of inventoryAiCapabilities) {
+	registrations.push({
+		manifest: {
+			id: capability.id,
+			ownerModule: 'inventory',
+			description: capability.description,
+			riskLevel: capability.riskLevel,
+			allowedAgents: [INVENTORY_AGENT_ID],
+			requiredUserPermissions: ['inventory:view'],
+			requiresConfirmation: false,
+			auditRequired: true,
+			enabled: true,
+			sideEffect: 'read',
+			inputSchema: capability.inputSchema
+		},
+		capability
+	});
+}
+
+const SALES_CRM_AGENT_ID = 'sales-crm-agent';
+for (const capability of salesCrmAiCapabilities) {
+	registrations.push({
+		manifest: {
+			id: capability.id,
+			ownerModule: 'sales-crm',
+			description: capability.description,
+			riskLevel: capability.riskLevel,
+			allowedAgents: [SALES_CRM_AGENT_ID],
+			requiredUserPermissions: ['sales-crm:view'],
+			requiresConfirmation: false,
+			auditRequired: true,
+			enabled: true,
+			sideEffect: 'read',
+			inputSchema: capability.inputSchema
+		},
+		capability
+	});
+}
 
 registerCapabilities(registrations);

@@ -45,9 +45,10 @@ describe('planHrAction (rule fallback)', () => {
 		expect(plan.kind).toBe('clarification');
 	});
 
-	it('returns unknown for an out-of-scope message', async () => {
-		const plan = await planHrAction(args('帮我改一下工资'));
-		expect(plan.kind).toBe('unknown');
+	it('routes a non-leave HR message to general read-only Q&A', async () => {
+		const plan = await planHrAction(args('这周考勤怎么样'));
+		expect(plan.kind).toBe('read');
+		if (plan.kind === 'read') expect(plan.capabilityId).toBe('hr.answer-question');
 	});
 });
 

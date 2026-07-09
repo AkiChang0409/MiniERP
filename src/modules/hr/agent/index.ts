@@ -1,5 +1,7 @@
 export { hrAgentManifest, type HrAgentManifest } from './manifest';
 export { hrAgentPlugin } from './plugin';
+export { hrAnswerQuestionCapability } from './answer-question';
+export { planHrAction, renderHrResult } from './plan-action';
 export {
 	HR_AGENT_ID,
 	hrAgentAllowedCapabilities,

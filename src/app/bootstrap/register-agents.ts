@@ -8,12 +8,16 @@
 import { financeAgentPlugin } from '$modules/finance/agent';
 import { hrAgentPlugin } from '$modules/hr/agent';
 import { projectAgentPlugin } from '$modules/project/agent';
+import { inventoryAgentPlugin } from '$modules/inventory/agent';
+import { salesCrmAgentPlugin } from '$modules/sales-crm/agent';
 import { registerAgent, registerEntityResolver } from '$platform/ai/orchestrator';
 import { projectEntityResolver } from '$app-layer/ai/orchestrator/resolvers/project-resolver';
 
 registerAgent(financeAgentPlugin);
 registerAgent(projectAgentPlugin);
 registerAgent(hrAgentPlugin);
+registerAgent(inventoryAgentPlugin);
+registerAgent(salesCrmAgentPlugin);
 
 // Entity resolvers (project first; task/employee/supplier/customer follow).
 registerEntityResolver(projectEntityResolver);

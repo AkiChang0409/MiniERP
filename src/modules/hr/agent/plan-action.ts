@@ -21,13 +21,6 @@ const LLM_MIN_CONFIDENCE = 0.6;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ALLOWED = new Set(hrAgentAllowedCapabilities.map((e) => e.id));
 
-const HELP_TEXT = [
-	'我可以帮你处理请假：',
-	'• 查看待审批请假',
-	'• 提交请假（说明类型/开始/结束日期，例如：我要请年假 2026-07-20 到 2026-07-22）',
-	'• 批准请假 <leaveRequestId>'
-].join('\n');
-
 /** Today in Asia/Singapore (UTC+8, no DST) — anchors relative-date parsing. */
 function currentDateInfo(): { currentDate: string; timezone: string } {
 	const sg = new Date(Date.now() + 8 * 60 * 60 * 1000);
@@ -99,7 +92,15 @@ export async function planHrAction(args: PlanActionArgs): Promise<PlannedAction>
 		llm && llm.confidence >= LLM_MIN_CONFIDENCE && llm.capabilityId ? fromLlm(llm) : fromRule(text);
 
 	if (!dispatch.capabilityId || !ALLOWED.has(dispatch.capabilityId)) {
-		return { kind: 'unknown', message: `暂不支持该操作。\n${HELP_TEXT}` };
+		// Not a concrete leave ACTION — treat as a general HR question (attendance /
+		// overtime / status) and answer read-only. Leave actions keep their precise
+		// flow above; truly out-of-scope asks get a needsHuman answer.
+		return {
+			kind: 'read',
+			capabilityId: 'hr.answer-question',
+			input: { question: text },
+			finalAction: 'hr.answered'
+		};
 	}
 	if (dispatch.missingFields.length > 0) {
 		return { kind: 'clarification', message: `还需要补充：${dispatch.missingFields.join('、')}。请补充后再说一次。` };
@@ -175,6 +176,11 @@ function templateFor(capabilityId: string, output: unknown): string {
 }
 
 export async function renderHrResult(args: RenderResultArgs): Promise<string> {
+	// hr.answer-question already returns a natural-language answer — pass it through.
+	if (args.capabilityId === 'hr.answer-question') {
+		const out = (args.output ?? {}) as { answer?: unknown };
+		return typeof out.answer === 'string' && out.answer.trim() ? out.answer : '（无法回答该问题）';
+	}
 	const summary = await summarizeHrResult(args.env, {
 		capabilityId: args.capabilityId,
 		result: args.output,
