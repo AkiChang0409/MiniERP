@@ -11,6 +11,7 @@ interface ProjectListRow {
 	project: { id: string; name: string | null };
 }
 
+
 export const projectEntityResolver: EntityResolver = {
 	type: 'project',
 	async resolve(input: EntityResolverInput): Promise<EntityCandidate[]> {
