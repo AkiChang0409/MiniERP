@@ -164,24 +164,34 @@ async function callWorkersAiJson(env: Env, input: AiJsonCallInput): Promise<unkn
 }
 
 async function callExternalApiJson(env: Env, input: AiJsonCallInput): Promise<unknown> {
-	const apiUrl = readEnv(env, 'LLM_API_URL');
-	if (!apiUrl) return null;
-
 	/**
 	 * External HTTP LLM is used when `LLM_API_URL` is set (e.g. OpenAI-compatible endpoint).
 	 * Previously this only ran when `LLM_PROVIDER=external`, which blocked fallback in local dev
 	 * where wrangler defaults to `LLM_PROVIDER=heuristic` even after Workers AI returns null.
 	 * Set `LLM_USE_EXTERNAL=false` to disable HTTP LLM calls (Workers + heuristics only).
+	 *
+	 * Endpoint/key resolution: an explicit `LLM_API_URL` / `LLM_API_KEY` wins;
+	 * otherwise fall back to the `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` the app
+	 * already ships (deploy sets `OPENAI_API_KEY` on the worker). This is why the
+	 * same key that powers OCR also powers the agent LLM path — no extra secret.
 	 */
 	if (readEnv(env, 'LLM_USE_EXTERNAL').toLowerCase() === 'false') return null;
 
-	const apiKey = readEnv(env, 'LLM_API_KEY');
+	const openaiKey = readEnv(env, 'OPENAI_API_KEY');
+	const anthropicKey = readEnv(env, 'ANTHROPIC_API_KEY');
+	const apiUrl =
+		readEnv(env, 'LLM_API_URL') ||
+		(openaiKey ? 'https://api.openai.com/v1/chat/completions' : '') ||
+		(anthropicKey ? 'https://api.anthropic.com/v1/messages' : '');
+	if (!apiUrl) return null;
+
+	const isOpenAiChatEndpoint = /api\.openai\.com\/v1\/chat\/completions/i.test(apiUrl);
+	const isAnthropicEndpoint = /api\.anthropic\.com/i.test(apiUrl);
+	const apiKey = readEnv(env, 'LLM_API_KEY') || (isAnthropicEndpoint ? anthropicKey : openaiKey);
 
 	const promptVersion = input.promptVersion || readEnv(env, 'OCR_PROMPT_VERSION') || 'v1';
 	const systemFull = `${input.system}\nPrompt version: ${promptVersion}`;
 	const model = readEnv(env, 'OPENAI_MODEL') || readEnv(env, 'LLM_MODEL') || 'gpt-4o-mini';
-	const isOpenAiChatEndpoint = /api\.openai\.com\/v1\/chat\/completions/i.test(apiUrl);
-	const isAnthropicEndpoint = /api\.anthropic\.com/i.test(apiUrl);
 
 	let init: RequestInit;
 	if (isAnthropicEndpoint) {

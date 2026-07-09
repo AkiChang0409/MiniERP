@@ -50,6 +50,10 @@
     "BETTER_AUTH_URL": "https://smartfin-v4.aki-wang.workers.dev",
     "EMAIL_FROM": "SmartFin <onboarding@resend.dev>",
     "LLM_PROVIDER": "heuristic",
+    // Agent orchestrator uses structured/tool JSON — prefer the OpenAI model
+    // (OPENAI_API_KEY is already deployed) over Workers AI on the app worker for
+    // reliable output. Workers AI still serves the doc-processor worker.
+    "LLM_SKIP_WORKERS": "true",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
     "OCR_IMAGE_PROVIDER": "openai",
