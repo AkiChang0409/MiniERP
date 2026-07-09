@@ -23,7 +23,16 @@ interface TenantTokenResponse {
 }
 
 /**
- * Mint a tenant_access_token from LARK_APP_ID / LARK_APP_SECRET.
+ * Per-isolate cache of the tenant token. Lark tokens live ~2h; caching avoids a
+ * token subrequest on every API call — critical because a single Worker
+ * invocation has a subrequest cap (50 free / 1000 paid), and flows like Bitable
+ * introspection or sync make many calls. Keyed by app id so a rare app switch
+ * doesn't serve a stale token.
+ */
+let tenantTokenCache: { appId: string; value: string; expiresAt: number } | null = null;
+
+/**
+ * Mint (or reuse) a tenant_access_token from LARK_APP_ID / LARK_APP_SECRET.
  * Docs: /open-apis/auth/v3/tenant_access_token/internal
  */
 export async function getTenantAccessToken(env: Env): Promise<string> {
@@ -31,6 +40,11 @@ export async function getTenantAccessToken(env: Env): Promise<string> {
 	const appSecret = env.LARK_APP_SECRET;
 	if (!appId || !appSecret) {
 		throw new Error('LARK_APP_ID / LARK_APP_SECRET are not configured');
+	}
+
+	const now = Date.now();
+	if (tenantTokenCache && tenantTokenCache.appId === appId && tenantTokenCache.expiresAt > now) {
+		return tenantTokenCache.value;
 	}
 
 	const res = await fetch(`${larkBaseUrl(env)}/open-apis/auth/v3/tenant_access_token/internal`, {
@@ -42,6 +56,13 @@ export async function getTenantAccessToken(env: Env): Promise<string> {
 	if (data.code !== 0 || !data.tenant_access_token) {
 		throw new Error(`Lark tenant_access_token failed: code=${data.code} msg=${data.msg ?? 'unknown'}`);
 	}
+	// Refresh 60s early; default 2h if `expire` is missing.
+	const ttlSec = typeof data.expire === 'number' && data.expire > 0 ? data.expire : 7200;
+	tenantTokenCache = {
+		appId,
+		value: data.tenant_access_token,
+		expiresAt: now + Math.max(60, ttlSec - 60) * 1000
+	};
 	return data.tenant_access_token;
 }
 

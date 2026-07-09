@@ -15,9 +15,16 @@ import {
  * Requires: the Lark app (`LARK_APP_ID`) is a collaborator on the Base, and
  * `LARK_APP_ID`/`LARK_APP_SECRET` are configured (tenant token).
  *
- * GET /api/admin/bitable/introspect?appToken=<token>&sample=<n>
+ * Cloudflare caps subrequests per invocation (50 free / 1000 paid). The tenant
+ * token is cached (one fetch), and this pages over tables (`limit`/`offset`) with
+ * samples OFF by default, so one call stays well under the cap. If you see
+ * "Too many subrequests", lower `limit` or page with `offset`.
+ *
+ * GET /api/admin/bitable/introspect?appToken=<t>&limit=30&offset=0&sample=0&table=<id?>
  */
 const MAX_SAMPLE = 5;
+const DEFAULT_LIMIT = 30;
+const MAX_LIMIT = 40;
 
 export const GET: RequestHandler = async (event) => {
 	if (!event.platform) return fail('Cloudflare platform bindings are required', 500);
@@ -27,19 +34,24 @@ export const GET: RequestHandler = async (event) => {
 		return fail('Forbidden — owner/admin only', 403);
 	}
 
-	const appToken = event.url.searchParams.get('appToken')?.trim();
+	const q = event.url.searchParams;
+	const appToken = q.get('appToken')?.trim();
 	if (!appToken) return fail('Missing appToken', 400);
-	const sample = Math.min(
-		MAX_SAMPLE,
-		Math.max(0, Number.parseInt(event.url.searchParams.get('sample') ?? '3', 10) || 0)
-	);
+	const onlyTable = q.get('table')?.trim() || null;
+	const sample = Math.min(MAX_SAMPLE, Math.max(0, Number.parseInt(q.get('sample') ?? '0', 10) || 0));
+	const limit = Math.min(MAX_LIMIT, Math.max(1, Number.parseInt(q.get('limit') ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
+	const offset = Math.max(0, Number.parseInt(q.get('offset') ?? '0', 10) || 0);
 
 	const env = event.platform.env;
 
 	try {
-		const tables = await bitableListTables(env, { appToken });
+		const allTables = await bitableListTables(env, { appToken });
+		const selected = onlyTable
+			? allTables.filter((t) => t.tableId === onlyTable)
+			: allTables.slice(offset, offset + limit);
+
 		const out = [];
-		for (const table of tables) {
+		for (const table of selected) {
 			const fields = await bitableListFields(env, { appToken, tableId: table.tableId });
 			let records: unknown[] = [];
 			if (sample > 0) {
@@ -52,7 +64,17 @@ export const GET: RequestHandler = async (event) => {
 			}
 			out.push({ tableId: table.tableId, name: table.name, fields, sample: records });
 		}
-		return ok({ appToken, tableCount: tables.length, tables: out });
+
+		const nextOffset = onlyTable ? null : offset + selected.length;
+		return ok({
+			appToken,
+			tableCount: allTables.length,
+			returned: out.length,
+			offset,
+			nextOffset: !onlyTable && nextOffset! < allTables.length ? nextOffset : null,
+			tableNames: allTables.map((t) => t.name),
+			tables: out
+		});
 	} catch (err) {
 		return fail(err instanceof Error ? err.message : 'Bitable introspection failed', 502);
 	}
