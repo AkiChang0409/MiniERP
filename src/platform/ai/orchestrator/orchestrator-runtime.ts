@@ -483,11 +483,18 @@ export async function handleMessage(
 		};
 	}
 
-	// Direct read answer: single-tool read agents (inventory / sales-crm / finance)
-	// declare an `answerCapabilityId` that self-fetches its snapshot from `{question}`.
-	// Call it directly instead of the tool-selection loop — deterministic, and it
-	// avoids the model declining to call the tool.
-	if (mc && READ_RISK.has(intent!.riskLevel) && agent!.answerCapabilityId) {
+	// Direct read answer: an agent's `answerCapabilityId` self-fetches its snapshot
+	// from `{question}`. Call it directly (deterministic; avoids the model declining
+	// to call a tool) when the routed intent points at it OR carries no specific
+	// capability (generic question / LLM-routed). Intents bound to a *specific*
+	// read capability (e.g. project.generate-plan) are left to their own path.
+	if (
+		mc &&
+		READ_RISK.has(intent!.riskLevel) &&
+		agent!.answerCapabilityId &&
+		(intent!.suggestedCapabilityId == null ||
+			intent!.suggestedCapabilityId === agent!.answerCapabilityId)
+	) {
 		const exec = await executeGuardedCapability<{ answer?: string }>({
 			db: mc.db,
 			agentId: agent!.manifest.id,

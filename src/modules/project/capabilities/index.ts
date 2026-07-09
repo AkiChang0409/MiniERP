@@ -1,4 +1,5 @@
 import { answerQuestionCapability } from './answer-question';
+import { answerProjectPortfolioCapability } from './answer';
 import { applyTaskChangeSetCapability } from './apply-task-change-set';
 import { createTaskCapability } from './create-task';
 import { detectScheduleConflictsCapability } from './detect-schedule-conflicts';
@@ -27,6 +28,7 @@ export { type ProposeTaskPlanInput } from './propose-task-plan';
 export { type ProposeRescheduleInput } from './propose-reschedule';
 export { type ProposeAssignmentInput } from './propose-assignment';
 export { type DetectScheduleConflictsInput } from './detect-schedule-conflicts';
+export { type ProjectAnswerInput, type ProjectAnswerOutput } from './answer';
 export { type CreateTaskInput, type CreateTaskOutput } from './create-task';
 export { type UpdateTaskInput, type UpdateTaskOutput } from './update-task';
 export {
@@ -50,6 +52,7 @@ export const projectCapabilities = [
 	generatePlanCapability,
 	summarizeDashboardCapability,
 	answerQuestionCapability,
+	answerProjectPortfolioCapability,
 	extractTasksCapability,
 	draftMeetingAgendaCapability,
 	processMeetingNotesCapability,

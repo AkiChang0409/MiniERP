@@ -29,6 +29,7 @@ export const projectAgentPlugin: DomainAgentPlugin = {
 		forbiddenActions: projectAgentManifest.forbiddenActions
 	},
 	allowedCapabilityIds: projectAgentAllowedCapabilities.map((entry) => entry.id),
+	answerCapabilityId: 'project.answer',
 	classifyIntent(input: IntentClassificationInput): AgentIntentResult | null {
 		const result = classifyProjectIntent({
 			message: input.message,
