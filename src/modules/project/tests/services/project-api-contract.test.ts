@@ -61,6 +61,8 @@ const EXPECTED_METHODS = [
 	'createTask',
 	'updateTask',
 	'removeTask',
+	'getTaskBitableRecordId',
+	'setTaskBitableRecordId',
 	'listTaskHistory',
 	'addTaskDependency',
 	'removeTaskDependency',

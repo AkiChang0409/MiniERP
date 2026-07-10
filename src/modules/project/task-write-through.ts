@@ -36,13 +36,13 @@ interface WriteThroughConfig {
 }
 
 /** Resolve Base app_token + table ids from env; null → write-through disabled. */
-function resolveConfig(env: Env): WriteThroughConfig | null {
-	const appToken = env.LARK_BITABLE_APP_TOKEN;
+function resolveConfig(env: Env | undefined): WriteThroughConfig | null {
+	const appToken = env?.LARK_BITABLE_APP_TOKEN;
 	if (!appToken) return null;
 	return {
 		appToken,
-		tableId: env.LARK_TASK_TABLE_ID ?? DEFAULT_TASKS_TABLE_ID,
-		projectsTableId: env.LARK_PROJECT_TABLE_ID ?? DEFAULT_PROJECTS_TABLE_ID
+		tableId: env?.LARK_TASK_TABLE_ID ?? DEFAULT_TASKS_TABLE_ID,
+		projectsTableId: env?.LARK_PROJECT_TABLE_ID ?? DEFAULT_PROJECTS_TABLE_ID
 	};
 }
 
