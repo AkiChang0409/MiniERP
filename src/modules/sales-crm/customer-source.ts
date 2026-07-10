@@ -10,6 +10,7 @@ import type { DBClient } from '$infrastructure/db';
 import { bitableCreateRecord, bitableUpdateRecord } from '$platform/integrations/lark/bitable';
 import { readBitableRecords, bitableText } from '$platform/integrations/lark/bitable-read';
 import { upsertBitableMirrorRecord } from '$platform/integrations/lark/bitable-sync';
+import { recordLarkWriteOperation } from '$platform/integrations/lark/bitable-write-log';
 import {
 	bitableCheckbox,
 	bitableLinkedRecordIds,
@@ -201,10 +202,23 @@ export class BitableCustomerRepository implements CustomerSource {
 		if (!this.env || !this.appToken) {
 			throw new Error('Sales CRM Lark write-through requires env and app token');
 		}
+		const businessPartnerFields = encodeBusinessPartnerCreate(data);
 		const record = await bitableCreateRecord(this.env, {
 			appToken: this.appToken,
 			tableId: this.tableId,
-			fields: encodeBusinessPartnerCreate(data)
+			fields: businessPartnerFields
+		});
+		await recordLarkWriteOperation(this.db, {
+			appToken: this.appToken,
+			tableId: this.tableId,
+			tableName: BUSINESS_PARTNER_TABLE.name,
+			recordId: record.record_id,
+			operation: 'create_record',
+			status: 'success',
+			payload: { fields: businessPartnerFields },
+			result: record,
+			sourceModule: 'sales-crm',
+			sourceAction: 'createCustomer'
 		});
 		await upsertBitableMirrorRecord(this.db, {
 			appToken: this.appToken,
@@ -217,10 +231,23 @@ export class BitableCustomerRepository implements CustomerSource {
 			if (!this.contactTableId) {
 				throw new Error('LARK_BP_CONTACT_TABLE_ID is required to create linked Contact Person records');
 			}
+			const contactFields = encodeContactPersonCreate(data, record.record_id);
 			const contactRecord = await bitableCreateRecord(this.env, {
 				appToken: this.appToken,
 				tableId: this.contactTableId,
-				fields: encodeContactPersonCreate(data, record.record_id)
+				fields: contactFields
+			});
+			await recordLarkWriteOperation(this.db, {
+				appToken: this.appToken,
+				tableId: this.contactTableId,
+				tableName: CONTACT_PERSON_TABLE.name,
+				recordId: contactRecord.record_id,
+				operation: 'create_record',
+				status: 'success',
+				payload: { fields: contactFields },
+				result: contactRecord,
+				sourceModule: 'sales-crm',
+				sourceAction: 'createCustomer.contactPerson'
 			});
 			await upsertBitableMirrorRecord(this.db, {
 				appToken: this.appToken,
@@ -234,6 +261,18 @@ export class BitableCustomerRepository implements CustomerSource {
 				tableId: this.tableId,
 				recordId: record.record_id,
 				fields: { [BUSINESS_PARTNER_TABLE.fields.contactPerson]: [contactRecord.record_id] }
+			});
+			await recordLarkWriteOperation(this.db, {
+				appToken: this.appToken,
+				tableId: this.tableId,
+				tableName: BUSINESS_PARTNER_TABLE.name,
+				recordId: record.record_id,
+				operation: 'update_record',
+				status: 'success',
+				payload: { fields: { [BUSINESS_PARTNER_TABLE.fields.contactPerson]: [contactRecord.record_id] } },
+				result: updatedBusinessPartner,
+				sourceModule: 'sales-crm',
+				sourceAction: 'createCustomer.linkContactPerson'
 			});
 			await upsertBitableMirrorRecord(this.db, {
 				appToken: this.appToken,

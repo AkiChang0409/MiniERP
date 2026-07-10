@@ -4,6 +4,7 @@ import { BitableCustomerRepository } from '$modules/sales-crm/customer-source';
 const mocks = vi.hoisted(() => ({
 	bitableCreateRecord: vi.fn(),
 	bitableUpdateRecord: vi.fn(),
+	recordLarkWriteOperation: vi.fn(),
 	readBitableRecords: vi.fn(),
 	upsertBitableMirrorRecord: vi.fn()
 }));
@@ -25,10 +26,15 @@ vi.mock('$platform/integrations/lark/bitable-sync', () => ({
 	upsertBitableMirrorRecord: mocks.upsertBitableMirrorRecord
 }));
 
+vi.mock('$platform/integrations/lark/bitable-write-log', () => ({
+	recordLarkWriteOperation: mocks.recordLarkWriteOperation
+}));
+
 describe('BitableCustomerRepository', () => {
 	beforeEach(() => {
 		mocks.bitableCreateRecord.mockReset();
 		mocks.bitableUpdateRecord.mockReset();
+		mocks.recordLarkWriteOperation.mockReset();
 		mocks.readBitableRecords.mockReset();
 		mocks.upsertBitableMirrorRecord.mockReset();
 	});
@@ -137,6 +143,19 @@ describe('BitableCustomerRepository', () => {
 				}
 			}
 		);
+		expect(mocks.recordLarkWriteOperation).toHaveBeenCalledWith(
+			{},
+			expect.objectContaining({
+				appToken: 'app_token',
+				tableId: 'bp_table',
+				tableName: 'Business Partner',
+				recordId: 'rec_bp_created',
+				operation: 'create_record',
+				status: 'success',
+				sourceModule: 'sales-crm',
+				sourceAction: 'createCustomer'
+			})
+		);
 	});
 
 	it('creates linked Contact Person records and links them back to Business Partner', async () => {
@@ -241,6 +260,29 @@ describe('BitableCustomerRepository', () => {
 				record: expect.objectContaining({
 					fields: expect.objectContaining({ 'Contact Person': ['rec_contact_created'] })
 				})
+			})
+		);
+		expect(mocks.recordLarkWriteOperation).toHaveBeenCalledTimes(3);
+		expect(mocks.recordLarkWriteOperation).toHaveBeenNthCalledWith(
+			2,
+			{},
+			expect.objectContaining({
+				tableId: 'contact_table',
+				tableName: 'Contact Person',
+				recordId: 'rec_contact_created',
+				operation: 'create_record',
+				sourceAction: 'createCustomer.contactPerson'
+			})
+		);
+		expect(mocks.recordLarkWriteOperation).toHaveBeenNthCalledWith(
+			3,
+			{},
+			expect.objectContaining({
+				tableId: 'bp_table',
+				tableName: 'Business Partner',
+				recordId: 'rec_bp_created',
+				operation: 'update_record',
+				sourceAction: 'createCustomer.linkContactPerson'
 			})
 		);
 	});
