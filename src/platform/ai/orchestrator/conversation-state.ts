@@ -19,16 +19,29 @@ export interface AgentPendingClarification {
 	candidates?: OrchestratorCandidate[];
 }
 
-export interface AgentPendingConfirmation {
-	actionId: string;
+/**
+ * One governed write staged inside a pending confirmation. A confirmation may
+ * carry several (the unified loop can propose a batch of writes that the user
+ * confirms together); each item executes through `executeGuardedCapability` as
+ * its owning agent.
+ */
+export interface AgentPendingWriteItem {
 	agentId: string;
 	capabilityId: string;
 	riskLevel: PlatformRiskLevel;
 	summary: string;
-	/** sha256 of the canonicalized input — recomputed on confirm to detect drift. */
-	payloadHash: string;
 	/** The validated capability input to execute once the user confirms. */
 	input: unknown;
+}
+
+export interface AgentPendingConfirmation {
+	actionId: string;
+	/** 1..n writes applied in order on confirm. */
+	items: AgentPendingWriteItem[];
+	/** Combined human-readable summary for the confirmation card. */
+	summary: string;
+	/** sha256 of the canonicalized items — recomputed on confirm to detect drift. */
+	payloadHash: string;
 	expiresAt: string;
 }
 
@@ -88,7 +101,7 @@ export async function setPendingConfirmation(
 	base: Pick<AgentConversationState, 'conversationId' | 'source' | 'userId' | 'tenantId'>,
 	confirmation: Omit<AgentPendingConfirmation, 'payloadHash' | 'expiresAt'>
 ): Promise<AgentPendingConfirmation> {
-	const payloadHash = await hashConfirmationPayload(confirmation.input);
+	const payloadHash = await hashConfirmationPayload(confirmation.items);
 	const expiresAt = new Date(Date.now() + CONFIRMATION_TTL_MS).toISOString();
 	const pending: AgentPendingConfirmation = { ...confirmation, payloadHash, expiresAt };
 

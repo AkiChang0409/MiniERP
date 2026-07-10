@@ -1,4 +1,5 @@
 import { createProjectApi } from '../../api';
+import { syncTaskToBitable } from '../../task-write-through';
 import type { ProjectCapability } from '../types';
 import {
 	UpdateTaskInputSchema,
@@ -25,6 +26,25 @@ export const updateTaskCapability: ProjectCapability<UpdateTaskInput, UpdateTask
 
 	async execute(input, ctx): Promise<UpdateTaskOutput> {
 		if (!ctx.moduleContext) throw new Error('project.update-task requires a module context');
-		return createProjectApi(ctx.moduleContext).updateTask(input.taskId, input.projectId, input.patch);
+		const result = await createProjectApi(ctx.moduleContext).updateTask(
+			input.taskId,
+			input.projectId,
+			input.patch
+		);
+		// Bitable write-through (B4) — best-effort, only the patched fields.
+		await syncTaskToBitable(ctx.moduleContext, {
+			taskId: input.taskId,
+			projectId: input.projectId,
+			values: {
+				name: input.patch.name ?? null,
+				description: input.patch.description ?? null,
+				startDate: input.patch.startDate ?? null,
+				endDate: input.patch.endDate ?? null,
+				progressPct: input.patch.progressPct ?? null,
+				priority: input.patch.priority ?? null
+			},
+			actorUserId: ctx.userId ?? null
+		});
+		return result;
 	}
 };

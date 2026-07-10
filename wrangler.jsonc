@@ -67,6 +67,7 @@
     // Legacy DocHub/QC table ids in the shared Bitable Base.
     "LARK_DOCHUB_TABLE_ID": "tblQ4XMPWLVALfrF",
     "LARK_PROJECT_TABLE_ID": "tblQzG5SD2URlzs6",
+    "LARK_TASK_TABLE_ID": "tblW3ug6R6JTDPvd",
     "LARK_SUPPLIER_TABLE_ID": "tblsYri9cgxgfYrB",
     "LARK_DICT_TABLE_ID": "tblJcL3sRLYqhX7G",
     // OCR.space "OCR API" route (ocrStrategy=ocr_api). Engine 3 = auto-language LSTM.
@@ -145,6 +146,8 @@
         "LARK_BITABLE_APP_TOKEN": "HO6ebX2araSa7Xsw2Rrj17DYpsd",
         "LARK_BP_TABLE_ID": "tblsYri9cgxgfYrB",
         "LARK_BP_CONTACT_TABLE_ID": "tblZcoJ7hVTWVk1b",
+        "LARK_PROJECT_TABLE_ID": "tblQzG5SD2URlzs6",
+        "LARK_TASK_TABLE_ID": "tblW3ug6R6JTDPvd",
         // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
         "OCR_SPACE_ENGINE": "3"
       },
@@ -220,6 +223,8 @@
         "LARK_BITABLE_APP_TOKEN": "HO6ebX2araSa7Xsw2Rrj17DYpsd",
         "LARK_BP_TABLE_ID": "tblsYri9cgxgfYrB",
         "LARK_BP_CONTACT_TABLE_ID": "tblZcoJ7hVTWVk1b",
+        "LARK_PROJECT_TABLE_ID": "tblQzG5SD2URlzs6",
+        "LARK_TASK_TABLE_ID": "tblW3ug6R6JTDPvd",
         // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
         "OCR_SPACE_ENGINE": "3",
 

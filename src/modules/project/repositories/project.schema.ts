@@ -253,6 +253,17 @@ export const projectTasks = sqliteTable('project_tasks', {
 	// Assignee's free-text submission note captured on the personal task-detail
 	// page (mainly for tasks without ISO records; see qms.schema.ts).
 	submissionNote: text('submission_note'),
+
+	// Task priority (P0 highest … P3). Mirrors the Bitable "Priority" single-select
+	// (B4 option A). Nullable — not every task is prioritized.
+	priority: text('priority', { enum: ['P0', 'P1', 'P2', 'P3'] }),
+
+	// --- Bitable write-through (B4, 2026-07) --------------------------------
+	// Linked record id in the Lark Bitable "Tasks" table (source of truth). Set
+	// by the governed write path when a task is written through; read on the next
+	// update so it targets the same Bitable record. Null when write-through is off
+	// or the task predates it.
+	bitableRecordId: text('bitable_record_id'),
 	...timeFields
 });
 

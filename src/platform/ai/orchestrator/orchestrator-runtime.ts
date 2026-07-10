@@ -130,46 +130,59 @@ export async function handleMessage(
 						};
 					}
 					const p = outcome.confirmation;
-					const agentPlugin = lookupAgent(p.agentId);
-					const exec = await executeGuardedCapability({
-						db: mc.db,
-						agentId: p.agentId,
-						agentVersion: agentPlugin?.manifest.version ?? '0.1.0',
-						capabilityId: p.capabilityId,
-						input: p.input,
-						ctx: {
-							tenantId: context.tenantId ?? 'default',
-							userId: message.userId,
-							env: mc.env,
-							moduleContext: mc
-						},
-						actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
-						confirmationRef: p.payloadHash,
-						intent: 'apply_confirmed',
-						finalAction: 'agent.apply_confirmed'
-					});
-					if (exec.status !== 'ok') {
-						return {
-							kind: exec.status === 'denied' ? 'denied' : 'error',
-							message: `I could not apply the change (${exec.status}).`,
-							context,
-							trace: { stage: 'confirm', status: exec.status }
-						};
-					}
-					const doneMessage = agentPlugin
-						? await renderOrDefault(
-								agentPlugin,
-								p.capabilityId,
+					// Apply every staged write in order, each through the governed runtime
+					// as its owning agent. The whole batch shares one payloadHash.
+					const applied: string[] = [];
+					const auditIds: string[] = [];
+					for (const item of p.items) {
+						const agentPlugin = lookupAgent(item.agentId);
+						const exec = await executeGuardedCapability({
+							db: mc.db,
+							agentId: item.agentId,
+							agentVersion: agentPlugin?.manifest.version ?? '0.1.0',
+							capabilityId: item.capabilityId,
+							input: item.input,
+							ctx: {
+								tenantId: context.tenantId ?? 'default',
+								userId: message.userId,
+								env: mc.env,
+								moduleContext: mc
+							},
+							actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
+							confirmationRef: p.payloadHash,
+							intent: 'apply_confirmed',
+							finalAction: 'agent.apply_confirmed'
+						});
+						if (exec.status !== 'ok') {
+							return {
+								kind: exec.status === 'denied' ? 'denied' : 'error',
+								message:
+									p.items.length > 1
+										? `Applied ${applied.length} of ${p.items.length} change(s); "${item.summary}" failed (${exec.status}).`
+										: `I could not apply the change (${exec.status}).`,
+								context,
+								trace: { stage: 'confirm', status: exec.status, applied, failedItem: item.capabilityId }
+							};
+						}
+						if (exec.auditId) auditIds.push(exec.auditId);
+						applied.push(
+							await renderOrDefault(
+								agentPlugin ?? ({} as DomainAgentPlugin),
+								item.capabilityId,
 								exec.output,
 								mc.env,
-								`Done — applied: ${p.summary}.`
+								item.summary
 							)
-						: `Done — applied: ${p.summary}.`;
+						);
+					}
 					return {
 						kind: 'answer',
-						message: doneMessage,
+						message:
+							applied.length === 1
+								? `Done — applied: ${applied[0]}.`
+								: `Done — applied ${applied.length} change(s):\n- ${applied.join('\n- ')}`,
 						context,
-						trace: { stage: 'confirm', applied: exec.output, auditId: exec.auditId }
+						trace: { stage: 'confirm', applied, auditIds }
 					};
 				}
 			}
@@ -220,21 +233,31 @@ export async function handleMessage(
 		}
 	});
 
-	// Write proposed → stage it for confirmation (no side effect happened).
-	if (loop.status === 'confirm_write' && loop.write) {
-		const write = loop.write;
+	// Write(s) proposed → stage the batch for confirmation (no side effect yet).
+	if (loop.status === 'confirm_write' && loop.writes && loop.writes.length > 0) {
+		const writes = loop.writes;
+		const items = writes.map((write) => ({
+			agentId: write.agentId,
+			capabilityId: write.capabilityId,
+			riskLevel: (lookupCapability(write.capabilityId)?.manifest.riskLevel ?? 'R4') as PlatformRiskLevel,
+			summary: write.summary,
+			input: write.input
+		}));
+		const combinedSummary =
+			items.length === 1
+				? items[0].summary
+				: `${items.length} changes:\n- ${items.map((it) => it.summary).join('\n- ')}`;
+		const preface = loop.answer?.trim() ? `${loop.answer.trim()}\n\n` : '';
 		if (!kv) {
 			return {
 				kind: 'confirmation',
-				message: `${write.summary} (confirmation store unavailable — open the app to apply).`,
-				draft: { summary: write.summary },
+				message: `${preface}${combinedSummary}\n\n(Confirmation store unavailable — open the app to apply.)`,
+				draft: { summary: combinedSummary, items },
 				context,
 				trace: { stage: 'loop', staged: false, steps: loop.steps }
 			};
 		}
 		const actionId = crypto.randomUUID();
-		const riskLevel: PlatformRiskLevel =
-			lookupCapability(write.capabilityId)?.manifest.riskLevel ?? 'R4';
 		await setPendingConfirmation(
 			kv,
 			{
@@ -243,21 +266,14 @@ export async function handleMessage(
 				userId: message.userId,
 				tenantId: context.tenantId
 			},
-			{
-				actionId,
-				agentId: write.agentId,
-				capabilityId: write.capabilityId,
-				riskLevel,
-				summary: write.summary,
-				input: write.input
-			}
+			{ actionId, items, summary: combinedSummary }
 		);
 		return {
 			kind: 'confirmation',
-			message: `${write.summary} — reply to confirm, or cancel.`,
+			message: `${preface}${combinedSummary}\n\nReply to confirm, or cancel.`,
 			actionId,
-			agentId: write.agentId,
-			draft: { summary: write.summary },
+			agentId: items.length === 1 ? items[0].agentId : undefined,
+			draft: { summary: combinedSummary, items },
 			context,
 			trace: { stage: 'loop', staged: true, steps: loop.steps }
 		};

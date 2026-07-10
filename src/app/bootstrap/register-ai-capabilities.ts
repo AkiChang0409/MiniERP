@@ -18,7 +18,11 @@ import { PROJECT_AGENT_ID, projectAgentAllowedCapabilities } from '$modules/proj
 import { projectCapabilities, type ProjectCapability } from '$modules/project/capabilities';
 import { projectAiCapabilities } from '$modules/project/ai-capabilities';
 import { inventoryAiCapabilities } from '$modules/inventory/ai-capabilities';
-import { salesCrmAiCapabilities } from '$modules/sales-crm/ai-capabilities';
+import {
+	salesCrmAiCapabilities,
+	salesCrmWriteCapabilities,
+	salesCrmCreateBusinessPartnerOutputSchema
+} from '$modules/sales-crm/ai-capabilities';
 import {
 	registerCapabilities,
 	type CapabilityRegistration
@@ -203,6 +207,30 @@ for (const capability of salesCrmAiCapabilities) {
 			enabled: true,
 			sideEffect: 'read',
 			inputSchema: capability.inputSchema
+		},
+		capability
+	});
+}
+
+// Sales-CRM governed WRITE (P2 unified write path): create-business-partner
+// writes through to the Lark Bitable Base + D1 mirror. R4 write, requires
+// confirmation, gated by sales-crm:edit; staged→confirmed by the unified loop.
+for (const capability of salesCrmWriteCapabilities) {
+	registrations.push({
+		manifest: {
+			id: capability.id,
+			ownerModule: 'sales-crm',
+			description: capability.description,
+			riskLevel: 'R4',
+			allowedAgents: [SALES_CRM_AGENT_ID],
+			requiredUserPermissions: ['sales-crm:edit'],
+			requiresConfirmation: true,
+			auditRequired: true,
+			enabled: true,
+			sideEffect: 'write',
+			inputSchema: capability.inputSchema,
+			outputSchema: salesCrmCreateBusinessPartnerOutputSchema,
+			persistTarget: 'business_partners'
 		},
 		capability
 	});

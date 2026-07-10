@@ -94,6 +94,9 @@ export function createProjectApi(ctx: ModuleContext) {
 		createTask: task.create.bind(task),
 		updateTask: task.update.bind(task),
 		removeTask: task.remove.bind(task),
+		// Bitable write-through link (B4)
+		getTaskBitableRecordId: task.getBitableRecordId.bind(task),
+		setTaskBitableRecordId: task.setBitableRecordId.bind(task),
 		listTaskHistory: task.listTaskHistory.bind(task),
 		addTaskDependency: task.addDependency.bind(task),
 		removeTaskDependency: task.removeDependency.bind(task),

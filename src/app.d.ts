@@ -85,6 +85,8 @@ declare global {
 		LARK_BP_CONTACT_TABLE_ID?: string;
 		/** Projects + Business Partner tables live in the same Bitable Base. */
 		LARK_PROJECT_TABLE_ID?: string;
+		/** Tasks table id in the Bitable Base — target of project task write-through (B4). */
+		LARK_TASK_TABLE_ID?: string;
 		LARK_SUPPLIER_TABLE_ID?: string;
 		/** Classification dictionary table (Secondary Category → Primary Category), same Base. */
 		LARK_DICT_TABLE_ID?: string;

@@ -31,11 +31,16 @@ const base = {
 
 const draftConfirmation = {
 	actionId: 'act_1',
-	agentId: 'project-agent',
-	capabilityId: 'project.apply-task-change-set',
-	riskLevel: 'R4' as const,
 	summary: '1 change(s) to project prj_1',
-	input: { projectId: 'prj_1', changes: [{ action: 'reschedule', taskId: 't1', after: {} }] }
+	items: [
+		{
+			agentId: 'project-agent',
+			capabilityId: 'project.apply-task-change-set',
+			riskLevel: 'R4' as const,
+			summary: '1 change(s) to project prj_1',
+			input: { projectId: 'prj_1', changes: [{ action: 'reschedule', taskId: 't1', after: {} }] }
+		}
+	]
 };
 
 describe('orchestrator conversation-state — confirmation loop', () => {
@@ -84,6 +89,41 @@ describe('orchestrator conversation-state — confirmation loop', () => {
 		const outcome = await consumePendingConfirmation(kv, base.conversationId, { actionId: 'act_1' });
 		expect(outcome.ok).toBe(false);
 		if (!outcome.ok) expect(outcome.reason).toBe('expired');
+	});
+
+	it('stages and consumes a multi-write batch as one confirmation', async () => {
+		const kv = makeKv();
+		const batch = {
+			actionId: 'act_batch',
+			summary: '2 changes',
+			items: [
+				{
+					agentId: 'project-agent',
+					capabilityId: 'project.update-task',
+					riskLevel: 'R4' as const,
+					summary: 'Reschedule t1',
+					input: { taskId: 't1' }
+				},
+				{
+					agentId: 'sales-crm-agent',
+					capabilityId: 'sales-crm.create-business-partner',
+					riskLevel: 'R4' as const,
+					summary: 'Create Acme',
+					input: { name: 'Acme' }
+				}
+			]
+		};
+		const pending = await setPendingConfirmation(kv, base, batch);
+		expect(pending.items).toHaveLength(2);
+
+		const outcome = await consumePendingConfirmation(kv, base.conversationId, { actionId: 'act_batch' });
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) {
+			expect(outcome.confirmation.items.map((i) => i.capabilityId)).toEqual([
+				'project.update-task',
+				'sales-crm.create-business-partner'
+			]);
+		}
 	});
 
 	it('verifies payloadHash when provided', async () => {

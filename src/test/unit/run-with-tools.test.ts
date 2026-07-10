@@ -81,28 +81,45 @@ describe('runWithTools — unified cross-domain loop', () => {
 		]);
 	});
 
-	it('stages a write tool as a confirm_write proposal without executing it', async () => {
-		decisions.push({
-			action: 'call_tool',
-			toolId: projectWrite.id,
-			input: { taskId: 't1', dueDate: '2026-07-15' },
-			summary: 'Reschedule task t1 to 2026-07-15'
-		});
+	it('stages write tools as a confirm_write batch without executing them', async () => {
+		decisions.push(
+			{
+				action: 'call_tool',
+				toolId: projectWrite.id,
+				input: { taskId: 't1', dueDate: '2026-07-15' },
+				summary: 'Reschedule task t1 to 2026-07-15'
+			},
+			{
+				action: 'call_tool',
+				toolId: projectWrite.id,
+				input: { taskId: 't2', dueDate: '2026-07-16' },
+				summary: 'Reschedule task t2 to 2026-07-16'
+			},
+			{ action: 'final', answer: 'Prepared 2 changes.' }
+		);
 
 		const result = await runWithTools({
 			...baseInput,
-			userMessage: 'move task t1 to wednesday',
+			userMessage: 'move t1 to wed and t2 to thu',
 			tools: [projectWrite]
 		});
 
 		expect(result.status).toBe('confirm_write');
-		expect(result.write).toEqual({
-			agentId: 'project-agent',
-			capabilityId: 'project.update-task',
-			input: { taskId: 't1', dueDate: '2026-07-15' },
-			summary: 'Reschedule task t1 to 2026-07-15'
-		});
-		// The write never reached the guarded executor.
+		expect(result.writes).toEqual([
+			{
+				agentId: 'project-agent',
+				capabilityId: 'project.update-task',
+				input: { taskId: 't1', dueDate: '2026-07-15' },
+				summary: 'Reschedule task t1 to 2026-07-15'
+			},
+			{
+				agentId: 'project-agent',
+				capabilityId: 'project.update-task',
+				input: { taskId: 't2', dueDate: '2026-07-16' },
+				summary: 'Reschedule task t2 to 2026-07-16'
+			}
+		]);
+		// No write reached the guarded executor.
 		expect(execCalls).toHaveLength(0);
 	});
 

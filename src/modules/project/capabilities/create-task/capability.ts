@@ -1,4 +1,5 @@
 import { createProjectApi } from '../../api';
+import { syncTaskToBitable } from '../../task-write-through';
 import type { ProjectCapability } from '../types';
 import {
 	CreateTaskInputSchema,
@@ -24,6 +25,21 @@ export const createTaskCapability: ProjectCapability<CreateTaskInput, CreateTask
 
 	async execute(input, ctx): Promise<CreateTaskOutput> {
 		if (!ctx.moduleContext) throw new Error('project.create-task requires a module context');
-		return createProjectApi(ctx.moduleContext).createTask(input);
+		const result = await createProjectApi(ctx.moduleContext).createTask(input);
+		// Bitable write-through (B4) — best-effort, never breaks the D1 create.
+		await syncTaskToBitable(ctx.moduleContext, {
+			taskId: result.id,
+			projectId: input.projectId,
+			values: {
+				name: input.name,
+				description: input.description ?? null,
+				startDate: input.startDate ?? null,
+				endDate: input.endDate ?? null,
+				status: 'unassigned',
+				priority: input.priority ?? null
+			},
+			actorUserId: ctx.userId ?? null
+		});
+		return result;
 	}
 };

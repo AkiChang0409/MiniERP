@@ -65,8 +65,8 @@ export interface RunWithToolsInput {
 export interface RunWithToolsResult {
 	status: 'final' | 'confirm_write' | 'max_steps' | 'no_provider' | 'error';
 	answer: string;
-	/** Present when status === 'confirm_write'. */
-	write?: PendingWriteProposal;
+	/** Present when status === 'confirm_write' — the batch of writes to stage. */
+	writes?: PendingWriteProposal[];
 	steps: ToolCallTrace[];
 	error?: string;
 }
@@ -111,22 +111,24 @@ function buildSystemPrompt(tools: ToolSpec[], preamble?: string): string {
 		preamble ?? 'You are the SmartFin/MiniERP assistant, a governed cross-domain agent.',
 		'You can call the tools below to read ERP business data and to propose changes.',
 		'Work step by step: call a read tool, look at its result, and call more tools (across domains) until you can fully answer. For questions that need business data, ALWAYS call the relevant tool before answering — do not answer from memory and do not refuse authorized data that a listed tool can retrieve.',
-		'To make a change, call the matching WRITE tool with the full intended input and a clear one-line "summary". It will NOT run immediately — it is proposed to the user for confirmation. Never claim a change is done from this loop.',
+		'To make changes, call the matching WRITE tool(s) with the full intended input and a clear one-line "summary". A write is NEVER executed here — it is STAGED. You may stage several writes (call several write tools) and they are all confirmed together by the user at the end. After staging the write(s) you need, give your final answer; do NOT claim a change is already done.',
 		'',
 		'TOOLS:',
 		toolLines || '(no tools available)',
 		'',
 		'Respond with exactly ONE JSON object and nothing else:',
 		'- To call a read tool: {"action":"call_tool","toolId":"<id>","input":{...}}',
-		'- To propose a write: {"action":"call_tool","toolId":"<write-id>","input":{...},"summary":"<what will change>"}',
-		'- To give the final answer: {"action":"final","answer":"<text>"}',
-		'Rules: only call tools from the list above; never invent tool ids; do not repeat a failed call; keep the final answer concise.'
+		'- To stage a write: {"action":"call_tool","toolId":"<write-id>","input":{...},"summary":"<what will change>"}',
+		'- To finish (returns your answer + any staged writes for confirmation): {"action":"final","answer":"<text>"}',
+		'Rules: only call tools from the list above; never invent tool ids; do not repeat a call you already made; keep the final answer concise.'
 	].join('\n');
 }
 
 export async function runWithTools(input: RunWithToolsInput): Promise<RunWithToolsResult> {
 	const maxSteps = input.maxSteps ?? 6;
 	const steps: ToolCallTrace[] = [];
+	const stagedWrites: PendingWriteProposal[] = [];
+	const stagedKeys = new Set<string>();
 	const specById = new Map(input.tools.map((tool) => [tool.id, tool]));
 	const allowed = new Set(input.tools.map((tool) => tool.id));
 	const system = buildSystemPrompt(input.tools, input.systemPreamble);
@@ -163,6 +165,9 @@ export async function runWithTools(input: RunWithToolsInput): Promise<RunWithToo
 
 		const decision = decisionRes.result.value;
 		if (decision.action === 'final') {
+			if (stagedWrites.length > 0) {
+				return { status: 'confirm_write', answer: decision.answer, writes: stagedWrites, steps };
+			}
 			return { status: 'final', answer: decision.answer, steps };
 		}
 
@@ -181,20 +186,22 @@ export async function runWithTools(input: RunWithToolsInput): Promise<RunWithToo
 		const spec = specById.get(decision.toolId)!;
 		const agentId = owningAgentId(spec, input.agentId);
 
-		// Write tool → stage for confirmation, end the loop. No side effect here.
+		// Write tool → STAGE it (do not execute) and keep looping so the model can
+		// stage more writes / read more before finishing. The whole batch is
+		// returned for confirmation when the model gives its final answer.
 		if (isWriteTool(spec)) {
+			const input_ = decision.input ?? {};
+			const key = `${decision.toolId}:${JSON.stringify(input_)}`;
+			if (stagedKeys.has(key)) {
+				scratch += `\n[step ${i}] Write "${decision.toolId}" is already staged. Stage a different change or finish.`;
+				continue;
+			}
+			stagedKeys.add(key);
+			const summary = decision.summary?.trim() || decision.reason?.trim() || `Run ${decision.toolId}`;
+			stagedWrites.push({ agentId, capabilityId: decision.toolId, input: input_, summary });
 			steps.push({ step: i, toolId: decision.toolId, ok: true, status: 'staged_write' });
-			return {
-				status: 'confirm_write',
-				answer: '',
-				write: {
-					agentId,
-					capabilityId: decision.toolId,
-					input: decision.input ?? {},
-					summary: decision.summary?.trim() || decision.reason?.trim() || `Run ${decision.toolId}`
-				},
-				steps
-			};
+			scratch += `\n[step ${i}] Staged write "${decision.toolId}" (${summary}). It is NOT executed yet. Stage more changes or finish to confirm.`;
+			continue;
 		}
 
 		// Read tool → execute now, as the owning agent, through the governed runtime.
@@ -225,6 +232,15 @@ export async function runWithTools(input: RunWithToolsInput): Promise<RunWithToo
 		} else {
 			scratch += `\n[step ${i}] ${decision.toolId} failed (${exec.status}). Do not retry the same call; answer with what you have.`;
 		}
+	}
+
+	if (stagedWrites.length > 0) {
+		return {
+			status: 'confirm_write',
+			answer: 'I prepared the following change(s) for your confirmation.',
+			writes: stagedWrites,
+			steps
+		};
 	}
 
 	return {

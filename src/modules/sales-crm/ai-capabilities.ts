@@ -227,3 +227,82 @@ export const salesCrmAiCapabilities = [
 	salesCrmSearchBusinessPartnersCapability,
 	salesCrmGetBusinessPartnerCapability
 ] as const;
+
+// --- Governed WRITE capability (P2 unified write path) --------------------
+// Creates a customer Business Partner. `createSalesCrmApi(ctx).createCustomer`
+// already WRITES THROUGH to the Lark Bitable Base (source of truth), records the
+// operation in `lark_write_operations`, and upserts the D1 mirror. Exposed here
+// as an R4 write so the unified agent loop stages it → user confirms →
+// `executeGuardedCapability` runs it (policy + schema + audit). This is the
+// end-to-end proof of the Bitable write-through governed path.
+
+const CURRENCY_OPTIONS = ['SGD', 'CNY', 'HKD', 'USD', 'JPY', 'AUD', 'EUR', 'GBP', 'NZD', 'CAD'] as const;
+const PAYMENT_TERMS_OPTIONS = ['Net 30d', 'Net 60d', 'Prepaid', 'Cash on delivery'] as const;
+
+export const salesCrmCreateBusinessPartnerInputSchema = z.object({
+	name: z.string().min(1).describe('Customer / company name (required).'),
+	address: z.string().optional().describe('Street address.'),
+	country: z.string().optional(),
+	registrationNo: z.string().optional().describe('Company registration number.'),
+	gstRegNo: z.string().optional().describe('GST registration number.'),
+	currency: z.enum(CURRENCY_OPTIONS).optional().describe('Billing currency (defaults SGD).'),
+	paymentTerms: z.enum(PAYMENT_TERMS_OPTIONS).optional(),
+	email: z.string().optional().describe("The partner's main email."),
+	phone: z.string().optional().describe("The partner's main phone."),
+	itemDescription: z.string().optional(),
+	remark: z.string().optional(),
+	// Optional linked contact person.
+	contactName: z.string().optional().describe('Primary contact person name.'),
+	contactPosition: z.string().optional(),
+	contactPhone: z.string().optional(),
+	contactEmail: z.string().optional(),
+	isMainContact: z.boolean().optional()
+});
+
+export const salesCrmCreateBusinessPartnerOutputSchema = z.object({
+	id: z.string(),
+	name: z.string()
+});
+
+type SalesCrmCreateBusinessPartnerInput = z.infer<typeof salesCrmCreateBusinessPartnerInputSchema>;
+type SalesCrmCreateBusinessPartnerOutput = z.infer<typeof salesCrmCreateBusinessPartnerOutputSchema>;
+
+/** Pack the Bitable-metadata-driven fields into the `metadata` JSON the encoder reads. */
+function buildCustomerMetadata(input: SalesCrmCreateBusinessPartnerInput): string | undefined {
+	const meta: Record<string, string> = {};
+	for (const key of ['country', 'registrationNo', 'currency', 'paymentTerms', 'email', 'phone', 'itemDescription', 'remark'] as const) {
+		const value = input[key];
+		if (typeof value === 'string' && value.trim()) meta[key] = value.trim();
+	}
+	return Object.keys(meta).length > 0 ? JSON.stringify(meta) : undefined;
+}
+
+export const salesCrmCreateBusinessPartnerCapability: PlatformCapability<
+	SalesCrmCreateBusinessPartnerInput,
+	SalesCrmCreateBusinessPartnerOutput
+> = {
+	id: 'sales-crm.create-business-partner',
+	description:
+		'Create a customer Business Partner (writes through to the Lark Bitable Base + D1 mirror). Requires confirmation.',
+	riskLevel: 'R4',
+	inputSchema: salesCrmCreateBusinessPartnerInputSchema,
+
+	async execute(input, ctx): Promise<SalesCrmCreateBusinessPartnerOutput> {
+		const api = await salesCrmApi(ctx);
+		const result = await api.createCustomer({
+			name: input.name,
+			address: input.address ?? null,
+			gstRegNo: input.gstRegNo ?? null,
+			contactName: input.contactName ?? null,
+			contactPosition: input.contactPosition ?? null,
+			contactPhone: input.contactPhone ?? null,
+			contactEmail: input.contactEmail ?? null,
+			isMainContact: input.isMainContact ?? null,
+			metadata: buildCustomerMetadata(input) ?? null
+		});
+		return { id: result.id, name: input.name };
+	}
+};
+
+/** Governed write tools for the Sales-CRM agent (staged → confirmed by the loop). */
+export const salesCrmWriteCapabilities = [salesCrmCreateBusinessPartnerCapability] as const;

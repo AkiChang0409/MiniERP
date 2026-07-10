@@ -1,4 +1,5 @@
 import { createProjectApi } from '../../api';
+import { syncTaskToBitable } from '../../task-write-through';
 import type { ProjectCapability } from '../types';
 import {
 	ApplyTaskChangeSetInputSchema,
@@ -20,6 +21,14 @@ function str(value: unknown): string | undefined {
 	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
+type Priority = (typeof PRIORITIES)[number];
+/** Coerce a change-set value to a valid priority, else undefined. */
+function prio(value: unknown): Priority | undefined {
+	const s = str(value)?.toUpperCase();
+	return (PRIORITIES as readonly string[]).includes(s ?? '') ? (s as Priority) : undefined;
+}
+
 export const applyTaskChangeSetCapability: ProjectCapability<
 	ApplyTaskChangeSetInput,
 	ApplyTaskChangeSetOutput
@@ -33,7 +42,8 @@ export const applyTaskChangeSetCapability: ProjectCapability<
 
 	async execute(input, ctx): Promise<ApplyTaskChangeSetOutput> {
 		if (!ctx.moduleContext) throw new Error('project.apply-task-change-set requires a module context');
-		const api = createProjectApi(ctx.moduleContext);
+		const mc = ctx.moduleContext;
+		const api = createProjectApi(mc);
 		const applied: ApplyTaskChangeSetOutput['applied'] = [];
 
 		for (const change of input.changes) {
@@ -51,7 +61,21 @@ export const applyTaskChangeSetCapability: ProjectCapability<
 					description: str(after.description),
 					startDate: str(after.startDate) ?? null,
 					endDate: str(after.endDate) ?? null,
-					assigneeId: str(after.assigneeId) ?? str(after.assignee) ?? null
+					assigneeId: str(after.assigneeId) ?? str(after.assignee) ?? null,
+					priority: prio(after.priority) ?? null
+				});
+				await syncTaskToBitable(mc, {
+					taskId: created.id,
+					projectId: input.projectId,
+					values: {
+						name,
+						description: str(after.description) ?? null,
+						startDate: str(after.startDate) ?? null,
+						endDate: str(after.endDate) ?? null,
+						status: 'unassigned',
+						priority: prio(after.priority) ?? null
+					},
+					actorUserId: ctx.userId ?? null
 				});
 				applied.push({ action: 'create', id: created.id });
 				continue;
@@ -71,7 +95,19 @@ export const applyTaskChangeSetCapability: ProjectCapability<
 						'assigneeId' in after || 'assignee' in after
 							? (str(after.assigneeId) ?? str(after.assignee) ?? null)
 							: undefined,
+					priority: 'priority' in after ? (prio(after.priority) ?? null) : undefined,
 					rescheduleReason: change.reason
+				});
+				await syncTaskToBitable(mc, {
+					taskId,
+					projectId: input.projectId,
+					values: {
+						name: str(after.name) ?? null,
+						startDate: 'startDate' in after ? (str(after.startDate) ?? null) : null,
+						endDate: 'endDate' in after ? (str(after.endDate) ?? null) : null,
+						priority: 'priority' in after ? (prio(after.priority) ?? null) : null
+					},
+					actorUserId: ctx.userId ?? null
 				});
 				applied.push({ action: change.action, taskId });
 				continue;

@@ -32,6 +32,9 @@ type TaskStatus = (typeof TASK_STATUSES)[number];
 const TASK_KINDS = ['task', 'milestone', 'buffer'] as const;
 type TaskKind = (typeof TASK_KINDS)[number];
 
+const TASK_PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
+type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
 export interface TaskCreateInput {
 	projectId: string;
 	name: string;
@@ -58,6 +61,8 @@ export interface TaskCreateInput {
 	actualStart?: string | null;
 	/** ISO 9001 work-type classification — the QMS template matching key. */
 	taskType?: string | null;
+	/** Priority P0 (highest) … P3 — mirrors the Bitable Priority single-select. */
+	priority?: TaskPriority | null;
 }
 
 export interface TaskUpdateInput {
@@ -85,6 +90,8 @@ export interface TaskUpdateInput {
 	actualStart?: string | null;
 	/** ISO 9001 work-type classification — the QMS template matching key. */
 	taskType?: string | null;
+	/** Priority P0 (highest) … P3 — mirrors the Bitable Priority single-select. */
+	priority?: TaskPriority | null;
 	/** Not a column — captured into the schedule-change log when dates move. */
 	rescheduleReason?: string | null;
 }
@@ -283,7 +290,8 @@ export class ProjectTaskService {
 			blockedReason: input.blockedReason ?? null,
 			outsourcedPartnerId: input.outsourcedPartnerId ?? null,
 			subProjectId: input.subProjectId ?? null,
-			taskType: input.taskType ?? null
+			taskType: input.taskType ?? null,
+			priority: input.priority ?? null
 		});
 		return { id };
 	}
@@ -356,6 +364,19 @@ export class ProjectTaskService {
 		await this.assertCanEdit(projectId);
 		await this.taskRepo.softDelete(taskId);
 		return { id: taskId };
+	}
+
+	// --- Bitable write-through link (B4) ------------------------------------
+	// The linked Bitable "Tasks" record id, so an update writes through to the
+	// same record. No side effects / no permission narration — used only by the
+	// governed write-through path after the D1 write succeeds.
+	async getBitableRecordId(projectId: string, taskId: string): Promise<string | null> {
+		const row = await this.taskRepo.findInProject(projectId, taskId);
+		return row?.bitableRecordId ?? null;
+	}
+
+	async setBitableRecordId(taskId: string, recordId: string): Promise<void> {
+		await this.taskRepo.update(taskId, { bitableRecordId: recordId });
 	}
 
 	// -----------------------------------------------------------------------

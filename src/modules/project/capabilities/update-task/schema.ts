@@ -14,6 +14,7 @@ export const UpdateTaskPatchSchema = z.object({
 	estimatedHours: z.number().nullable().optional(),
 	isMilestone: z.boolean().optional(),
 	kind: z.enum(['task', 'milestone']).optional(),
+	priority: z.enum(['P0', 'P1', 'P2', 'P3']).nullable().optional(),
 	workflowStageId: z.string().nullable().optional(),
 	progressPct: z.number().nullable().optional(),
 	rescheduleReason: z.string().nullable().optional()
