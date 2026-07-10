@@ -56,6 +56,8 @@
     "OCR_IMAGE_PROVIDER": "openai",
     "OCR_PROMPT_VERSION": "v1",
     "OPENAI_VISION_MODEL": "gpt-4o",
+    // Lark OpenAPI host. Use https://open.larksuite.com for international Lark.
+    "LARK_BASE_URL": "https://open.feishu.cn",
     // OCR.space "OCR API" route (ocrStrategy=ocr_api) — the async pipeline runs
     // text extraction here, so OCR_SPACE_API_KEY must be set on THIS worker too
     // (wrangler secret put OCR_SPACE_API_KEY -c workers/wrangler.document-processor.jsonc).

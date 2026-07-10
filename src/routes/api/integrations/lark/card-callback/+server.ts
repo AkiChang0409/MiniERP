@@ -153,7 +153,7 @@ export const POST: RequestHandler = async (event) => {
 	if (kind === 'qc_confirm' || kind === 'qc_reject') {
 		const recordId = action?.record_id;
 		if (!recordId) return toast('info', '无法识别记录。');
-		const appToken = env.LARK_DOCHUB_APP_TOKEN;
+		const appToken = env.LARK_BITABLE_APP_TOKEN;
 		const tableId = env.LARK_DOCHUB_TABLE_ID;
 		if (!appToken || !tableId) return toast('error', 'Doc Hub 未配置。');
 

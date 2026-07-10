@@ -2,8 +2,8 @@
  * Lark (Feishu) Bitable (多维表格) OpenAPI client — record create / search / update.
  *
  * Reuses `getTenantAccessToken` + `larkBaseUrl` from `./client` (no SDK, global
- * `fetch`). Used by the Doc Hub / QC intake flow to write records into a Lark
- * Base from the MiniERP backend (the "external server").
+ * `fetch`). Used by Bitable-backed MiniERP flows to read/write records in the
+ * shared Lark Base from the MiniERP backend (the "external server").
  *
  * IMPORTANT: the app (`LARK_APP_ID`) must be added as an editor/manager
  * collaborator on the target Base, otherwise reads return empty and writes fail.
@@ -60,12 +60,21 @@ async function bitableCall<T>(env: Env, path: string, init: RequestInit): Promis
 	return data.data as T;
 }
 
-/** Resolve the Doc Hub Base target from env; throws if not configured. */
+/** Resolve the shared Bitable Base app_token from env; throws if not configured. */
+export function larkBitableAppToken(env: Env): string {
+	const appToken = env.LARK_BITABLE_APP_TOKEN;
+	if (!appToken) {
+		throw new Error('LARK_BITABLE_APP_TOKEN is not configured');
+	}
+	return appToken;
+}
+
+/** Resolve the Doc Hub table target from env; throws if not configured. */
 export function larkDocHubTarget(env: Env): { appToken: string; tableId: string } {
-	const appToken = env.LARK_DOCHUB_APP_TOKEN;
+	const appToken = larkBitableAppToken(env);
 	const tableId = env.LARK_DOCHUB_TABLE_ID;
-	if (!appToken || !tableId) {
-		throw new Error('LARK_DOCHUB_APP_TOKEN / LARK_DOCHUB_TABLE_ID are not configured');
+	if (!tableId) {
+		throw new Error('LARK_BITABLE_APP_TOKEN / LARK_DOCHUB_TABLE_ID are not configured');
 	}
 	return { appToken, tableId };
 }

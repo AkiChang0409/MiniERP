@@ -5,8 +5,7 @@
  * (only a title field) — skipped by "sync all" until fields are built.
  *
  * The Base app_token is one for the whole Base; it comes from env
- * (`LARK_BITABLE_APP_TOKEN`, falling back to the already-deployed
- * `LARK_DOCHUB_APP_TOKEN` which points at the same Base).
+ * (`LARK_BITABLE_APP_TOKEN`). It is a Base identifier, not the Lark app secret.
  */
 export interface BitableTableDef {
 	tableId: string;
@@ -46,9 +45,9 @@ export const BITABLE_TABLES: readonly BitableTableDef[] = [
 ];
 
 export function bitableAppToken(env: Env): string {
-	const token = env.LARK_BITABLE_APP_TOKEN || env.LARK_DOCHUB_APP_TOKEN;
+	const token = env.LARK_BITABLE_APP_TOKEN;
 	if (!token) {
-		throw new Error('LARK_BITABLE_APP_TOKEN / LARK_DOCHUB_APP_TOKEN are not configured');
+		throw new Error('LARK_BITABLE_APP_TOKEN is not configured');
 	}
 	return token;
 }

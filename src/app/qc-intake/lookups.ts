@@ -6,11 +6,11 @@
  * `record_id` (which the signed token carries and which the Doc Hub link fields
  * are written with); labels come from the display fields.
  *
- * All three tables share one Base → the app_token is `LARK_DOCHUB_APP_TOKEN`;
+ * All three tables share one Base → the app_token is `LARK_BITABLE_APP_TOKEN`;
  * each table has its own table_id env.
  */
 
-import { bitableSearchRecords } from '$platform/integrations/lark/bitable';
+import { bitableSearchRecords, larkBitableAppToken } from '$platform/integrations/lark/bitable';
 
 /** Flatten a Bitable cell value (text fields come back as strings or segment arrays). */
 function cellText(v: unknown): string {
@@ -28,9 +28,7 @@ function cellText(v: unknown): string {
 }
 
 function baseAppToken(env: Env): string {
-	const token = env.LARK_DOCHUB_APP_TOKEN;
-	if (!token) throw new Error('LARK_DOCHUB_APP_TOKEN is not configured');
-	return token;
+	return larkBitableAppToken(env);
 }
 
 export interface ProjectOption {

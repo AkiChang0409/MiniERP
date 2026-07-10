@@ -62,16 +62,17 @@ declare global {
 		/** Optional: API base. Default https://open.feishu.cn; international Lark = https://open.larksuite.com */
 		LARK_BASE_URL?: string;
 		/**
-		 * Lark Bitable (多维表格) target for the Doc Hub record store. The app
+		 * Lark Bitable (多维表格) Doc Hub table target. The app
 		 * (LARK_APP_ID) must be added as an editor/manager collaborator on this
 		 * Base, otherwise record read/write returns empty / permission errors.
-		 * app_token + table_id come from the Base URL (feishu.cn/base/<app_token>?table=<table_id>).
+		 * The shared Base app_token is LARK_BITABLE_APP_TOKEN; this is only the
+		 * Doc Hub table_id from the Base URL.
 		 */
-		LARK_DOCHUB_APP_TOKEN?: string;
 		LARK_DOCHUB_TABLE_ID?: string;
 		/**
 		 * Base app_token for the Bitable-as-source-of-truth sync (all 25 tables
-		 * live in one Base). Falls back to LARK_DOCHUB_APP_TOKEN (same Base).
+		 * live in one Base). This is a Base id from the Bitable URL, not
+		 * LARK_APP_SECRET.
 		 */
 		LARK_BITABLE_APP_TOKEN?: string;
 		/**
@@ -82,7 +83,7 @@ declare global {
 		LARK_BP_TABLE_ID?: string;
 		/** Contact Person table id linked from Business Partner.Contact Person. */
 		LARK_BP_CONTACT_TABLE_ID?: string;
-		/** Projects + Business Partner tables live in the same Base (share LARK_DOCHUB_APP_TOKEN). */
+		/** Projects + Business Partner tables live in the same Bitable Base. */
 		LARK_PROJECT_TABLE_ID?: string;
 		LARK_SUPPLIER_TABLE_ID?: string;
 		/** Classification dictionary table (Secondary Category → Primary Category), same Base. */

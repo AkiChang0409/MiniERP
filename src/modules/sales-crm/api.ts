@@ -5,9 +5,9 @@ import { BitableCustomerRepository } from './customer-source';
 export type SalesCrmApi = ReturnType<typeof createSalesCrmApi>;
 
 function bitableAppToken(env: Env): string {
-	const token = env.LARK_BITABLE_APP_TOKEN || env.LARK_DOCHUB_APP_TOKEN;
+	const token = env.LARK_BITABLE_APP_TOKEN;
 	if (!token) {
-		throw new Error('LARK_BITABLE_APP_TOKEN / LARK_DOCHUB_APP_TOKEN are required for Sales CRM Lark writes.');
+		throw new Error('LARK_BITABLE_APP_TOKEN is required for Sales CRM Lark writes.');
 	}
 	return token;
 }

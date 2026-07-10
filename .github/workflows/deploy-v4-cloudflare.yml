@@ -113,30 +113,7 @@ jobs:
             printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET
             printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET --config workers/wrangler.document-processor.jsonc
           fi
-          # Optional API base — set only for international Lark (open.larksuite.com);
-          # leave unset to default to open.feishu.cn.
-          if [ -n "${LARK_BASE_URL:-}" ]; then
-            printf '%s' "$LARK_BASE_URL" | npx wrangler secret put LARK_BASE_URL
-            printf '%s' "$LARK_BASE_URL" | npx wrangler secret put LARK_BASE_URL --config workers/wrangler.document-processor.jsonc
-          fi
-
-          # QC intake (Doc Hub in Lark Bitable): Base target (app_token + table_ids),
-          # signed upload-token secret, and the monitored reply inbox. App worker only.
-          if [ -n "${LARK_DOCHUB_APP_TOKEN:-}" ]; then
-            printf '%s' "$LARK_DOCHUB_APP_TOKEN" | npx wrangler secret put LARK_DOCHUB_APP_TOKEN
-          fi
-          if [ -n "${LARK_DOCHUB_TABLE_ID:-}" ]; then
-            printf '%s' "$LARK_DOCHUB_TABLE_ID" | npx wrangler secret put LARK_DOCHUB_TABLE_ID
-          fi
-          if [ -n "${LARK_PROJECT_TABLE_ID:-}" ]; then
-            printf '%s' "$LARK_PROJECT_TABLE_ID" | npx wrangler secret put LARK_PROJECT_TABLE_ID
-          fi
-          if [ -n "${LARK_SUPPLIER_TABLE_ID:-}" ]; then
-            printf '%s' "$LARK_SUPPLIER_TABLE_ID" | npx wrangler secret put LARK_SUPPLIER_TABLE_ID
-          fi
-          if [ -n "${LARK_DICT_TABLE_ID:-}" ]; then
-            printf '%s' "$LARK_DICT_TABLE_ID" | npx wrangler secret put LARK_DICT_TABLE_ID
-          fi
+          # QC intake secrets. Fixed DocHub/QC Base/table ids live in wrangler.jsonc vars.
           if [ -n "${QC_TOKEN_SECRET:-}" ]; then
             printf '%s' "$QC_TOKEN_SECRET" | npx wrangler secret put QC_TOKEN_SECRET
           fi
@@ -154,12 +131,6 @@ jobs:
           LARK_VERIFICATION_TOKEN: ${{ secrets.LARK_VERIFICATION_TOKEN }}
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
-          LARK_BASE_URL: ${{ secrets.LARK_BASE_URL }}
-          LARK_DOCHUB_APP_TOKEN: ${{ secrets.LARK_DOCHUB_APP_TOKEN }}
-          LARK_DOCHUB_TABLE_ID: ${{ secrets.LARK_DOCHUB_TABLE_ID }}
-          LARK_PROJECT_TABLE_ID: ${{ secrets.LARK_PROJECT_TABLE_ID }}
-          LARK_SUPPLIER_TABLE_ID: ${{ secrets.LARK_SUPPLIER_TABLE_ID }}
-          LARK_DICT_TABLE_ID: ${{ secrets.LARK_DICT_TABLE_ID }}
           QC_TOKEN_SECRET: ${{ secrets.QC_TOKEN_SECRET }}
           QC_INBOX_EMAIL: ${{ secrets.QC_INBOX_EMAIL }}
 

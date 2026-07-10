@@ -16,6 +16,7 @@ import {
 	bitableListFieldNames,
 	bitableUpdateRecord,
 	bitableUploadMedia,
+	larkBitableAppToken,
 	type BitableFields
 } from '$platform/integrations/lark/bitable';
 import { sendInteractiveCard } from '$platform/integrations/lark/client';
@@ -44,11 +45,11 @@ export async function receiveQcUpload(
 	const ids = await verifyQcToken(env, args.token);
 	if (!ids) return { ok: false, reason: 'invalid_token' };
 
-	const appToken = env.LARK_DOCHUB_APP_TOKEN;
 	const tableId = env.LARK_DOCHUB_TABLE_ID;
-	if (!appToken || !tableId) {
+	if (!env.LARK_BITABLE_APP_TOKEN || !tableId) {
 		return { ok: false, reason: 'not_configured', message: 'Doc Hub Base is not configured' };
 	}
+	const appToken = larkBitableAppToken(env);
 
 	try {
 		const fileToken = await bitableUploadMedia(env, {
@@ -150,7 +151,7 @@ async function notifyPmForReview(
 	args: { recordId: string; projectId: string; supplierId: string; fileName: string }
 ): Promise<void> {
 	try {
-		const appToken = env.LARK_DOCHUB_APP_TOKEN;
+		const appToken = env.LARK_BITABLE_APP_TOKEN;
 		const projectTable = env.LARK_PROJECT_TABLE_ID;
 		if (!appToken || !projectTable) return;
 

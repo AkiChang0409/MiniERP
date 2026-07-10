@@ -11,12 +11,12 @@ describe('createSalesCrmApi', () => {
 		).toThrow(/LARK_BP_TABLE_ID is required/);
 	});
 
-	it('fails fast when the Lark Base app token is not configured', () => {
+	it('fails fast when the Bitable Base app token is not configured', () => {
 		expect(() =>
 			createSalesCrmApi({
 				db: {},
 				env: { LARK_BP_TABLE_ID: 'bp_table' }
 			} as never)
-		).toThrow(/LARK_BITABLE_APP_TOKEN/);
+		).toThrow(/LARK_BITABLE_APP_TOKEN is required/);
 	});
 });

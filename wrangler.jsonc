@@ -59,12 +59,16 @@
     "OCR_IMAGE_PROVIDER": "openai",
     "OCR_PROMPT_VERSION": "v1",
     "OPENAI_VISION_MODEL": "gpt-4o",
-    // Bitable-as-source-of-truth Base app_token (not a secret — it's in Base URLs).
+    // Lark OpenAPI host. Use https://open.larksuite.com for international Lark.
+    "LARK_BASE_URL": "https://open.larksuite.com",
     "LARK_BITABLE_APP_TOKEN": "HO6ebX2araSa7Xsw2Rrj17DYpsd",
-    // Business Partner table id — set = sales-crm reads customers from Bitable mirror (B5).
     "LARK_BP_TABLE_ID": "tblsYri9cgxgfYrB",
-    // Contact Person table id linked from Business Partner.Contact Person.
     "LARK_BP_CONTACT_TABLE_ID": "tblZcoJ7hVTWVk1b",
+    // Legacy DocHub/QC table ids in the shared Bitable Base.
+    "LARK_DOCHUB_TABLE_ID": "tblQ4XMPWLVALfrF",
+    "LARK_PROJECT_TABLE_ID": "tblQzG5SD2URlzs6",
+    "LARK_SUPPLIER_TABLE_ID": "tblsYri9cgxgfYrB",
+    "LARK_DICT_TABLE_ID": "tblJcL3sRLYqhX7G",
     // OCR.space "OCR API" route (ocrStrategy=ocr_api). Engine 3 = auto-language LSTM.
     "OCR_SPACE_ENGINE": "3"
     // OPENAI_API_KEY: set via wrangler secret / .dev.vars — do not commit here
@@ -135,6 +139,12 @@
         "OCR_IMAGE_PROVIDER": "openai",
         "OCR_PROMPT_VERSION": "v1",
         "OPENAI_VISION_MODEL": "gpt-4o",
+        // Lark OpenAPI host. Use https://open.larksuite.com for international Lark.
+        "LARK_BASE_URL": "https://open.feishu.cn",
+        // Bitable-as-source-of-truth Base/table ids. These are identifiers, not secrets.
+        "LARK_BITABLE_APP_TOKEN": "HO6ebX2araSa7Xsw2Rrj17DYpsd",
+        "LARK_BP_TABLE_ID": "tblsYri9cgxgfYrB",
+        "LARK_BP_CONTACT_TABLE_ID": "tblZcoJ7hVTWVk1b",
         // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
         "OCR_SPACE_ENGINE": "3"
       },
@@ -204,6 +214,12 @@
         "OCR_IMAGE_PROVIDER": "openai",
         "OCR_PROMPT_VERSION": "v1",
         "OPENAI_VISION_MODEL": "gpt-4o",
+        // Lark OpenAPI host. Use https://open.larksuite.com for international Lark.
+        "LARK_BASE_URL": "https://open.feishu.cn",
+        // Bitable-as-source-of-truth Base/table ids. These are identifiers, not secrets.
+        "LARK_BITABLE_APP_TOKEN": "HO6ebX2araSa7Xsw2Rrj17DYpsd",
+        "LARK_BP_TABLE_ID": "tblsYri9cgxgfYrB",
+        "LARK_BP_CONTACT_TABLE_ID": "tblZcoJ7hVTWVk1b",
         // OCR.space "OCR API" route. OCR_SPACE_API_KEY set via wrangler secret.
         "OCR_SPACE_ENGINE": "3",
 
