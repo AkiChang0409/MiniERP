@@ -1,5 +1,5 @@
 import { createProjectApi } from '../../api';
-import { syncTaskToBitable } from '../../task-write-through';
+import { writeTaskToBitable } from '../../task-write-through';
 import type { ProjectCapability } from '../types';
 import {
 	ApplyTaskChangeSetInputSchema,
@@ -55,18 +55,9 @@ export const applyTaskChangeSetCapability: ProjectCapability<
 					applied.push({ action: 'create', skipped: true });
 					continue;
 				}
-				const created = await api.createTask({
-					projectId: input.projectId,
-					name,
-					description: str(after.description),
-					startDate: str(after.startDate) ?? null,
-					endDate: str(after.endDate) ?? null,
-					assigneeId: str(after.assigneeId) ?? str(after.assignee) ?? null,
-					priority: prio(after.priority) ?? null
-				});
-				await syncTaskToBitable(mc, {
-					taskId: created.id,
-					projectId: input.projectId,
+				// Bitable-first (source of truth) + best-effort D1 mirror.
+				const wt = await writeTaskToBitable(mc, {
+					projectRef: input.projectId,
 					values: {
 						name,
 						description: str(after.description) ?? null,
@@ -77,7 +68,24 @@ export const applyTaskChangeSetCapability: ProjectCapability<
 					},
 					actorUserId: ctx.userId ?? null
 				});
-				applied.push({ action: 'create', id: created.id });
+				let d1Id: string | null = null;
+				try {
+					const r = await api.createTask({
+						projectId: input.projectId,
+						name,
+						description: str(after.description),
+						startDate: str(after.startDate) ?? null,
+						endDate: str(after.endDate) ?? null,
+						assigneeId: str(after.assigneeId) ?? str(after.assignee) ?? null,
+						priority: prio(after.priority) ?? null
+					});
+					d1Id = r.id;
+					if (wt.recordId) await api.setTaskBitableRecordId(r.id, wt.recordId);
+				} catch {
+					/* project not in D1 — Bitable is the source of truth */
+				}
+				const newId = d1Id ?? wt.recordId;
+				applied.push(newId ? { action: 'create', id: newId } : { action: 'create', skipped: true });
 				continue;
 			}
 
@@ -87,28 +95,36 @@ export const applyTaskChangeSetCapability: ProjectCapability<
 					applied.push({ action: change.action, skipped: true });
 					continue;
 				}
-				await api.updateTask(taskId, input.projectId, {
-					name: str(after.name),
-					startDate: 'startDate' in after ? (str(after.startDate) ?? null) : undefined,
-					endDate: 'endDate' in after ? (str(after.endDate) ?? null) : undefined,
-					assigneeId:
-						'assigneeId' in after || 'assignee' in after
-							? (str(after.assigneeId) ?? str(after.assignee) ?? null)
-							: undefined,
-					priority: 'priority' in after ? (prio(after.priority) ?? null) : undefined,
-					rescheduleReason: change.reason
-				});
-				await syncTaskToBitable(mc, {
-					taskId,
-					projectId: input.projectId,
-					values: {
-						name: str(after.name) ?? null,
-						startDate: 'startDate' in after ? (str(after.startDate) ?? null) : null,
-						endDate: 'endDate' in after ? (str(after.endDate) ?? null) : null,
-						priority: 'priority' in after ? (prio(after.priority) ?? null) : null
-					},
-					actorUserId: ctx.userId ?? null
-				});
+				let recId: string | null = /^rec[A-Za-z0-9]+$/.test(taskId) ? taskId : null;
+				try {
+					await api.updateTask(taskId, input.projectId, {
+						name: str(after.name),
+						startDate: 'startDate' in after ? (str(after.startDate) ?? null) : undefined,
+						endDate: 'endDate' in after ? (str(after.endDate) ?? null) : undefined,
+						assigneeId:
+							'assigneeId' in after || 'assignee' in after
+								? (str(after.assigneeId) ?? str(after.assignee) ?? null)
+								: undefined,
+						priority: 'priority' in after ? (prio(after.priority) ?? null) : undefined,
+						rescheduleReason: change.reason
+					});
+					if (!recId) recId = await api.getTaskBitableRecordId(input.projectId, taskId);
+				} catch {
+					/* not a D1-native task — taskId is a Bitable record id */
+				}
+				if (recId) {
+					await writeTaskToBitable(mc, {
+						recordId: recId,
+						projectRef: input.projectId,
+						values: {
+							name: str(after.name) ?? null,
+							startDate: 'startDate' in after ? (str(after.startDate) ?? null) : null,
+							endDate: 'endDate' in after ? (str(after.endDate) ?? null) : null,
+							priority: 'priority' in after ? (prio(after.priority) ?? null) : null
+						},
+						actorUserId: ctx.userId ?? null
+					});
+				}
 				applied.push({ action: change.action, taskId });
 				continue;
 			}

@@ -1,17 +1,17 @@
 /**
- * Project task → Lark Bitable write-through (B4, the write-through template).
+ * Project task → Lark Bitable write path (B4).
  *
- * After a governed task write commits to D1, this mirrors it to the Bitable
- * "Tasks" table (source of truth), records the operation in
- * `lark_write_operations`, and upserts the D1 read mirror — the same 3-phase
- * pattern sales-crm uses for customers. Design choice: tasks stay D1-primary
- * (the scheduling/gantt/dependency engine is D1-native), and we DUAL-WRITE
- * through to Bitable so the Base stays the shared source of truth.
+ * Because projects/tasks live in the Lark Base (source of truth) while the D1
+ * `project_tasks` engine only holds D1-native projects, the governed AI task
+ * writes are **Bitable-first**: the task is created/updated in the Bitable Tasks
+ * table (linked to the Bitable Projects record), recorded in
+ * `lark_write_operations`, and mirrored into D1 `bitable_records`. The legacy D1
+ * `project_tasks` row is a best-effort side write (only succeeds for D1-native
+ * projects); it never blocks the Bitable write.
  *
- * Best-effort by contract: the D1 write already succeeded, so any Bitable/Lark
- * failure here is caught, logged (`status:'failed'`), and swallowed — it never
- * breaks the user's task operation. When write-through is not configured
- * (no app token), it is a no-op.
+ * The 3-phase pattern (Bitable → audit → mirror) matches sales-crm's customer
+ * write-through. Never throws for a Lark/API error — failures are logged and
+ * returned so the caller can surface a useful message.
  */
 import type { ModuleContext } from '$platform/modules/types';
 import {
@@ -46,19 +46,28 @@ function resolveConfig(env: Env): WriteThroughConfig | null {
 	};
 }
 
+/** Lark Bitable record ids start with `rec`. */
+function isBitableRecordId(value: string): boolean {
+	return /^rec[A-Za-z0-9]+$/.test(value);
+}
+
 /**
- * Map a D1 projectId to its Bitable Projects record id by matching the project's
- * name against the projects mirror. Best-effort: returns undefined when unknown
- * (the task is still written, just without the project link).
+ * Resolve the Bitable Projects record id for a project reference. If the
+ * reference already is a Bitable record id (the AI read it from the mirror via
+ * `project.list-projects`), use it directly; otherwise treat it as a D1 project
+ * id and match the project's name against the projects mirror. undefined → the
+ * task is still written, just without the project link.
  */
 async function resolveProjectRecordId(
 	mc: ModuleContext,
 	cfg: WriteThroughConfig,
-	projectId: string
+	projectRef: string
 ): Promise<string | undefined> {
+	if (isBitableRecordId(projectRef)) return projectRef;
+
 	let projectName: string | null = null;
 	try {
-		const project = await createProjectApi(mc).getById(projectId);
+		const project = await createProjectApi(mc).getById(projectRef);
 		projectName = project?.name ?? null;
 	} catch {
 		return undefined;
@@ -76,10 +85,19 @@ async function resolveProjectRecordId(
 	return undefined;
 }
 
-async function logFailure(
+async function logOperation(
 	mc: ModuleContext,
 	cfg: WriteThroughConfig,
-	args: { recordId?: string | null; operation: string; sourceAction: string; payload: unknown; error: unknown; actorUserId?: string | null }
+	args: {
+		recordId?: string | null;
+		operation: string;
+		status: 'success' | 'failed';
+		sourceAction: string;
+		payload: unknown;
+		result?: unknown;
+		error?: unknown;
+		actorUserId?: string | null;
+	}
 ): Promise<void> {
 	try {
 		await recordLarkWriteOperation(mc.db, {
@@ -88,128 +106,120 @@ async function logFailure(
 			tableName: TASKS_TABLE_NAME,
 			recordId: args.recordId ?? null,
 			operation: args.operation,
-			status: 'failed',
+			status: args.status,
 			payload: args.payload,
-			error: args.error instanceof Error ? args.error.message : String(args.error),
+			result: args.result,
+			error: args.error ? (args.error instanceof Error ? args.error.message : String(args.error)) : null,
 			sourceModule: 'project',
 			sourceAction: args.sourceAction,
 			actorUserId: args.actorUserId ?? null
 		});
 	} catch {
-		/* logging is best-effort too — never throw from the write-through */
+		/* logging is best-effort too — never throw from the write path */
 	}
 }
 
-async function persistSuccess(
-	mc: ModuleContext,
-	cfg: WriteThroughConfig,
-	args: { record: BitableRecord; operation: string; sourceAction: string; payload: unknown; actorUserId?: string | null }
-): Promise<void> {
-	await recordLarkWriteOperation(mc.db, {
-		appToken: cfg.appToken,
-		tableId: cfg.tableId,
-		tableName: TASKS_TABLE_NAME,
-		recordId: args.record.record_id,
-		operation: args.operation,
-		status: 'success',
-		payload: args.payload,
-		result: args.record,
-		sourceModule: 'project',
-		sourceAction: args.sourceAction,
-		actorUserId: args.actorUserId ?? null
-	});
+async function mirror(mc: ModuleContext, cfg: WriteThroughConfig, record: BitableRecord): Promise<void> {
 	await upsertBitableMirrorRecord(mc.db, {
 		appToken: cfg.appToken,
 		tableId: cfg.tableId,
 		tableName: TASKS_TABLE_NAME,
-		record: args.record
+		record
 	});
 }
 
-export interface SyncTaskArgs {
-	taskId: string;
-	projectId: string;
+export interface WriteTaskArgs {
+	/** Bitable Tasks record id to update; omit to create a new record. */
+	recordId?: string | null;
+	/** Bitable project record id OR a D1 project id (resolved to the record). */
+	projectRef: string;
 	values: TaskWriteValues;
 	actorUserId?: string | null;
 }
 
-/**
- * Write a task through to Bitable. Creates the linked record on first write
- * (persisting its id back to D1) and updates the same record thereafter.
- * Never throws — see file header.
- */
-export async function syncTaskToBitable(mc: ModuleContext, args: SyncTaskArgs): Promise<void> {
-	const cfg = resolveConfig(mc.env);
-	if (!cfg) return;
+export interface WriteTaskResult {
+	recordId: string | null;
+	error?: string;
+}
 
+/**
+ * Create or update a task in the Bitable Tasks table (source of truth). Returns
+ * the Bitable record id (the AI task's identity). Best-effort: on a Lark error
+ * it logs + returns `{ recordId: existing ?? null, error }` instead of throwing.
+ */
+export async function writeTaskToBitable(mc: ModuleContext, args: WriteTaskArgs): Promise<WriteTaskResult> {
+	const cfg = resolveConfig(mc.env);
+	if (!cfg) return { recordId: args.recordId ?? null, error: 'bitable_not_configured' };
+
+	let fields: Record<string, unknown>;
 	try {
 		const resolved = await resolveTaskFields(mc.env, cfg.appToken, cfg.tableId);
-		const projectRecordId = await resolveProjectRecordId(mc, cfg, args.projectId);
-		const fields = encodeTaskFields(resolved, args.values, projectRecordId);
-		if (Object.keys(fields).length === 0) return; // nothing mappable to write
-
-		const api = createProjectApi(mc);
-		const existingRecordId = await api.getTaskBitableRecordId(args.projectId, args.taskId);
-
-		if (existingRecordId) {
-			try {
-				const record = await bitableUpdateRecord(mc.env, {
-					appToken: cfg.appToken,
-					tableId: cfg.tableId,
-					recordId: existingRecordId,
-					fields
-				});
-				await persistSuccess(mc, cfg, {
-					record,
-					operation: 'update_record',
-					sourceAction: 'updateTask',
-					payload: { fields },
-					actorUserId: args.actorUserId
-				});
-			} catch (error) {
-				await logFailure(mc, cfg, {
-					recordId: existingRecordId,
-					operation: 'update_record',
-					sourceAction: 'updateTask',
-					payload: { fields },
-					error,
-					actorUserId: args.actorUserId
-				});
-			}
-			return;
-		}
-
-		try {
-			const record = await bitableCreateRecord(mc.env, {
-				appToken: cfg.appToken,
-				tableId: cfg.tableId,
-				fields
-			});
-			await api.setTaskBitableRecordId(args.taskId, record.record_id);
-			await persistSuccess(mc, cfg, {
-				record,
-				operation: 'create_record',
-				sourceAction: 'createTask',
-				payload: { fields },
-				actorUserId: args.actorUserId
-			});
-		} catch (error) {
-			await logFailure(mc, cfg, {
-				operation: 'create_record',
-				sourceAction: 'createTask',
-				payload: { fields },
-				error,
-				actorUserId: args.actorUserId
-			});
-		}
+		const projectRecordId = await resolveProjectRecordId(mc, cfg, args.projectRef);
+		fields = encodeTaskFields(resolved, args.values, projectRecordId);
 	} catch (error) {
-		// Resolution / project-link / field-fetch failure — log once, swallow.
-		await logFailure(mc, cfg, {
-			operation: 'write_through',
-			sourceAction: 'syncTaskToBitable',
-			payload: { taskId: args.taskId, projectId: args.projectId },
+		await logOperation(mc, cfg, {
+			recordId: args.recordId ?? null,
+			operation: 'encode',
+			status: 'failed',
+			sourceAction: 'writeTaskToBitable',
+			payload: { projectRef: args.projectRef, values: args.values },
 			error,
 			actorUserId: args.actorUserId
 		});
+		return { recordId: args.recordId ?? null, error: error instanceof Error ? error.message : String(error) };
+	}
+
+	if (Object.keys(fields).length === 0) {
+		return { recordId: args.recordId ?? null, error: 'no_mappable_fields' };
+	}
+
+	try {
+		if (args.recordId) {
+			const record = await bitableUpdateRecord(mc.env, {
+				appToken: cfg.appToken,
+				tableId: cfg.tableId,
+				recordId: args.recordId,
+				fields
+			});
+			await logOperation(mc, cfg, {
+				recordId: record.record_id,
+				operation: 'update_record',
+				status: 'success',
+				sourceAction: 'updateTask',
+				payload: { fields },
+				result: record,
+				actorUserId: args.actorUserId
+			});
+			await mirror(mc, cfg, record);
+			return { recordId: record.record_id };
+		}
+
+		const record = await bitableCreateRecord(mc.env, {
+			appToken: cfg.appToken,
+			tableId: cfg.tableId,
+			fields
+		});
+		await logOperation(mc, cfg, {
+			recordId: record.record_id,
+			operation: 'create_record',
+			status: 'success',
+			sourceAction: 'createTask',
+			payload: { fields },
+			result: record,
+			actorUserId: args.actorUserId
+		});
+		await mirror(mc, cfg, record);
+		return { recordId: record.record_id };
+	} catch (error) {
+		await logOperation(mc, cfg, {
+			recordId: args.recordId ?? null,
+			operation: args.recordId ? 'update_record' : 'create_record',
+			status: 'failed',
+			sourceAction: args.recordId ? 'updateTask' : 'createTask',
+			payload: { fields },
+			error,
+			actorUserId: args.actorUserId
+		});
+		return { recordId: args.recordId ?? null, error: error instanceof Error ? error.message : String(error) };
 	}
 }
