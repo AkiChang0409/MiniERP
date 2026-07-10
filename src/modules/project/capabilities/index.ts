@@ -1,5 +1,4 @@
 import { answerQuestionCapability } from './answer-question';
-import { answerProjectPortfolioCapability } from './answer';
 import { applyTaskChangeSetCapability } from './apply-task-change-set';
 import { createTaskCapability } from './create-task';
 import { detectScheduleConflictsCapability } from './detect-schedule-conflicts';
@@ -52,7 +51,6 @@ export const projectCapabilities = [
 	generatePlanCapability,
 	summarizeDashboardCapability,
 	answerQuestionCapability,
-	answerProjectPortfolioCapability,
 	extractTasksCapability,
 	draftMeetingAgendaCapability,
 	processMeetingNotesCapability,

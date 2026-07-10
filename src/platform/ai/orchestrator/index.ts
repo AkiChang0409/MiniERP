@@ -56,11 +56,12 @@ export {
 } from './entity-resolver';
 export {
 	runWithTools,
-	listReadOnlyToolSpecs,
 	type RunWithToolsInput,
 	type RunWithToolsResult,
+	type PendingWriteProposal,
 	type ToolCallTrace
 } from './run-with-tools';
+export { buildAgentToolCatalog } from './tool-catalog';
 export {
 	getConversationState,
 	saveConversationState,

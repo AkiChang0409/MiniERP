@@ -44,8 +44,18 @@ export const projectAgentAllowedCapabilities: ProjectCapabilityPolicyEntry[] = [
 		requiresConfirmation: false,
 		requiredUserPermissions: ['project:view']
 	},
+	// Raw data read tools (unified-agent refactor): plain Bitable-mirror reads
+	// the unified loop composes answers from. These replaced the inner-LLM
+	// `project.answer` portfolio Q&A (removed — it returned invalid_output).
 	{
-		id: 'project.answer',
+		id: 'project.list-projects',
+		riskLevel: 'R1',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:view']
+	},
+	{
+		id: 'project.get-project',
 		riskLevel: 'R1',
 		sideEffect: 'read',
 		requiresConfirmation: false,

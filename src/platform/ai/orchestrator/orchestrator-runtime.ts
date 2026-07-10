@@ -2,39 +2,43 @@
  * Unified orchestrator runtime entry point. One channel-agnostic function every
  * adapter calls: `handleMessage(InboundAgentMessage)`.
  *
- * Responsibilities (design §6): normalize is done by the adapter; here we build
- * minimal context, resolve identity, route to a domain agent, and return a
- * channel-appropriate result. The orchestrator never performs business logic,
- * never touches repositories, and never bypasses policy/confirmation/audit.
+ * Pipeline (unified-agent refactor):
+ *   1. Build minimal runtime context (user / roles / route hints).
+ *   2. Resolve identity (must succeed before anything runs).
+ *   3. CONFIRM/CANCEL FIRST — an affirmative reply resumes a staged write via the
+ *      governed runtime, instead of being re-interpreted as a new request.
+ *   4. UNIFIED AGENT LOOP — assemble the user's full cross-domain tool catalog
+ *      (reads + writes, filtered by role) and run the governed ReAct loop
+ *      (`runWithTools`): reads execute now, writes come back as a `confirm_write`
+ *      proposal we stage for confirmation.
+ *   5. Render answer / confirmation / error.
  *
- * Phase 3 scope: read-only routing only — it reports which agent/intent a
- * message resolves to. The dynamic tool loop (`runWithTools`) that actually
- * executes capabilities lands in plan Phase 5.
+ * The orchestrator performs no business logic and never bypasses
+ * policy/confirmation/audit — every tool call inside the loop and every
+ * confirmed write goes through `executeGuardedCapability`. Governance lives at
+ * each tool call, not in a single super-agent gate; domains are reduced to
+ * "capability packages + permissions" the loop composes across.
  */
 import type { ModuleContext } from '../../modules/types';
 import type { PlatformRiskLevel } from '../capability-registry';
+import { lookupCapability } from '../capability-registry';
 import { executeGuardedCapability } from '../execute-capability';
 import { buildRuntimeContext } from './context-builder';
-import { routeMessage } from './agent-router';
-import { llmRouteMessage } from './llm-router';
 import { lookupAgent } from './agent-registry';
-import { lookupEntityResolver, resolveEntities } from './entity-resolver';
 import {
 	clearConversationState,
 	consumePendingConfirmation,
 	getConversationState,
 	setPendingConfirmation
 } from './conversation-state';
-import { listReadOnlyToolSpecs, runWithTools } from './run-with-tools';
+import { runWithTools } from './run-with-tools';
+import { buildAgentToolCatalog } from './tool-catalog';
 import type {
 	ContextProvider,
 	DomainAgentPlugin,
 	InboundAgentMessage,
 	OrchestratorResult
 } from './contracts';
-
-/** Intent risk levels that may run the read-only dynamic tool loop. */
-const READ_RISK: ReadonlySet<PlatformRiskLevel> = new Set<PlatformRiskLevel>(['R0', 'R1', 'R2']);
 
 /** Natural-language confirm / cancel fallbacks (structured actionId is primary). */
 const AFFIRM = /^(confirm|yes|ok(ay)?|y|确认|确定|好的?|同意|是的?)\s*$/i;
@@ -71,7 +75,7 @@ function confirmFailMessage(reason: 'none_pending' | 'expired' | 'hash_mismatch'
 
 export interface OrchestratorRuntimeOptions {
 	contextProviders?: readonly ContextProvider[];
-	/** Request-scoped module context so entity resolvers can call module apis. */
+	/** Request-scoped module context so the loop can read/write module data. */
 	moduleContext?: ModuleContext;
 }
 
@@ -81,7 +85,7 @@ export async function handleMessage(
 ): Promise<OrchestratorResult> {
 	const context = await buildRuntimeContext(message, options.contextProviders ?? []);
 
-	// Identity must be resolved before routing (acceptance criterion §17.2).
+	// Identity must be resolved before anything runs (acceptance criterion §17.2).
 	if (!message.userId) {
 		return {
 			kind: 'denied',
@@ -92,10 +96,11 @@ export async function handleMessage(
 		};
 	}
 
-	// --- Confirm / cancel a staged write (design §10) — before routing so an
-	// affirmative reply resumes the pending action instead of being re-classified.
 	const mc = options.moduleContext;
 	const kv = mc?.env.KV;
+
+	// --- Confirm / cancel a staged write (design §10) — before the loop so an
+	// affirmative reply resumes the pending action instead of starting a new one.
 	if (kv && mc) {
 		const trimmed = message.text.trim();
 		const wantsConfirm = !!message.confirm?.actionId || AFFIRM.test(trimmed);
@@ -168,293 +173,68 @@ export async function handleMessage(
 					};
 				}
 			}
-			// No pending action: fall through to normal routing (don't hijack the message).
+			// No pending action: fall through to the loop (don't hijack the message).
 		}
 	}
 
-	let decision: ReturnType<typeof routeMessage> = { kind: 'no_route', candidates: [] };
-
-	// Normal agent routing is LLM-first. Domain keyword classifiers are retained
-	// only for contexts that cannot supply an env/moduleContext yet.
-	if (mc) {
-		const llm = await llmRouteMessage(message.text, mc.env);
-		if (llm.kind === 'smalltalk') {
-			return { kind: 'answer', message: llm.reply, context, trace: { stage: 'llm_route', smalltalk: true } };
-		}
-		if (llm.kind === 'agent') {
-			const routed = lookupAgent(llm.agentId);
-			if (routed) {
-				// Synthesize a routed decision. Force R1 (these are questions) and point
-				// at the agent's direct answer capability so the read tier can serve it.
-				decision = {
-					kind: 'routed',
-					agent: routed,
-					intent: {
-						agentId: routed.manifest.id,
-						domain: routed.manifest.domain,
-						intent: llm.intent,
-						confidence: llm.confidence,
-						reason: 'llm_route',
-						riskLevel: 'R1',
-						requiredInputs: [],
-						suggestedCapabilityId: routed.answerCapabilityId ?? null,
-						suggestedWorkflowId: null
-					},
-					candidates: []
-				};
-			}
-		}
-	} else {
-		decision = routeMessage(
-			{ message: message.text, currentPath: context.routeContext?.route },
-			context
-		);
-	}
-
-	if (decision.kind === 'no_route') {
+	// The unified loop needs a module context (env / db / kv). Without it we can't
+	// safely read or act — every real adapter (AI Panel, Lark) supplies one.
+	if (!mc) {
 		return {
-			kind: 'no_route',
-			message:
-				"I couldn't tell which area this relates to (project, finance, HR, inventory, or customers). Could you rephrase, or tell me which one?",
+			kind: 'error',
+			message: 'The assistant runtime is not available in this context.',
 			context,
-			trace: { source: message.source }
+			trace: { reason: 'no_module_context', source: message.source }
 		};
 	}
 
-	if (decision.kind === 'ambiguous') {
+	// --- Unified cross-domain agent loop. Catalog is scoped to the user's roles;
+	// reads execute now, writes come back as a confirm_write proposal we stage.
+	const tools = buildAgentToolCatalog(context.roles);
+	if (tools.length === 0) {
 		return {
-			kind: 'clarification',
-			message: 'This could relate to more than one area — which one do you mean?',
+			kind: 'answer',
+			message: "You don't currently have access to any assistant tools. Please contact an admin.",
 			context,
-			candidates: decision.candidates.map((candidate) => ({
-				type: 'domain',
-				id: candidate.agent.manifest.domain,
-				label: candidate.agent.manifest.name,
-				confidence: candidate.intent.confidence
-			})),
-			trace: { source: message.source }
+			trace: { reason: 'empty_catalog' }
 		};
 	}
 
-	const { agent, intent } = decision;
+	const loop = await runWithTools({
+		agentId: 'orchestrator',
+		agentVersion: '1.0.0',
+		userMessage: message.text,
+		tools,
+		env: mc.env,
+		db: mc.db,
+		capabilityCtx: {
+			tenantId: context.tenantId ?? 'default',
+			userId: message.userId,
+			env: mc.env,
+			moduleContext: mc
+		},
+		actor: {
+			userId: message.userId,
+			userEmail: mc.user?.email ?? null,
+			roles: context.roles
+		}
+	});
 
-	// Targeted entity resolution: only when the intent needs a specific project,
-	// the channel did not already supply one, and a resolver is available. We
-	// never block routing when resolution simply cannot run (design §9: ask only
-	// on genuine ambiguity, otherwise proceed).
-	const needsProject =
-		!!intent!.requiredInputs.includes('project_context') &&
-		!context.routeContext?.projectId;
-	if (needsProject && options.moduleContext && lookupEntityResolver('project')) {
-		const resolution = await resolveEntities({
-			message,
-			context,
-			want: ['project'],
-			moduleContext: options.moduleContext
-		});
-
-		if (resolution.ambiguity) {
-			return {
-				kind: 'clarification',
-				message: 'I found more than one matching project. Which one do you mean?',
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				candidates: resolution.candidates.map((candidate) => ({
-					type: candidate.type,
-					id: candidate.id,
-					label: candidate.label,
-					confidence: candidate.confidence
-				})),
-				trace: { stage: 'entity_resolution' }
-			};
-		}
-
-		if (resolution.resolved.projectId) {
-			context.routeContext = {
-				...context.routeContext,
-				projectId: resolution.resolved.projectId
-			};
-		} else if (resolution.missingSlots.includes('projectId')) {
-			return {
-				kind: 'clarification',
-				message:
-					"Which project is this about? I couldn't match one from your message.",
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				trace: { stage: 'entity_resolution', missing: resolution.missingSlots }
-			};
-		}
-	}
-
-	// --- Full domain planner (design §7): when the agent owns a `planAction`
-	// (async LLM intent + input extraction — e.g. HR leave), use it instead of the
-	// generic draft/tool-loop path. Read executes now (rendered by the plugin);
-	// write is staged for confirmation through the same mechanism as everything
-	// else. This is how a domain with rich, module-specific logic joins the
-	// unified agent without leaking that logic into the platform.
-	if (mc && agent!.planAction) {
-		const meta = {
-			agentId: agent!.manifest.id,
-			domain: agent!.manifest.domain,
-			intent,
-			context
-		};
-		const plan = await agent!.planAction({ message, context, moduleContext: mc, env: mc.env });
-
-		if (plan.kind === 'answer') {
-			return { kind: 'answer', message: plan.message, ...meta, trace: { stage: 'plan', kind: 'answer' } };
-		}
-		if (plan.kind === 'clarification') {
-			return { kind: 'clarification', message: plan.message, ...meta, trace: { stage: 'plan' } };
-		}
-		if (plan.kind === 'unknown') {
-			return {
-				kind: 'no_route',
-				message: plan.message ?? "I couldn't map that to something I can do.",
-				...meta,
-				trace: { stage: 'plan', kind: 'unknown' }
-			};
-		}
-		if (plan.kind === 'read') {
-			const exec = await executeGuardedCapability({
-				db: mc.db,
-				agentId: agent!.manifest.id,
-				agentVersion: agent!.manifest.version,
-				capabilityId: plan.capabilityId,
-				input: plan.input,
-				ctx: {
-					tenantId: context.tenantId ?? 'default',
-					userId: message.userId,
-					env: mc.env,
-					moduleContext: mc
-				},
-				actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
-				intent: intent!.intent,
-				finalAction: plan.finalAction
-			});
-			if (exec.status !== 'ok') {
-				return {
-					kind: exec.status === 'denied' ? 'denied' : 'error',
-					message: `That didn't work (${exec.status}).`,
-					...meta,
-					trace: { stage: 'plan', status: exec.status }
-				};
-			}
-			const rendered = await renderOrDefault(agent!, plan.capabilityId, exec.output, mc.env, 'Done.');
-			return { kind: 'answer', message: rendered, ...meta, trace: { stage: 'plan', kind: 'read' } };
-		}
-		// plan.kind === 'write' — stage for confirmation (no write yet).
-		if (kv) {
-			const actionId = crypto.randomUUID();
-			await setPendingConfirmation(
-				kv,
-				{
-					conversationId: message.conversationId,
-					source: message.source,
-					userId: message.userId,
-					tenantId: context.tenantId
-				},
-				{
-					actionId,
-					agentId: agent!.manifest.id,
-					capabilityId: plan.capabilityId,
-					riskLevel: 'R4',
-					summary: plan.summary,
-					input: plan.input
-				}
-			);
-			return {
-				kind: 'confirmation',
-				message: `${plan.summary} — reply to confirm, or cancel.`,
-				actionId,
-				draft: { summary: plan.summary },
-				...meta,
-				trace: { stage: 'plan', staged: true }
-			};
-		}
-		return {
-			kind: 'confirmation',
-			message: `${plan.summary} (confirmation store unavailable — open the app to apply).`,
-			draft: { summary: plan.summary },
-			...meta,
-			trace: { stage: 'plan', staged: false }
-		};
-	}
-
-	// --- Draft tier (R3): propose a change set, preview it, and stage it for
-	// confirmation (design §11/§12). No business write happens here — the write is
-	// the separate R4 apply capability, run only after the user confirms.
-	if (mc && intent!.riskLevel === 'R3' && intent!.suggestedCapabilityId) {
-		const projectId = context.routeContext?.projectId;
-		if (!projectId) {
-			return {
-				kind: 'clarification',
-				message: "Which project is this about? I couldn't determine one.",
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				trace: { stage: 'draft', missing: ['projectId'] }
-			};
-		}
-		const draftExec = await executeGuardedCapability({
-			db: mc.db,
-			agentId: agent!.manifest.id,
-			agentVersion: agent!.manifest.version,
-			capabilityId: intent!.suggestedCapabilityId,
-			input: { projectId, goal: message.text },
-			ctx: {
-				tenantId: context.tenantId ?? 'default',
-				userId: message.userId,
-				env: mc.env,
-				moduleContext: mc
-			},
-			actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
-			intent: intent!.intent
-		});
-		if (draftExec.status !== 'ok') {
-			return {
-				kind: draftExec.status === 'denied' ? 'denied' : 'error',
-				message: `I couldn't prepare a proposal (${draftExec.status}).`,
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				trace: { stage: 'draft', status: draftExec.status }
-			};
-		}
-		const draft = draftExec.output;
-		const applyReq = agent!.buildApplyRequest?.({ intent: intent!, draft, context });
-		if (!applyReq) {
-			return {
-				kind: 'answer',
-				message: 'I reviewed it but found no changes to apply.',
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				draft,
-				trace: { stage: 'draft', changes: 0 }
-			};
-		}
+	// Write proposed → stage it for confirmation (no side effect happened).
+	if (loop.status === 'confirm_write' && loop.write) {
+		const write = loop.write;
 		if (!kv) {
 			return {
 				kind: 'confirmation',
-				message:
-					'Here is the proposed change set (open the app to apply — confirmation store unavailable).',
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
+				message: `${write.summary} (confirmation store unavailable — open the app to apply).`,
+				draft: { summary: write.summary },
 				context,
-				draft,
-				trace: { stage: 'draft', staged: false }
+				trace: { stage: 'loop', staged: false, steps: loop.steps }
 			};
 		}
 		const actionId = crypto.randomUUID();
+		const riskLevel: PlatformRiskLevel =
+			lookupCapability(write.capabilityId)?.manifest.riskLevel ?? 'R4';
 		await setPendingConfirmation(
 			kv,
 			{
@@ -465,129 +245,38 @@ export async function handleMessage(
 			},
 			{
 				actionId,
-				agentId: agent!.manifest.id,
-				capabilityId: applyReq.capabilityId,
-				riskLevel: 'R4',
-				summary: applyReq.summary,
-				input: applyReq.input
+				agentId: write.agentId,
+				capabilityId: write.capabilityId,
+				riskLevel,
+				summary: write.summary,
+				input: write.input
 			}
 		);
 		return {
 			kind: 'confirmation',
-			message: `I propose the following changes — review and confirm to apply. (${applyReq.summary})`,
-			agentId: agent!.manifest.id,
-			domain: agent!.manifest.domain,
-			intent,
-			context,
-			draft,
+			message: `${write.summary} — reply to confirm, or cancel.`,
 			actionId,
-			trace: { stage: 'draft', staged: true }
+			agentId: write.agentId,
+			draft: { summary: write.summary },
+			context,
+			trace: { stage: 'loop', staged: true, steps: loop.steps }
 		};
 	}
 
-	// Direct read answer: an agent's `answerCapabilityId` self-fetches its snapshot
-	// from `{question}`. Call it directly (deterministic; avoids the model declining
-	// to call a tool) when the routed intent points at it OR carries no specific
-	// capability (generic question / LLM-routed). Intents bound to a *specific*
-	// read capability (e.g. project.generate-plan) are left to their own path.
-	if (
-		mc &&
-		READ_RISK.has(intent!.riskLevel) &&
-		agent!.answerCapabilityId &&
-		(intent!.suggestedCapabilityId == null ||
-			intent!.suggestedCapabilityId === agent!.answerCapabilityId)
-	) {
-		const exec = await executeGuardedCapability<{ answer?: string }>({
-			db: mc.db,
-			agentId: agent!.manifest.id,
-			agentVersion: agent!.manifest.version,
-			capabilityId: agent!.answerCapabilityId,
-			input: { question: message.text },
-			ctx: {
-				tenantId: context.tenantId ?? 'default',
-				userId: message.userId,
-				env: mc.env,
-				moduleContext: mc
-			},
-			actor: { userId: message.userId, userEmail: mc.user?.email ?? null, roles: context.roles },
-			intent: intent!.intent
-		});
-		if (exec.status === 'ok') {
-			const out = (exec.output ?? {}) as { answer?: unknown };
-			return {
-				kind: 'answer',
-				message: typeof out.answer === 'string' && out.answer.trim() ? out.answer : 'Done.',
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				trace: { stage: 'direct_answer', capabilityId: agent!.answerCapabilityId }
-			};
-		}
-		if (exec.status === 'denied') {
-			return {
-				kind: 'denied',
-				message: 'You do not have access to that information.',
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				trace: { stage: 'direct_answer', status: exec.status }
-			};
-		}
-		// Other failures (invalid input / runtime) fall through to the tool loop.
+	if (loop.status === 'no_provider' || loop.status === 'error') {
+		return {
+			kind: 'error',
+			message: loop.answer,
+			context,
+			trace: { stage: 'loop', status: loop.status, error: loop.error, steps: loop.steps }
+		};
 	}
 
-	// Phase 5: dynamic read-only tool loop. Runs only for read-risk intents and
-	// only when a module context (env/db) is available. The catalog is read-only
-	// and tool-policy denies un-confirmed writes, so this loop cannot mutate
-	// business data — confirmed writes land in a later phase.
-	if (mc && READ_RISK.has(intent!.riskLevel)) {
-		const tools = listReadOnlyToolSpecs(agent!.manifest.id);
-		if (tools.length > 0) {
-			const loop = await runWithTools({
-				agentId: agent!.manifest.id,
-				agentVersion: agent!.manifest.version,
-				userMessage: message.text,
-				systemPreamble: agent!.manifest.description,
-				tools,
-				env: mc.env,
-				db: mc.db,
-				capabilityCtx: {
-					tenantId: context.tenantId ?? 'default',
-					userId: message.userId,
-					env: mc.env,
-					moduleContext: mc
-				},
-				actor: {
-					userId: message.userId,
-					userEmail: mc.user?.email ?? null,
-					roles: context.roles
-				}
-			});
-			return {
-				kind: loop.status === 'final' ? 'answer' : 'routed',
-				message: loop.answer,
-				agentId: agent!.manifest.id,
-				domain: agent!.manifest.domain,
-				intent,
-				context,
-				trace: { phase: 'tool_loop', loopStatus: loop.status, steps: loop.steps }
-			};
-		}
-	}
-
+	// 'final' or 'max_steps' — natural-language answer (possibly partial).
 	return {
-		kind: 'routed',
-		message: `Routed to ${agent!.manifest.name} (intent: ${intent!.intent}).`,
-		agentId: agent!.manifest.id,
-		domain: agent!.manifest.domain,
-		intent,
+		kind: 'answer',
+		message: loop.answer,
 		context,
-		trace: {
-			phase: 'route_only',
-			candidateCount: decision.candidates.length,
-			resolvedProjectId: context.routeContext?.projectId
-		}
+		trace: { stage: 'loop', status: loop.status, steps: loop.steps }
 	};
 }

@@ -154,6 +154,10 @@ export interface ToolSpec {
 	ownerModule: string;
 	allowedAgents: string[];
 	requiresConfirmation: boolean;
+	/** read vs write — drives whether the loop executes or stages for confirmation. */
+	sideEffect: CapabilitySideEffect;
+	/** permissions the caller's roles must satisfy (for catalog scoping). */
+	requiredUserPermissions: string[];
 	parameters: Record<string, unknown> | null;
 }
 
@@ -166,6 +170,8 @@ function toToolSpec(entry: RegistryEntry): ToolSpec {
 		ownerModule: manifest.ownerModule,
 		allowedAgents: manifest.allowedAgents,
 		requiresConfirmation: manifest.requiresConfirmation,
+		sideEffect: manifest.sideEffect,
+		requiredUserPermissions: manifest.requiredUserPermissions,
 		parameters: capability.inputSchema
 			? (z.toJSONSchema(capability.inputSchema) as Record<string, unknown>)
 			: null

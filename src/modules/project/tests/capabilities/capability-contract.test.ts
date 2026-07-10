@@ -19,8 +19,10 @@ import {
  */
 describe('project capability contract', () => {
 	it('every capability exposes serializable Zod input + output schemas', () => {
-		// 7 read/suggestive + portfolio answer + 4 Stage-2 drafts (R3) + 3 Stage-3 writes (R4).
-		expect(projectCapabilities.length).toBe(15);
+		// 7 read/suggestive + 4 Stage-2 drafts (R3) + 3 Stage-3 writes (R4). The raw
+		// data read tools (project.list-projects / get-project) live in the separate
+		// `projectAiCapabilities` surface; the inner-LLM `project.answer` was removed.
+		expect(projectCapabilities.length).toBe(14);
 		for (const capability of projectCapabilities) {
 			expect(capability.inputSchema, `${capability.id} missing inputSchema`).toBeDefined();
 			expect(capability.outputSchema, `${capability.id} missing outputSchema`).toBeDefined();

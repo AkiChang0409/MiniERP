@@ -29,7 +29,9 @@ export const projectAgentPlugin: DomainAgentPlugin = {
 		forbiddenActions: projectAgentManifest.forbiddenActions
 	},
 	allowedCapabilityIds: projectAgentAllowedCapabilities.map((entry) => entry.id),
-	answerCapabilityId: 'project.answer',
+	// Unused by the unified loop (which composes over the raw read tools); kept
+	// pointing at a registered read tool for backward-compat metadata only.
+	answerCapabilityId: 'project.list-projects',
 	classifyIntent(input: IntentClassificationInput): AgentIntentResult | null {
 		const result = classifyProjectIntent({
 			message: input.message,

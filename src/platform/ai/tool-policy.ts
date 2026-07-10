@@ -44,7 +44,7 @@ const PERMISSION_TO_ROLES: Record<string, readonly AuthRole[]> = {
 	'sales-crm:view': ['owner', 'admin']
 };
 
-function rolesHavePermission(roles: AuthRole[] | null | undefined, permission: string): boolean {
+export function rolesHavePermission(roles: AuthRole[] | null | undefined, permission: string): boolean {
 	if (!roles || roles.length === 0) return false;
 	const allowed = PERMISSION_TO_ROLES[permission];
 	if (!allowed) return false;

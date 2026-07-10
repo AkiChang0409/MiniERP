@@ -16,6 +16,7 @@ import {
 } from '$modules/hr/capabilities';
 import { PROJECT_AGENT_ID, projectAgentAllowedCapabilities } from '$modules/project/agent';
 import { projectCapabilities, type ProjectCapability } from '$modules/project/capabilities';
+import { projectAiCapabilities } from '$modules/project/ai-capabilities';
 import { inventoryAiCapabilities } from '$modules/inventory/ai-capabilities';
 import { salesCrmAiCapabilities } from '$modules/sales-crm/ai-capabilities';
 import {
@@ -117,7 +118,11 @@ registrations.push({
 // the capability's Zod input/output schemas + the policy entry's risk /
 // permission / sideEffect. All are read-only, so the write⇒requiresConfirmation
 // invariant holds trivially.
-for (const capability of projectCapabilities as readonly ProjectCapability<unknown, unknown>[]) {
+const allProjectCapabilities = [
+	...projectCapabilities,
+	...projectAiCapabilities
+] as readonly ProjectCapability<unknown, unknown>[];
+for (const capability of allProjectCapabilities) {
 	const policyEntry = projectAgentAllowedCapabilities.find((entry) => entry.id === capability.id);
 	if (!policyEntry) {
 		throw new Error(
