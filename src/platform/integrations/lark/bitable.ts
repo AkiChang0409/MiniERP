@@ -213,10 +213,13 @@ export async function bitableListFieldNames(
 }
 
 export interface BitableFieldDef {
+	fieldId: string;
 	name: string;
 	type: number;
 	/** Option labels for single/multi-select fields (empty otherwise). */
 	options: string[];
+	/** Raw Lark field property for table contracts/codecs that need type-specific metadata. */
+	property: Record<string, unknown>;
 }
 
 /**
@@ -230,9 +233,10 @@ export async function bitableListFields(
 ): Promise<BitableFieldDef[]> {
 	const data = await bitableCall<{
 		items?: Array<{
+			field_id?: string;
 			field_name?: string;
 			type?: number;
-			property?: { options?: Array<{ name?: string }> };
+			property?: { options?: Array<{ name?: string }> } & Record<string, unknown>;
 		}>;
 	}>(
 		env,
@@ -241,9 +245,11 @@ export async function bitableListFields(
 	);
 	return (data.items ?? [])
 		.map((f) => ({
+			fieldId: f.field_id ?? '',
 			name: f.field_name ?? '',
 			type: f.type ?? 0,
-			options: (f.property?.options ?? []).map((o) => o.name ?? '').filter(Boolean)
+			options: (f.property?.options ?? []).map((o) => o.name ?? '').filter(Boolean),
+			property: f.property ?? {}
 		}))
 		.filter((f) => f.name);
 }

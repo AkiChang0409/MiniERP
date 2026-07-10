@@ -172,14 +172,11 @@ export async function handleMessage(
 		}
 	}
 
-	let decision = routeMessage(
-		{ message: message.text, currentPath: context.routeContext?.route },
-		context
-	);
+	let decision: ReturnType<typeof routeMessage> = { kind: 'no_route', candidates: [] };
 
-	// Keyword routing missed → LLM fallback router (handles other languages /
-	// paraphrases / small talk). Only runs on the miss, so the common path is free.
-	if (decision.kind === 'no_route' && mc) {
+	// Normal agent routing is LLM-first. Domain keyword classifiers are retained
+	// only for contexts that cannot supply an env/moduleContext yet.
+	if (mc) {
 		const llm = await llmRouteMessage(message.text, mc.env);
 		if (llm.kind === 'smalltalk') {
 			return { kind: 'answer', message: llm.reply, context, trace: { stage: 'llm_route', smalltalk: true } };
@@ -207,6 +204,11 @@ export async function handleMessage(
 				};
 			}
 		}
+	} else {
+		decision = routeMessage(
+			{ message: message.text, currentPath: context.routeContext?.route },
+			context
+		);
 	}
 
 	if (decision.kind === 'no_route') {

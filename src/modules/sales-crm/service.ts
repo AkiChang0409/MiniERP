@@ -1,13 +1,12 @@
 import type { ModuleContext } from '$platform/modules/types';
 import { NotFoundError } from '$platform/modules/errors';
 import { CustomerRepository } from './repository';
-import type { CustomerSource } from './customer-source';
+import type { CustomerCreateInput, CustomerSource } from './customer-source';
 
 export class SalesCrmService {
 	private customers: CustomerSource;
 
-	/** `source` lets the composition root inject a Bitable-backed reader (B5);
-	 *  defaults to the legacy D1 repository. */
+	/** `source` lets tests/legacy callers inject a repository; app wiring must use Lark-backed source. */
 	constructor(ctx: ModuleContext, source?: CustomerSource) {
 		this.customers = source ?? new CustomerRepository(ctx.db);
 	}
@@ -28,7 +27,7 @@ export class SalesCrmService {
 		return this.customers.listDirectory();
 	}
 
-	async createCustomer(data: { name: string; address?: string; contact?: string; gstRegNo?: string; metadata?: string }) {
+	async createCustomer(data: CustomerCreateInput) {
 		return this.customers.create(data);
 	}
 

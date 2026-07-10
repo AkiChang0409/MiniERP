@@ -24,6 +24,11 @@ export const POST: RequestHandler = async (event) => {
 			name?: string;
 			address?: string;
 			contact?: string;
+			contactName?: string;
+			contactPosition?: string;
+			contactPhone?: string;
+			contactEmail?: string;
+			isMainContact?: boolean;
 			gstRegNo?: string;
 			metadata?: unknown;
 		};
@@ -36,6 +41,11 @@ export const POST: RequestHandler = async (event) => {
 			name: body.name,
 			address: body.address,
 			contact: body.contact,
+			contactName: body.contactName,
+			contactPosition: body.contactPosition,
+			contactPhone: body.contactPhone,
+			contactEmail: body.contactEmail,
+			isMainContact: body.isMainContact,
 			gstRegNo: body.gstRegNo,
 			metadata: body.metadata ? JSON.stringify(body.metadata) : undefined
 		});

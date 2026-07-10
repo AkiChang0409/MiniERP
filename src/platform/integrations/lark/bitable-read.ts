@@ -9,6 +9,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { DBClient } from '$infrastructure/db';
 import { bitableRecords } from './bitable-mirror.schema';
+import { bitablePlainText } from './bitable-field-codec';
 
 export interface MirrorRecord {
 	recordId: string;
@@ -34,23 +35,5 @@ export async function readBitableRecords(db: DBClient, tableId: string): Promise
 
 /** Extract a plain string from a Bitable field value; null when empty. */
 export function bitableText(value: unknown): string | null {
-	if (value == null) return null;
-	if (typeof value === 'string') return value.trim() || null;
-	if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-	if (Array.isArray(value)) {
-		const parts = value
-			.map((x) =>
-				typeof x === 'string'
-					? x
-					: x && typeof x === 'object' && 'text' in x
-						? String((x as { text?: unknown }).text ?? '')
-						: ''
-			)
-			.filter(Boolean);
-		return parts.join(', ').trim() || null;
-	}
-	if (typeof value === 'object' && 'text' in value) {
-		return String((value as { text?: unknown }).text ?? '').trim() || null;
-	}
-	return null;
+	return bitablePlainText(value);
 }

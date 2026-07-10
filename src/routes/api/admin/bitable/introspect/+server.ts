@@ -9,8 +9,9 @@ import {
 
 /**
  * Owner/admin-only, READ-ONLY Bitable schema dump. Given a Base `appToken`, it
- * enumerates every table + its fields (name / type / select options) + a few
- * sample records. Used to build the Bitable→D1 mapping registry (plan Phase A).
+ * enumerates every table + its fields (field id / name / type / property /
+ * select options) + a few sample records. Used to build the Bitable→D1 mapping
+ * registry and table contracts.
  *
  * Requires: the Lark app (`LARK_APP_ID`) is a collaborator on the Base, and
  * `LARK_APP_ID`/`LARK_APP_SECRET` are configured (tenant token).

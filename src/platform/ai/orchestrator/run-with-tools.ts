@@ -78,7 +78,7 @@ const decisionSchema = z.discriminatedUnion('action', [
 	})
 ]);
 
-function truncate(value: string, max = 600): string {
+function truncate(value: string, max = 6000): string {
 	return value.length > max ? `${value.slice(0, max)}… (truncated)` : value;
 }
 
@@ -91,7 +91,8 @@ function buildSystemPrompt(tools: ToolSpec[], preamble?: string): string {
 		.join('\n');
 	return [
 		preamble ?? 'You are a SmartFin domain expert agent.',
-		'You can call the read-only tools below to answer the user. Use a tool only when it helps; otherwise answer directly.',
+		'You can call the read-only tools below to answer the user.',
+		'For questions that ask for ERP business data, call the relevant tool before answering. Do not answer from memory and do not refuse authorized data that a listed tool can retrieve.',
 		'',
 		'TOOLS:',
 		toolLines || '(no tools available)',
@@ -107,7 +108,7 @@ export async function runWithTools(input: RunWithToolsInput): Promise<RunWithToo
 	const maxSteps = input.maxSteps ?? 4;
 	const steps: ToolCallTrace[] = [];
 	const allowed = new Set(input.tools.map((tool) => tool.id));
-	const system = buildSystemPrompt(input.tools);
+	const system = buildSystemPrompt(input.tools, input.systemPreamble);
 	let scratch = '';
 
 	for (let i = 1; i <= maxSteps; i++) {

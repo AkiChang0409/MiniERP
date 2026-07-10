@@ -11,6 +11,7 @@
 import { and, eq, lt } from 'drizzle-orm';
 import type { DBClient } from '$infrastructure/db';
 import { bitableListAllRecords } from './bitable';
+import type { BitableRecord } from './bitable';
 import { bitableRecords } from './bitable-mirror.schema';
 
 export interface SyncTableResult {
@@ -21,6 +22,36 @@ export interface SyncTableResult {
 }
 
 const UPSERT_CHUNK = 50;
+
+export async function upsertBitableMirrorRecord(
+	db: DBClient,
+	args: {
+		appToken: string;
+		tableId: string;
+		tableName: string;
+		record: BitableRecord;
+		syncedAt?: string;
+	}
+): Promise<void> {
+	const syncedAt = args.syncedAt ?? new Date().toISOString();
+	const fields = JSON.stringify(args.record.fields ?? {});
+	await db
+		.insert(bitableRecords)
+		.values({
+			id: `${args.tableId}:${args.record.record_id}`,
+			baseToken: args.appToken,
+			tableId: args.tableId,
+			tableName: args.tableName,
+			recordId: args.record.record_id,
+			fields,
+			syncedAt,
+			deleted: 0
+		})
+		.onConflictDoUpdate({
+			target: bitableRecords.id,
+			set: { fields, tableName: args.tableName, syncedAt, deleted: 0 }
+		});
+}
 
 export async function syncBitableTable(
 	env: Env,
@@ -36,9 +67,8 @@ export async function syncBitableTable(
 	// Upsert in chunks via db.batch (fewer round-trips than per-row awaits).
 	for (let i = 0; i < records.length; i += UPSERT_CHUNK) {
 		const chunk = records.slice(i, i + UPSERT_CHUNK);
-		const stmts = chunk.map((r) => {
-			const fields = JSON.stringify(r.fields ?? {});
-			return db
+		const stmts = chunk.map((r) =>
+			db
 				.insert(bitableRecords)
 				.values({
 					id: `${args.tableId}:${r.record_id}`,
@@ -46,15 +76,20 @@ export async function syncBitableTable(
 					tableId: args.tableId,
 					tableName: args.tableName,
 					recordId: r.record_id,
-					fields,
+					fields: JSON.stringify(r.fields ?? {}),
 					syncedAt: runTs,
 					deleted: 0
 				})
 				.onConflictDoUpdate({
 					target: bitableRecords.id,
-					set: { fields, tableName: args.tableName, syncedAt: runTs, deleted: 0 }
-				});
-		});
+					set: {
+						fields: JSON.stringify(r.fields ?? {}),
+						tableName: args.tableName,
+						syncedAt: runTs,
+						deleted: 0
+					}
+				})
+		);
 		if (stmts.length === 1) await stmts[0];
 		else if (stmts.length > 1) await db.batch(stmts as [typeof stmts[0], ...(typeof stmts)]);
 	}

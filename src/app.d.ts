@@ -80,6 +80,8 @@ declare global {
 		 * instead of the legacy D1 `business_partners` table (facade repoint, B5).
 		 */
 		LARK_BP_TABLE_ID?: string;
+		/** Contact Person table id linked from Business Partner.Contact Person. */
+		LARK_BP_CONTACT_TABLE_ID?: string;
 		/** Projects + Business Partner tables live in the same Base (share LARK_DOCHUB_APP_TOKEN). */
 		LARK_PROJECT_TABLE_ID?: string;
 		LARK_SUPPLIER_TABLE_ID?: string;

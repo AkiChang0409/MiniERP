@@ -4,11 +4,27 @@ import { BitableCustomerRepository } from './customer-source';
 
 export type SalesCrmApi = ReturnType<typeof createSalesCrmApi>;
 
+function bitableAppToken(env: Env): string {
+	const token = env.LARK_BITABLE_APP_TOKEN || env.LARK_DOCHUB_APP_TOKEN;
+	if (!token) {
+		throw new Error('LARK_BITABLE_APP_TOKEN / LARK_DOCHUB_APP_TOKEN are required for Sales CRM Lark writes.');
+	}
+	return token;
+}
+
 export function createSalesCrmApi(ctx: ModuleContext) {
-	// Bitable-as-source-of-truth: when the Business Partner table id is configured,
-	// read customers from the Bitable mirror; otherwise fall back to legacy D1.
 	const bpTable = ctx.env?.LARK_BP_TABLE_ID;
-	const source = bpTable ? new BitableCustomerRepository(ctx.db, bpTable) : undefined;
+	if (!bpTable) {
+		throw new Error('LARK_BP_TABLE_ID is required: Sales CRM Business Partner data is sourced from Lark Base.');
+	}
+	const contactTable = ctx.env?.LARK_BP_CONTACT_TABLE_ID;
+	const source = new BitableCustomerRepository(
+		ctx.db,
+		bpTable,
+		contactTable,
+		ctx.env,
+		bitableAppToken(ctx.env)
+	);
 	const svc = new SalesCrmService(ctx, source);
 
 	return {

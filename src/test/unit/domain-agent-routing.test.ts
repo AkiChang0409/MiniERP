@@ -3,9 +3,9 @@ import { inventoryAgentPlugin } from '$modules/inventory/agent';
 import { salesCrmAgentPlugin } from '$modules/sales-crm/agent';
 
 /**
- * Locks the keyword routing for the Step-3 read-only domain agents: a domain-ish
- * message resolves to that agent's answer-question capability; an unrelated one
- * returns null so the router can pick another agent.
+ * Inventory still uses its legacy keyword classifier. Sales CRM intentionally
+ * does not: customer questions should be routed by the orchestrator LLM router
+ * and then answered through explicit CRM read tools.
  */
 describe('domain agent routing (inventory / sales-crm)', () => {
 	it('routes inventory questions to inventory.answer-question', () => {
@@ -17,11 +17,10 @@ describe('domain agent routing (inventory / sales-crm)', () => {
 		}
 	});
 
-	it('routes customer/sales questions to sales-crm.answer-question', () => {
+	it('does not keyword-route customer/sales questions', () => {
 		for (const msg of ['list our customers', '这个客户的订单', 'any quotation for Acme']) {
 			const r = salesCrmAgentPlugin.classifyIntent({ message: msg });
-			expect(r, msg).not.toBeNull();
-			expect(r?.suggestedCapabilityId).toBe('sales-crm.answer-question');
+			expect(r, msg).toBeNull();
 		}
 	});
 

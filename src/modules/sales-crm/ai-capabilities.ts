@@ -1,38 +1,168 @@
 /**
- * Sales-CRM agent capabilities (Step 3 — read-only Q&A). A single read
- * capability that snapshots the customer directory via `createSalesCrmApi` and
- * answers grounded in it. R1, never writes.
+ * Sales-CRM agent read tools.
+ *
+ * The agent should retrieve customer data through explicit governed tools, then
+ * let the LLM compose the answer. These tools intentionally surface repository
+ * and Lark mirror errors instead of converting failures into empty directories.
  */
 import { z } from 'zod';
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
 import type { PlatformCapability } from '$platform/ai/capability-registry';
-import type { CustomerDirectoryEntry } from './customer-source';
+
+const customerDirectoryEntrySchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	contact: z.string().nullable(),
+	address: z.string().nullable()
+});
+
+const customerDetailSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	type: z.string(),
+	registrationNo: z.string().nullable(),
+	country: z.string().nullable(),
+	address: z.string().nullable(),
+	contact: z.string().nullable(),
+	itemDescription: z.string().nullable(),
+	currency: z.string().nullable(),
+	gstRegNo: z.string().nullable(),
+	metadata: z.string().nullable()
+});
+
+export const salesCrmListBusinessPartnersInputSchema = z.object({
+	limit: z.number().int().min(1).max(200).optional().describe('Maximum records to return.')
+});
+
+export const salesCrmSearchBusinessPartnersInputSchema = z.object({
+	query: z.string().min(1).describe('Customer name, contact, address, or related text to search.'),
+	limit: z.number().int().min(1).max(50).optional().describe('Maximum matches to return.')
+});
+
+export const salesCrmGetBusinessPartnerInputSchema = z.object({
+	id: z.string().min(1).describe('Business Partner record id.')
+});
 
 export const salesCrmAnswerInputSchema = z.object({
 	question: z.string().min(1).describe('A natural-language question about customers / sales.')
 });
 
-const salesCrmAnswerOutputSchema = z.preprocess((value) => {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-	const obj = value as Record<string, unknown>;
-	return {
-		...obj,
-		answer: typeof obj.answer === 'string' ? obj.answer : obj.message,
-		needsHuman: typeof obj.needsHuman === 'boolean' ? obj.needsHuman : obj.needs_human
-	};
-}, z.object({
-	answer: z.string().min(1),
-	needsHuman: z.boolean().default(false)
-}));
+const salesCrmBusinessPartnerListOutputSchema = z.object({
+	count: z.number().int(),
+	returned: z.number().int(),
+	truncated: z.boolean(),
+	customers: z.array(customerDirectoryEntrySchema)
+});
 
+const salesCrmBusinessPartnerSearchOutputSchema = z.object({
+	query: z.string(),
+	count: z.number().int(),
+	returned: z.number().int(),
+	truncated: z.boolean(),
+	customers: z.array(customerDirectoryEntrySchema)
+});
+
+const salesCrmBusinessPartnerGetOutputSchema = z.object({
+	customer: customerDetailSchema.nullable()
+});
+
+const salesCrmAnswerOutputSchema = z.object({
+	answer: z.string().min(1),
+	needsHuman: z.boolean()
+});
+
+type SalesCrmListBusinessPartnersInput = z.infer<typeof salesCrmListBusinessPartnersInputSchema>;
+type SalesCrmSearchBusinessPartnersInput = z.infer<typeof salesCrmSearchBusinessPartnersInputSchema>;
+type SalesCrmGetBusinessPartnerInput = z.infer<typeof salesCrmGetBusinessPartnerInputSchema>;
 type SalesCrmAnswerInput = z.infer<typeof salesCrmAnswerInputSchema>;
+type SalesCrmBusinessPartnerListOutput = z.infer<typeof salesCrmBusinessPartnerListOutputSchema>;
+type SalesCrmBusinessPartnerSearchOutput = z.infer<typeof salesCrmBusinessPartnerSearchOutputSchema>;
+type SalesCrmBusinessPartnerGetOutput = z.infer<typeof salesCrmBusinessPartnerGetOutputSchema>;
 type SalesCrmAnswerOutput = z.infer<typeof salesCrmAnswerOutputSchema>;
+
+async function salesCrmApi(ctx: Parameters<PlatformCapability<unknown, unknown>['execute']>[1]) {
+	if (!ctx.moduleContext) throw new Error('Sales-CRM capability requires a module context');
+	const { createSalesCrmApi } = await import('./api');
+	return createSalesCrmApi(ctx.moduleContext);
+}
+
+function includesText(entry: { name: string; contact: string | null; address: string | null }, query: string) {
+	const q = query.trim().toLowerCase();
+	return [entry.name, entry.contact, entry.address].some((value) =>
+		(value ?? '').toLowerCase().includes(q)
+	);
+}
+
+export const salesCrmListBusinessPartnersCapability: PlatformCapability<
+	SalesCrmListBusinessPartnersInput,
+	SalesCrmBusinessPartnerListOutput
+> = {
+	id: 'sales-crm.list-business-partners',
+	description: 'List customer Business Partner records from the Sales CRM customer directory.',
+	riskLevel: 'R1',
+	inputSchema: salesCrmListBusinessPartnersInputSchema,
+
+	async execute(input, ctx): Promise<SalesCrmBusinessPartnerListOutput> {
+		const api = await salesCrmApi(ctx);
+		const customers = await api.listCustomerDirectory();
+		const limit = input.limit ?? 100;
+		const selected = customers.slice(0, limit);
+		return {
+			count: customers.length,
+			returned: selected.length,
+			truncated: customers.length > selected.length,
+			customers: selected
+		};
+	}
+};
+
+export const salesCrmSearchBusinessPartnersCapability: PlatformCapability<
+	SalesCrmSearchBusinessPartnersInput,
+	SalesCrmBusinessPartnerSearchOutput
+> = {
+	id: 'sales-crm.search-business-partners',
+	description: 'Search customer Business Partner records by name, contact, or address.',
+	riskLevel: 'R1',
+	inputSchema: salesCrmSearchBusinessPartnersInputSchema,
+
+	async execute(input, ctx): Promise<SalesCrmBusinessPartnerSearchOutput> {
+		const api = await salesCrmApi(ctx);
+		const matches = (await api.listCustomerDirectory()).filter((entry) =>
+			includesText(entry, input.query)
+		);
+		const limit = input.limit ?? 20;
+		const selected = matches.slice(0, limit);
+		return {
+			query: input.query,
+			count: matches.length,
+			returned: selected.length,
+			truncated: matches.length > selected.length,
+			customers: selected
+		};
+	}
+};
+
+export const salesCrmGetBusinessPartnerCapability: PlatformCapability<
+	SalesCrmGetBusinessPartnerInput,
+	SalesCrmBusinessPartnerGetOutput
+> = {
+	id: 'sales-crm.get-business-partner',
+	description: 'Get one customer Business Partner record by record id.',
+	riskLevel: 'R1',
+	inputSchema: salesCrmGetBusinessPartnerInputSchema,
+
+	async execute(input, ctx): Promise<SalesCrmBusinessPartnerGetOutput> {
+		const api = await salesCrmApi(ctx);
+		const customer = await api.getCustomerById(input.id);
+		return { customer };
+	}
+};
 
 const SYSTEM_PROMPT = `You answer questions about customers / sales using the JSON
 snapshot inside <sales_snapshot>, which contains the COMPLETE customer directory
 (every customer). Rules:
 - For "list / show all customers" type asks, ENUMERATE them (name + key fields).
-  You have the full list — do NOT ask for more context and do NOT refuse.
+  You have the full list - do NOT ask for more context and do NOT refuse.
 - If the directory is empty, say there are currently no customers.
 - Set needsHuman=true ONLY when the question needs data not present in the
   snapshot (e.g. a customer's unpaid invoices). Never use it to avoid listing.
@@ -40,50 +170,7 @@ snapshot inside <sales_snapshot>, which contains the COMPLETE customer directory
 Output JSON only.`;
 
 function truncate(value: string, max = 6000): string {
-	return value.length > max ? `${value.slice(0, max)}… (truncated)` : value;
-}
-
-function usesChinese(value: string): boolean {
-	return /[\u3400-\u9fff]/.test(value);
-}
-
-function asksForCustomerDirectory(question: string): boolean {
-	const q = question.trim().toLowerCase();
-	if (!q) return false;
-	return (
-		/(客户|客戶).*(名单|名單|列表|清单|清單|目录|目錄|有哪些|是谁|是誰|是谁们|是誰們|我们的|我們的|所有|全部|列出|显示|查看|看看)/.test(q) ||
-		/(名单|名單|列表|清单|清單|目录|目錄|有哪些|是谁|是誰|是谁们|是誰們|列出|显示|查看|看看).*(客户|客戶)/.test(q) ||
-		/\b(list|show|who|what|all|our)\b.*\bcustomers?\b/.test(q) ||
-		/\bcustomers?\b.*\b(list|directory|all|who|what)\b/.test(q)
-	);
-}
-
-function formatCustomerDirectoryAnswer(
-	question: string,
-	customers: CustomerDirectoryEntry[]
-): SalesCrmAnswerOutput {
-	const zh = usesChinese(question);
-	if (customers.length === 0) {
-		return {
-			answer: zh ? '目前没有客户。' : 'There are currently no customers.',
-			needsHuman: false
-		};
-	}
-
-	const rows = customers.map((customer, index) => {
-		const details = [
-			customer.contact ? (zh ? `联系人：${customer.contact}` : `contact: ${customer.contact}`) : null,
-			customer.address ? (zh ? `地址：${customer.address}` : `address: ${customer.address}`) : null
-		].filter(Boolean);
-		return `${index + 1}. ${customer.name}${details.length ? ` (${details.join(zh ? '；' : '; ')})` : ''}`;
-	});
-
-	return {
-		answer: zh
-			? `我们目前有 ${customers.length} 个客户：\n${rows.join('\n')}`
-			: `There are ${customers.length} customers:\n${rows.join('\n')}`,
-		needsHuman: false
-	};
+	return value.length > max ? `${value.slice(0, max)}... (truncated)` : value;
 }
 
 export const salesCrmAnswerQuestionCapability: PlatformCapability<
@@ -92,24 +179,16 @@ export const salesCrmAnswerQuestionCapability: PlatformCapability<
 > = {
 	id: 'sales-crm.answer-question',
 	description:
-		'Answer a factual question about customers / sales grounded in a live customer-directory snapshot.',
+		'Answer a factual question about customers / sales grounded in a customer-directory snapshot.',
 	riskLevel: 'R1',
 	inputSchema: salesCrmAnswerInputSchema,
 
 	async execute(input, ctx): Promise<SalesCrmAnswerOutput> {
 		if (!ctx.env) throw new Error('sales-crm.answer-question requires Workers AI env');
-		if (!ctx.moduleContext) throw new Error('sales-crm.answer-question requires a module context');
 
-		const { createSalesCrmApi } = await import('./api');
-		const api = createSalesCrmApi(ctx.moduleContext);
-		const customers = await api.listCustomerDirectory().catch(() => [] as unknown[]);
+		const api = await salesCrmApi(ctx);
+		const customers = await api.listCustomerDirectory();
 		const snapshot = { customerCount: customers.length, customers };
-		if (asksForCustomerDirectory(input.question)) {
-			return formatCustomerDirectoryAnswer(
-				input.question,
-				customers as CustomerDirectoryEntry[]
-			);
-		}
 
 		const result = await runStructuredOutput({
 			task: 'sales-crm.answer-question',
@@ -143,4 +222,8 @@ export const salesCrmAnswerQuestionCapability: PlatformCapability<
 	}
 };
 
-export const salesCrmAiCapabilities = [salesCrmAnswerQuestionCapability] as const;
+export const salesCrmAiCapabilities = [
+	salesCrmListBusinessPartnersCapability,
+	salesCrmSearchBusinessPartnersCapability,
+	salesCrmGetBusinessPartnerCapability
+] as const;

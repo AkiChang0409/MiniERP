@@ -13,7 +13,10 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const name = String(form.get('name') ?? '').trim();
 		const address = String(form.get('address') ?? '').trim();
-		const contact = String(form.get('contact') ?? '').trim();
+		const contactName = String(form.get('contactName') ?? '').trim();
+		const contactPosition = String(form.get('contactPosition') ?? '').trim();
+		const contactPhone = String(form.get('contactPhone') ?? '').trim();
+		const contactEmail = String(form.get('contactEmail') ?? '').trim();
 		const gstRegNo = String(form.get('gstRegNo') ?? '').trim();
 
 		if (!name) {
@@ -25,7 +28,11 @@ export const actions: Actions = {
 		await salesCrm.createCustomer({
 			name,
 			address: address || undefined,
-			contact: contact || undefined,
+			contactName: contactName || undefined,
+			contactPosition: contactPosition || undefined,
+			contactPhone: contactPhone || undefined,
+			contactEmail: contactEmail || undefined,
+			isMainContact: true,
 			gstRegNo: gstRegNo || undefined,
 			metadata: undefined
 		});

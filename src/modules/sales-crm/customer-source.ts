@@ -1,16 +1,27 @@
 /**
  * Customer data source abstraction (B5 — Bitable-as-source-of-truth).
  *
- * The sales-crm service reads customers through this interface, so the storage
- * backend can swap behind the `createSalesCrmApi` facade WITHOUT touching routes,
- * UI, or the sales-crm agent. Two impls:
- *   - `CustomerRepository` (repository.ts) — legacy D1 `business_partners`.
- *   - `BitableCustomerRepository` (below) — reads the Bitable mirror.
- * Which one is wired is decided in `api.ts` by the `LARK_BP_TABLE_ID` env toggle.
+ * The sales-crm service reads customers through this interface. App wiring uses
+ * `BitableCustomerRepository` because Lark Base is the source of truth; the
+ * legacy D1 repository remains only for migration/test seams until D1 is rebuilt
+ * as backup/projection storage.
  */
 import type { DBClient } from '$infrastructure/db';
+import { bitableCreateRecord, bitableUpdateRecord } from '$platform/integrations/lark/bitable';
 import { readBitableRecords, bitableText } from '$platform/integrations/lark/bitable-read';
+import { upsertBitableMirrorRecord } from '$platform/integrations/lark/bitable-sync';
+import {
+	bitableCheckbox,
+	bitableLinkedRecordIds,
+	bitablePhoneText
+} from '$platform/integrations/lark/bitable-field-codec';
 import type { businessPartners } from './repositories/customer.schema';
+import {
+	BUSINESS_PARTNER_TABLE,
+	CONTACT_PERSON_TABLE,
+	encodeBusinessPartnerCreate,
+	encodeContactPersonCreate
+} from './lark-contracts';
 
 export type CustomerRow = typeof businessPartners.$inferSelect;
 export interface CustomerOption {
@@ -29,6 +40,11 @@ export interface CustomerCreateInput {
 	name: string;
 	address?: string | null;
 	contact?: string | null;
+	contactName?: string | null;
+	contactPosition?: string | null;
+	contactPhone?: string | null;
+	contactEmail?: string | null;
+	isMainContact?: boolean | null;
 	gstRegNo?: string | null;
 	metadata?: string | null;
 }
@@ -44,6 +60,17 @@ export interface CustomerSource {
 
 const CUSTOMER_TYPES = new Set<CustomerRow['type']>(['customer', 'both']);
 
+interface ContactPersonProjection {
+	id: string;
+	name: string | null;
+	position: string | null;
+	phone: string | null;
+	email: string | null;
+	isMainContact: boolean | null;
+}
+
+type ContactPersonLookup = Map<string, ContactPersonProjection>;
+
 function normalizeType(value: unknown): CustomerRow['type'] {
 	const s = (bitableText(value) ?? '').toLowerCase();
 	if (s.startsWith('supplier')) return 'supplier';
@@ -51,9 +78,49 @@ function normalizeType(value: unknown): CustomerRow['type'] {
 	return 'customer';
 }
 
+function mapContactPerson(recordId: string, f: Record<string, unknown>): ContactPersonProjection {
+	return {
+		id: recordId,
+		name: bitableText(f['Contact Name']),
+		position: bitableText(f['Position']),
+		phone: bitablePhoneText(f['Phone']),
+		email: bitableText(f['Personal Email']),
+		isMainContact: bitableCheckbox(f['Is_main_contact'])
+	};
+}
+
+function contactDisplayName(contact: ContactPersonProjection): string | null {
+	const parts = [
+		contact.name,
+		contact.position ? `${contact.position}` : null,
+		contact.phone ? `phone: ${contact.phone}` : null,
+		contact.email ? `email: ${contact.email}` : null
+	].filter((part): part is string => Boolean(part));
+	return parts.join(' / ') || null;
+}
+
+function resolveLinkedContacts(
+	contactPersonRecordIds: string[],
+	contacts: ContactPersonLookup
+): ContactPersonProjection[] {
+	return contactPersonRecordIds
+		.map((id) => contacts.get(id))
+		.filter((contact): contact is ContactPersonProjection => Boolean(contact))
+		.sort((a, b) => Number(b.isMainContact === true) - Number(a.isMainContact === true));
+}
+
 /** Map one Bitable Business Partner record to the `business_partners` row shape. */
-function mapBusinessPartner(recordId: string, f: Record<string, unknown>): CustomerRow {
+function mapBusinessPartner(
+	recordId: string,
+	f: Record<string, unknown>,
+	contacts: ContactPersonLookup = new Map()
+): CustomerRow {
 	const now = '';
+	const contactPersonRecordIds = bitableLinkedRecordIds(f['Contact Person']);
+	const contactPersons = resolveLinkedContacts(contactPersonRecordIds, contacts);
+	const linkedContactText = contactPersons.map(contactDisplayName).filter(Boolean).join('; ');
+	const contact =
+		linkedContactText || (contactPersonRecordIds.length > 0 ? null : bitableText(f['Contact Person']));
 	return {
 		id: recordId,
 		name: bitableText(f['Name']) ?? '(unnamed)',
@@ -61,7 +128,7 @@ function mapBusinessPartner(recordId: string, f: Record<string, unknown>): Custo
 		registrationNo: bitableText(f['Registration No']),
 		country: bitableText(f['Country']),
 		address: bitableText(f['Address']),
-		contact: bitableText(f['Contact Person']),
+		contact,
 		itemDescription: bitableText(f['Item Description']),
 		dateCreate: null,
 		projectRelated: null,
@@ -70,9 +137,11 @@ function mapBusinessPartner(recordId: string, f: Record<string, unknown>): Custo
 		metadata: JSON.stringify({
 			no: bitableText(f['No']),
 			email: bitableText(f['Email']),
-			phone: bitableText(f['Phone']),
+			phone: bitablePhoneText(f['Phone']),
 			credit: bitableText(f['Credit']),
 			paymentTerms: bitableText(f['Payment Terms']),
+			contactPersonRecordIds,
+			contactPersons,
 			remark: bitableText(f['Remark'])
 		}),
 		createdAt: now,
@@ -81,19 +150,28 @@ function mapBusinessPartner(recordId: string, f: Record<string, unknown>): Custo
 	};
 }
 
-const WRITE_MSG =
-	'Customer master is managed in Lark Bitable now. MiniERP write-through lands in B4 — please edit in Lark for now.';
-
 export class BitableCustomerRepository implements CustomerSource {
 	constructor(
 		private db: DBClient,
-		private tableId: string
+		private tableId: string,
+		private contactTableId?: string,
+		private env?: Env,
+		private appToken?: string
 	) {}
 
+	private async contactLookup(): Promise<ContactPersonLookup> {
+		if (!this.contactTableId) return new Map();
+		const rows = await readBitableRecords(this.db, this.contactTableId);
+		return new Map(rows.map((row) => [row.recordId, mapContactPerson(row.recordId, row.fields)]));
+	}
+
 	private async all(): Promise<CustomerRow[]> {
-		const records = await readBitableRecords(this.db, this.tableId);
+		const [records, contacts] = await Promise.all([
+			readBitableRecords(this.db, this.tableId),
+			this.contactLookup()
+		]);
 		return records
-			.map((r) => mapBusinessPartner(r.recordId, r.fields))
+			.map((r) => mapBusinessPartner(r.recordId, r.fields, contacts))
 			.filter((c) => CUSTOMER_TYPES.has(c.type))
 			.sort((a, b) => a.name.localeCompare(b.name));
 	}
@@ -119,11 +197,55 @@ export class BitableCustomerRepository implements CustomerSource {
 		}));
 	}
 
-	async create(): Promise<{ id: string }> {
-		throw new Error(WRITE_MSG);
+	async create(data: CustomerCreateInput): Promise<{ id: string }> {
+		if (!this.env || !this.appToken) {
+			throw new Error('Sales CRM Lark write-through requires env and app token');
+		}
+		const record = await bitableCreateRecord(this.env, {
+			appToken: this.appToken,
+			tableId: this.tableId,
+			fields: encodeBusinessPartnerCreate(data)
+		});
+		await upsertBitableMirrorRecord(this.db, {
+			appToken: this.appToken,
+			tableId: this.tableId,
+			tableName: BUSINESS_PARTNER_TABLE.name,
+			record
+		});
+
+		if (data.contactName?.trim()) {
+			if (!this.contactTableId) {
+				throw new Error('LARK_BP_CONTACT_TABLE_ID is required to create linked Contact Person records');
+			}
+			const contactRecord = await bitableCreateRecord(this.env, {
+				appToken: this.appToken,
+				tableId: this.contactTableId,
+				fields: encodeContactPersonCreate(data, record.record_id)
+			});
+			await upsertBitableMirrorRecord(this.db, {
+				appToken: this.appToken,
+				tableId: this.contactTableId,
+				tableName: CONTACT_PERSON_TABLE.name,
+				record: contactRecord
+			});
+
+			const updatedBusinessPartner = await bitableUpdateRecord(this.env, {
+				appToken: this.appToken,
+				tableId: this.tableId,
+				recordId: record.record_id,
+				fields: { [BUSINESS_PARTNER_TABLE.fields.contactPerson]: [contactRecord.record_id] }
+			});
+			await upsertBitableMirrorRecord(this.db, {
+				appToken: this.appToken,
+				tableId: this.tableId,
+				tableName: BUSINESS_PARTNER_TABLE.name,
+				record: updatedBusinessPartner
+			});
+		}
+		return { id: record.record_id };
 	}
 
 	async softDelete(): Promise<void> {
-		throw new Error(WRITE_MSG);
+		throw new Error('Customer deletion must be implemented as Lark write-through with confirmation.');
 	}
 }

@@ -1,9 +1,7 @@
 /**
- * LLM fallback router. The keyword `routeMessage` is cheap and deterministic but
- * brittle (English-centric, misses paraphrases / other languages). When it can't
- * pick a domain, this classifies the message with one LLM call against the
- * registered agents' manifests, or recognizes small talk. Only runs on the
- * keyword miss, so the common path stays LLM-free.
+ * LLM router. The orchestrator uses this as the normal routing path when a
+ * module env is available; keyword classifiers are retained only for legacy
+ * contexts that cannot run an LLM route.
  */
 import { z } from 'zod';
 import { runStructuredOutput } from '../ai-runtime';
