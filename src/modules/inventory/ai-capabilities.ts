@@ -8,6 +8,7 @@
  */
 import { z } from 'zod';
 import { runStructuredOutput } from '$platform/ai/ai-runtime';
+import { readBitableRecords, normalizeMirrorRecord } from '$platform/integrations/lark/bitable-read';
 import type { PlatformCapability } from '$platform/ai/capability-registry';
 
 export const inventoryAnswerInputSchema = z.object({
@@ -92,4 +93,79 @@ export const inventoryAnswerQuestionCapability: PlatformCapability<
 	}
 };
 
-export const inventoryAiCapabilities = [inventoryAnswerQuestionCapability] as const;
+// --- Raw data read tools (P3 read-from-Bitable) ----------------------------
+// Read the Bitable mirror (source of truth) and return normalized records; the
+// unified loop composes the answer. Table ids from the Bitable registry.
+
+const ITEMS_TABLE_ID = 'tblacMmS2cFonqkx';
+const STORAGE_TABLE_ID = 'tblWCyise8iEE4Lz';
+const ITEM_NAME_FIELDS = ['Item Name', 'Name', 'Item', 'SKU', '物品名称', '名称', '物料'];
+const STORAGE_NAME_FIELDS = ['Storage', 'Location', 'Warehouse', 'Name', '仓库', '库位', '名称'];
+
+const mirrorRecordSchema = z.object({
+	recordId: z.string(),
+	name: z.string().nullable(),
+	fields: z.record(z.string(), z.string())
+});
+
+export const inventoryListInputSchema = z.object({
+	limit: z.number().int().min(1).max(200).optional().describe('Maximum records to return.')
+});
+
+const inventoryListOutputSchema = z.object({
+	count: z.number().int(),
+	returned: z.number().int(),
+	truncated: z.boolean(),
+	records: z.array(mirrorRecordSchema)
+});
+
+type InventoryListInput = z.infer<typeof inventoryListInputSchema>;
+type InventoryListOutput = z.infer<typeof inventoryListOutputSchema>;
+
+function makeInventoryListCapability(
+	id: string,
+	description: string,
+	tableId: string,
+	nameFields: readonly string[]
+): PlatformCapability<InventoryListInput, InventoryListOutput> {
+	return {
+		id,
+		description,
+		riskLevel: 'R1',
+		inputSchema: inventoryListInputSchema,
+		async execute(input, ctx): Promise<InventoryListOutput> {
+			if (!ctx.moduleContext) throw new Error(`${id} requires a module context`);
+			const records = (await readBitableRecords(ctx.moduleContext.db, tableId)).map((r) =>
+				normalizeMirrorRecord(r, nameFields)
+			);
+			const limit = input.limit ?? 100;
+			const selected = records.slice(0, limit);
+			return {
+				count: records.length,
+				returned: selected.length,
+				truncated: records.length > selected.length,
+				records: selected
+			};
+		}
+	};
+}
+
+export const inventoryListItemsCapability = makeInventoryListCapability(
+	'inventory.list-items',
+	'List inventory items from the Items table (Bitable source of truth).',
+	ITEMS_TABLE_ID,
+	ITEM_NAME_FIELDS
+);
+
+export const inventoryListStorageCapability = makeInventoryListCapability(
+	'inventory.list-storage',
+	'List storage / stock locations from the Storage table (Bitable source of truth).',
+	STORAGE_TABLE_ID,
+	STORAGE_NAME_FIELDS
+);
+
+export const inventoryAiCapabilities = [
+	inventoryAnswerQuestionCapability,
+	inventoryListItemsCapability,
+	inventoryListStorageCapability
+] as const;

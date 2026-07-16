@@ -48,6 +48,8 @@
 		"deploy:document-processor:personal": "wrangler deploy --config workers/wrangler.document-processor.jsonc",
 		"deploy:document-processor:company": "wrangler deploy --config workers/wrangler.document-processor.jsonc --env company-dev",
 		"deploy:document-processor:prod": "wrangler deploy --config workers/wrangler.document-processor.jsonc --env production",
+		"dev:bitable-sync": "wrangler dev --config workers/wrangler.bitable-sync.jsonc",
+		"deploy:bitable-sync": "wrangler deploy --config workers/wrangler.bitable-sync.jsonc",
 		"deploy:company:all": "npm run deploy:company && npm run deploy:document-processor:company",
 		"deploy:prod:all": "npm run deploy:prod && npm run deploy:document-processor:prod",
 		"mobile": "npm --prefix mobile run start",

@@ -1,0 +1,39 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+
+  // Dedicated Cron worker: pulls the Lark Bitable Base into the D1 mirror
+  // (Bitable-as-source-of-truth). Top-level = personal v4.
+  "name": "smartfin-bitable-sync-v4",
+  "account_id": "c09bb2823904032b6ec648b23411f2e0",
+  "compatibility_date": "2026-03-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "bitable-sync.ts",
+
+  // Hourly. Tune as needed (e.g. "*/30 * * * *" for every 30 min). External Lark
+  // edits become visible to the read tools within one tick.
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "smartfin-db-v4",
+      "database_id": "e802fb76-fdbf-4884-a2f6-bc2d826b8b50",
+      "migrations_dir": "../drizzle/migrations"
+    }
+  ],
+
+  "vars": {
+    "APP_ENV": "personal-v4",
+    // Lark OpenAPI host. Use https://open.larksuite.com for international Lark.
+    "LARK_BASE_URL": "https://open.larksuite.com",
+    // Base app_token for the Bitable-as-source-of-truth sync (identifier, not a secret).
+    "LARK_BITABLE_APP_TOKEN": "HO6ebX2araSa7Xsw2Rrj17DYpsd"
+    // LARK_APP_ID / LARK_APP_SECRET: set via `wrangler secret put ... -c workers/wrangler.bitable-sync.jsonc`
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

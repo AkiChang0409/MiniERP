@@ -14,13 +14,19 @@
  */
 import { z } from 'zod';
 import { readBitableRecords, bitableText } from '$platform/integrations/lark/bitable-read';
+import { bitableLinkedRecordIds } from '$platform/integrations/lark/bitable-field-codec';
 import type { ProjectCapability } from './capabilities/types';
 
-/** Fallback Projects table id (registry `tblQzG5SD2URlzs6`) when env is unset. */
+/** Fallback table ids (registry) when env is unset. */
 const DEFAULT_PROJECTS_TABLE_ID = 'tblQzG5SD2URlzs6';
+const DEFAULT_TASKS_TABLE_ID = 'tblW3ug6R6JTDPvd';
 
 /** Field-name candidates used to surface a human-readable project name. */
 const NAME_FIELD_CANDIDATES = ['Project Name', 'Name', 'Project', '项目名称', '项目', 'Title'];
+/** Field-name candidates for a task's display name. */
+const TASK_NAME_FIELD_CANDIDATES = ['Task', 'Task Name', 'Name', 'Title', '任务名称', '任务', '标题'];
+/** Task column that links to the Projects table. */
+const TASK_PROJECT_FIELD_CANDIDATES = ['Project', 'Projects', '🚩 Projects', '所属项目', '项目'];
 
 const projectRecordSchema = z.object({
 	recordId: z.string(),
@@ -56,19 +62,24 @@ function projectsTableId(env: Env): string {
 	return env.LARK_PROJECT_TABLE_ID ?? DEFAULT_PROJECTS_TABLE_ID;
 }
 
-/** Normalize a mirror record into `{ recordId, name, fields }` (all plain text). */
-function normalizeProject(record: { recordId: string; fields: Record<string, unknown> }): {
+interface NormalizedRecord {
 	recordId: string;
 	name: string | null;
 	fields: Record<string, string>;
-} {
+}
+
+/** Normalize a mirror record into `{ recordId, name, fields }` (all plain text). */
+function normalizeRecord(
+	record: { recordId: string; fields: Record<string, unknown> },
+	nameCandidates: readonly string[]
+): NormalizedRecord {
 	const fields: Record<string, string> = {};
 	for (const [fieldName, value] of Object.entries(record.fields)) {
 		const text = bitableText(value);
 		if (text) fields[fieldName] = text;
 	}
 	let name: string | null = null;
-	for (const candidate of NAME_FIELD_CANDIDATES) {
+	for (const candidate of nameCandidates) {
 		if (fields[candidate]) {
 			name = fields[candidate];
 			break;
@@ -80,6 +91,28 @@ function normalizeProject(record: { recordId: string; fields: Record<string, unk
 		name = first ?? null;
 	}
 	return { recordId: record.recordId, name, fields };
+}
+
+const normalizeProject = (record: { recordId: string; fields: Record<string, unknown> }) =>
+	normalizeRecord(record, NAME_FIELD_CANDIDATES);
+const normalizeTask = (record: { recordId: string; fields: Record<string, unknown> }) =>
+	normalizeRecord(record, TASK_NAME_FIELD_CANDIDATES);
+
+function tasksTableId(env: Env): string {
+	return env.LARK_TASK_TABLE_ID ?? DEFAULT_TASKS_TABLE_ID;
+}
+
+/** Whether a Tasks mirror record links to the given Bitable project record id. */
+function taskLinksToProject(
+	record: { fields: Record<string, unknown> },
+	projectRecordId: string
+): boolean {
+	for (const candidate of TASK_PROJECT_FIELD_CANDIDATES) {
+		if (candidate in record.fields) {
+			return bitableLinkedRecordIds(record.fields[candidate]).includes(projectRecordId);
+		}
+	}
+	return false;
 }
 
 export const projectListProjectsCapability: ProjectCapability<
@@ -128,8 +161,89 @@ export const projectGetProjectCapability: ProjectCapability<
 	}
 };
 
+// --- Tasks (P3 read-from-Bitable: closes the write→read loop) --------------
+
+export const projectListTasksInputSchema = z.object({
+	projectId: z
+		.string()
+		.optional()
+		.describe('Bitable Projects record id — filter to tasks linked to this project.'),
+	limit: z.number().int().min(1).max(200).optional().describe('Maximum tasks to return.')
+});
+
+export const projectGetTaskInputSchema = z.object({
+	recordId: z.string().min(1).describe('Bitable Tasks record id.')
+});
+
+const projectListTasksOutputSchema = z.object({
+	count: z.number().int(),
+	returned: z.number().int(),
+	truncated: z.boolean(),
+	tasks: z.array(projectRecordSchema)
+});
+
+const projectGetTaskOutputSchema = z.object({
+	task: projectRecordSchema.nullable()
+});
+
+type ProjectListTasksInput = z.infer<typeof projectListTasksInputSchema>;
+type ProjectGetTaskInput = z.infer<typeof projectGetTaskInputSchema>;
+type ProjectListTasksOutput = z.infer<typeof projectListTasksOutputSchema>;
+type ProjectGetTaskOutput = z.infer<typeof projectGetTaskOutputSchema>;
+
+export const projectListTasksCapability: ProjectCapability<
+	ProjectListTasksInput,
+	ProjectListTasksOutput
+> = {
+	id: 'project.list-tasks',
+	description:
+		'List tasks from the Tasks table (Bitable source of truth). Optionally filter to one project by its Bitable record id. Returns each task record with its fields as plain text.',
+	riskLevel: 'R1',
+	inputSchema: projectListTasksInputSchema,
+	outputSchema: projectListTasksOutputSchema,
+
+	async execute(input, ctx): Promise<ProjectListTasksOutput> {
+		if (!ctx.moduleContext) throw new Error('project.list-tasks requires a module context');
+		const { db, env } = ctx.moduleContext;
+		const records = await readBitableRecords(db, tasksTableId(env));
+		const filtered = input.projectId
+			? records.filter((r) => taskLinksToProject(r, input.projectId!))
+			: records;
+		const tasks = filtered.map(normalizeTask);
+		const limit = input.limit ?? 100;
+		const selected = tasks.slice(0, limit);
+		return {
+			count: tasks.length,
+			returned: selected.length,
+			truncated: tasks.length > selected.length,
+			tasks: selected
+		};
+	}
+};
+
+export const projectGetTaskCapability: ProjectCapability<
+	ProjectGetTaskInput,
+	ProjectGetTaskOutput
+> = {
+	id: 'project.get-task',
+	description: 'Get one task by its Bitable record id (Tasks table, source of truth).',
+	riskLevel: 'R1',
+	inputSchema: projectGetTaskInputSchema,
+	outputSchema: projectGetTaskOutputSchema,
+
+	async execute(input, ctx): Promise<ProjectGetTaskOutput> {
+		if (!ctx.moduleContext) throw new Error('project.get-task requires a module context');
+		const { db, env } = ctx.moduleContext;
+		const records = await readBitableRecords(db, tasksTableId(env));
+		const match = records.find((r) => r.recordId === input.recordId);
+		return { task: match ? normalizeTask(match) : null };
+	}
+};
+
 /** Raw data read tools for the Project agent (composed by the unified loop). */
 export const projectAiCapabilities = [
 	projectListProjectsCapability,
-	projectGetProjectCapability
+	projectGetProjectCapability,
+	projectListTasksCapability,
+	projectGetTaskCapability
 ] as const;

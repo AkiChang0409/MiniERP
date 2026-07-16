@@ -18,6 +18,7 @@ import { PROJECT_AGENT_ID, projectAgentAllowedCapabilities } from '$modules/proj
 import { projectCapabilities, type ProjectCapability } from '$modules/project/capabilities';
 import { projectAiCapabilities } from '$modules/project/ai-capabilities';
 import { inventoryAiCapabilities } from '$modules/inventory/ai-capabilities';
+import { financeReadCapabilities } from '$modules/finance/ai-capabilities';
 import {
 	salesCrmAiCapabilities,
 	salesCrmWriteCapabilities,
@@ -231,6 +232,27 @@ for (const capability of salesCrmWriteCapabilities) {
 			inputSchema: capability.inputSchema,
 			outputSchema: salesCrmCreateBusinessPartnerOutputSchema,
 			persistTarget: 'business_partners'
+		},
+		capability
+	});
+}
+
+// Finance raw Bitable read tools (P3 read-from-Bitable): list customer/supplier
+// invoices + income/outcome ledgers from the mirror. Read-only, finance:view.
+for (const capability of financeReadCapabilities) {
+	registrations.push({
+		manifest: {
+			id: capability.id,
+			ownerModule: 'finance',
+			description: capability.description,
+			riskLevel: capability.riskLevel,
+			allowedAgents: [FINANCE_AGENT_ID],
+			requiredUserPermissions: ['finance:view'],
+			requiresConfirmation: false,
+			auditRequired: true,
+			enabled: true,
+			sideEffect: 'read',
+			inputSchema: capability.inputSchema
 		},
 		capability
 	});

@@ -37,3 +37,36 @@ export async function readBitableRecords(db: DBClient, tableId: string): Promise
 export function bitableText(value: unknown): string | null {
 	return bitablePlainText(value);
 }
+
+export interface NormalizedMirrorRecord {
+	recordId: string;
+	name: string | null;
+	fields: Record<string, string>;
+}
+
+/**
+ * Normalize a mirror record into `{ recordId, name, fields }` with every field
+ * value flattened to plain text. `nameCandidates` picks a human-readable name
+ * (first matching field), falling back to the first non-empty field. Shared by
+ * the domains' raw Bitable read tools (P3 read-from-Bitable) so they don't each
+ * reimplement the flattening.
+ */
+export function normalizeMirrorRecord(
+	record: MirrorRecord,
+	nameCandidates: readonly string[]
+): NormalizedMirrorRecord {
+	const fields: Record<string, string> = {};
+	for (const [fieldName, value] of Object.entries(record.fields)) {
+		const text = bitablePlainText(value);
+		if (text) fields[fieldName] = text;
+	}
+	let name: string | null = null;
+	for (const candidate of nameCandidates) {
+		if (fields[candidate]) {
+			name = fields[candidate];
+			break;
+		}
+	}
+	if (!name) name = Object.values(fields)[0] ?? null;
+	return { recordId: record.recordId, name, fields };
+}

@@ -62,6 +62,20 @@ export const projectAgentAllowedCapabilities: ProjectCapabilityPolicyEntry[] = [
 		requiredUserPermissions: ['project:view']
 	},
 	{
+		id: 'project.list-tasks',
+		riskLevel: 'R1',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:view']
+	},
+	{
+		id: 'project.get-task',
+		riskLevel: 'R1',
+		sideEffect: 'read',
+		requiresConfirmation: false,
+		requiredUserPermissions: ['project:view']
+	},
+	{
 		id: 'project.extract-tasks',
 		riskLevel: 'R1',
 		sideEffect: 'read',
