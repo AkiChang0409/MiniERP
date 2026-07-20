@@ -90,6 +90,21 @@ declare global {
 		LARK_SUPPLIER_TABLE_ID?: string;
 		/** Classification dictionary table (Secondary Category → Primary Category), same Base. */
 		LARK_DICT_TABLE_ID?: string;
+		/**
+		 * Doc Hub auto-summary webhook (src/routes/api/integrations/lark/doc-hub-summary):
+		 * a Lark automation posts a new record's id here; MiniERP downloads +
+		 * OCRs + summarizes the attachment and writes the summary back.
+		 * `LARK_DOCHUB_WEBHOOK_SECRET` is an optional shared bearer secret the
+		 * automation's HTTP node must send as `Authorization: Bearer <value>`.
+		 * The *_FIELD / *_STATUS_* vars override the target field names + status
+		 * option labels when the Bitable table uses labels other than the
+		 * defaults ("Doc Content" / "Processing Status" / "Completed" / "Failed").
+		 */
+		LARK_DOCHUB_WEBHOOK_SECRET?: string;
+		LARK_DOCHUB_CONTENT_FIELD?: string;
+		LARK_DOCHUB_STATUS_FIELD?: string;
+		LARK_DOCHUB_STATUS_DONE?: string;
+		LARK_DOCHUB_STATUS_FAILED?: string;
 		/** HMAC secret for QC intake signed upload tokens (see src/app/qc-intake/token.ts). */
 		QC_TOKEN_SECRET?: string;
 		/** Monitored inbox that supplier email replies go to (fallback channel B). Defaults to EMAIL_FROM. */

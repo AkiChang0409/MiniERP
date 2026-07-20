@@ -13,7 +13,7 @@
  * the legacy D1 `projects` table and on Bitable-as-source-of-truth.
  */
 import { z } from 'zod';
-import { readBitableRecords, bitableText } from '$platform/integrations/lark/bitable-read';
+import { readBitableRecords, normalizeMirrorRecord } from '$platform/integrations/lark/bitable-read';
 import { bitableLinkedRecordIds } from '$platform/integrations/lark/bitable-field-codec';
 import type { ProjectCapability } from './capabilities/types';
 
@@ -62,41 +62,12 @@ function projectsTableId(env: Env): string {
 	return env.LARK_PROJECT_TABLE_ID ?? DEFAULT_PROJECTS_TABLE_ID;
 }
 
-interface NormalizedRecord {
-	recordId: string;
-	name: string | null;
-	fields: Record<string, string>;
-}
-
-/** Normalize a mirror record into `{ recordId, name, fields }` (all plain text). */
-function normalizeRecord(
-	record: { recordId: string; fields: Record<string, unknown> },
-	nameCandidates: readonly string[]
-): NormalizedRecord {
-	const fields: Record<string, string> = {};
-	for (const [fieldName, value] of Object.entries(record.fields)) {
-		const text = bitableText(value);
-		if (text) fields[fieldName] = text;
-	}
-	let name: string | null = null;
-	for (const candidate of nameCandidates) {
-		if (fields[candidate]) {
-			name = fields[candidate];
-			break;
-		}
-	}
-	if (!name) {
-		// Fall back to the first non-empty text field so lists are never nameless.
-		const first = Object.values(fields)[0];
-		name = first ?? null;
-	}
-	return { recordId: record.recordId, name, fields };
-}
-
+// Uses the shared `normalizeMirrorRecord` (B5 dedupe): flatten every field to
+// text + pick a name from candidates. Thin per-entity wrappers below.
 const normalizeProject = (record: { recordId: string; fields: Record<string, unknown> }) =>
-	normalizeRecord(record, NAME_FIELD_CANDIDATES);
+	normalizeMirrorRecord(record, NAME_FIELD_CANDIDATES);
 const normalizeTask = (record: { recordId: string; fields: Record<string, unknown> }) =>
-	normalizeRecord(record, TASK_NAME_FIELD_CANDIDATES);
+	normalizeMirrorRecord(record, TASK_NAME_FIELD_CANDIDATES);
 
 function tasksTableId(env: Env): string {
 	return env.LARK_TASK_TABLE_ID ?? DEFAULT_TASKS_TABLE_ID;

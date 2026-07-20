@@ -18,6 +18,18 @@
 # LARK_DICT_TABLE_ID=
 # HMAC secret for QC intake signed upload tokens (any long random string, e.g. openssl rand -hex 32).
 # QC_TOKEN_SECRET=
+
+# Doc Hub auto-summary webhook (src/routes/api/integrations/lark/doc-hub-summary).
+# A Lark automation ("Doc Hub 新增记录时" → 发送 HTTP 请求) posts the new record's id;
+# MiniERP downloads + OCRs + summarizes the attachment and writes the summary into
+# "Doc Content" + flips "Processing Status" to Completed. Set the HTTP node to send
+# `Authorization: Bearer <secret>` (any long random string, e.g. openssl rand -hex 32).
+# LARK_DOCHUB_WEBHOOK_SECRET=
+# Override target field / status labels only if the Bitable table renamed them:
+# LARK_DOCHUB_CONTENT_FIELD=Doc Content
+# LARK_DOCHUB_STATUS_FIELD=Processing Status
+# LARK_DOCHUB_STATUS_DONE=Completed
+# LARK_DOCHUB_STATUS_FAILED=Failed
 # Monitored inbox for supplier email replies (fallback channel B). Defaults to EMAIL_FROM if unset.
 # QC_INBOX_EMAIL=
 

@@ -159,7 +159,14 @@
       "Bash(node build-html.mjs \"./应用搭建-03-QC邮件回传AI匹配-实施方案.md\")",
       "Bash(curl -s -m 15 \"https://smartfin-v4.aki-wang.workers.dev/api/integrations/lark/card-callback\")",
       "Bash(curl -s -m 15 -X POST \"https://smartfin-v4.aki-wang.workers.dev/api/integrations/lark/card-callback\" -H \"Content-Type: application/json\" -d '{\"type\":\"url_verification\",\"challenge\":\"testchallenge123\",\"token\":\"whatever\"}')",
-      "Bash(grep -nE \"isProjectDetailPage|projects/\\\\\\(\\\\?!|new\\\\\\\\$|/projects/|detail\" \"src/routes/\\(app\\)/+layout.svelte\")"
+      "Bash(grep -nE \"isProjectDetailPage|projects/\\\\\\(\\\\?!|new\\\\\\\\$|/projects/|detail\" \"src/routes/\\(app\\)/+layout.svelte\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(JSON.parse\\(require\\('fs'\\).readFileSync\\('package.json'\\)\\).scripts, null, 2\\)\\)\")",
+      "Bash(node --check scripts/bench-agent-latency.mjs)",
+      "Bash(node scripts/bench-agent-latency.mjs)",
+      "Bash(grep -n \"^\\\\s*\\\\\"binding\\\\\"\\\\|d1_databases\\\\|kv_namespaces\\\\|\\\\\\\\[ai\\\\\\\\]\" wrangler.jsonc)",
+      "Bash(node scripts/bench-agent-latency.mjs --email bench-tester@smartfin.local --password Bench1234! --register --requests 2 --warmup 1 --out reports/agent-latency-smoketest.json)",
+      "Bash(node scripts/bench-agent-latency.mjs --email bench-tester@smartfin.local --password Bench1234! --register --auth-origin https://smartfin-v4.aki-wang.workers.dev --requests 2 --warmup 1 --out reports/agent-latency-smoketest.json)",
+      "Bash(node -e ' *)"
     ]
   }
 }

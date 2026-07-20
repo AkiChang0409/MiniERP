@@ -298,6 +298,37 @@ export interface BitableTableInfo {
 }
 
 /**
+ * Download attachment bytes for a Bitable file_token. Attachment field values
+ * come back from `bitableGetRecord`/`bitableSearchRecords` as
+ * `[{ file_token, name, type, size }]` — no ready-to-fetch URL, so the actual
+ * bytes need this separate Drive call.
+ * Docs: GET /open-apis/drive/v1/medias/{file_token}/download
+ */
+export async function bitableDownloadMedia(
+	env: Env,
+	fileToken: string
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+	const token = await getTenantAccessToken(env);
+	const res = await fetch(`${larkBaseUrl(env)}/open-apis/drive/v1/medias/${enc(fileToken)}/download`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	const contentType = res.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
+	// Lark returns JSON only on error; a successful download is binary.
+	if (!res.ok || contentType === 'application/json') {
+		let detail = `${res.status} ${res.statusText}`;
+		try {
+			const body = (await res.json()) as { code?: number; msg?: string };
+			detail = `code=${body.code} msg=${body.msg ?? 'unknown'}`;
+		} catch {
+			/* keep status detail */
+		}
+		throw new Error(`Lark media download failed: ${detail}`);
+	}
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	return { bytes, mimeType: contentType || 'application/octet-stream' };
+}
+
+/**
  * List all tables in a Base.
  * Docs: GET /open-apis/bitable/v1/apps/{app_token}/tables (paged).
  */

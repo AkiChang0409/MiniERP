@@ -23,6 +23,7 @@
 		"preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
 		"prepare": "svelte-kit sync || echo ''",
 		"check:modular-boundary": "node scripts/check-modular-boundary.mjs",
+	"bench:agent": "node scripts/bench-agent-latency.mjs",
 		"check:architecture-report": "node scripts/check-modular-boundary.mjs --report-only",
 		"check": "npm run check:modular-boundary && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",

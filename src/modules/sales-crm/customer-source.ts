@@ -8,7 +8,11 @@
  */
 import type { DBClient } from '$infrastructure/db';
 import { bitableCreateRecord, bitableUpdateRecord } from '$platform/integrations/lark/bitable';
-import { readBitableRecords, bitableText } from '$platform/integrations/lark/bitable-read';
+import { bitableText } from '$platform/integrations/lark/bitable-read';
+import {
+	loadBitableProjection,
+	loadBitableLinkIndex
+} from '$platform/integrations/lark/bitable-projection';
 import { upsertBitableMirrorRecord } from '$platform/integrations/lark/bitable-sync';
 import { recordLarkWriteOperation } from '$platform/integrations/lark/bitable-write-log';
 import {
@@ -23,6 +27,10 @@ import {
 	encodeBusinessPartnerCreate,
 	encodeContactPersonCreate
 } from './lark-contracts';
+
+/** Shared read/write column contract (single source for Bitable column names). */
+const BP = BUSINESS_PARTNER_TABLE.fields;
+const CP = CONTACT_PERSON_TABLE.fields;
 
 export type CustomerRow = typeof businessPartners.$inferSelect;
 export interface CustomerOption {
@@ -82,11 +90,11 @@ function normalizeType(value: unknown): CustomerRow['type'] {
 function mapContactPerson(recordId: string, f: Record<string, unknown>): ContactPersonProjection {
 	return {
 		id: recordId,
-		name: bitableText(f['Contact Name']),
-		position: bitableText(f['Position']),
-		phone: bitablePhoneText(f['Phone']),
-		email: bitableText(f['Personal Email']),
-		isMainContact: bitableCheckbox(f['Is_main_contact'])
+		name: bitableText(f[CP.name]),
+		position: bitableText(f[CP.position]),
+		phone: bitablePhoneText(f[CP.phone]),
+		email: bitableText(f[CP.personalEmail]),
+		isMainContact: bitableCheckbox(f[CP.isMainContact])
 	};
 }
 
@@ -117,33 +125,33 @@ function mapBusinessPartner(
 	contacts: ContactPersonLookup = new Map()
 ): CustomerRow {
 	const now = '';
-	const contactPersonRecordIds = bitableLinkedRecordIds(f['Contact Person']);
+	const contactPersonRecordIds = bitableLinkedRecordIds(f[BP.contactPerson]);
 	const contactPersons = resolveLinkedContacts(contactPersonRecordIds, contacts);
 	const linkedContactText = contactPersons.map(contactDisplayName).filter(Boolean).join('; ');
 	const contact =
-		linkedContactText || (contactPersonRecordIds.length > 0 ? null : bitableText(f['Contact Person']));
+		linkedContactText || (contactPersonRecordIds.length > 0 ? null : bitableText(f[BP.contactPerson]));
 	return {
 		id: recordId,
-		name: bitableText(f['Name']) ?? '(unnamed)',
-		type: normalizeType(f['Type']),
-		registrationNo: bitableText(f['Registration No']),
-		country: bitableText(f['Country']),
-		address: bitableText(f['Address']),
+		name: bitableText(f[BP.name]) ?? '(unnamed)',
+		type: normalizeType(f[BP.type]),
+		registrationNo: bitableText(f[BP.registrationNo]),
+		country: bitableText(f[BP.country]),
+		address: bitableText(f[BP.address]),
 		contact,
-		itemDescription: bitableText(f['Item Description']),
+		itemDescription: bitableText(f[BP.itemDescription]),
 		dateCreate: null,
 		projectRelated: null,
-		currency: bitableText(f['Currency']) ?? 'SGD',
-		gstRegNo: bitableText(f['GST Registration No']),
+		currency: bitableText(f[BP.currency]) ?? 'SGD',
+		gstRegNo: bitableText(f[BP.gstRegistrationNo]),
 		metadata: JSON.stringify({
-			no: bitableText(f['No']),
-			email: bitableText(f['Email']),
-			phone: bitablePhoneText(f['Phone']),
-			credit: bitableText(f['Credit']),
-			paymentTerms: bitableText(f['Payment Terms']),
+			no: bitableText(f[BP.no]),
+			email: bitableText(f[BP.email]),
+			phone: bitablePhoneText(f[BP.phone]),
+			credit: bitableText(f[BP.credit]),
+			paymentTerms: bitableText(f[BP.paymentTerms]),
 			contactPersonRecordIds,
 			contactPersons,
-			remark: bitableText(f['Remark'])
+			remark: bitableText(f[BP.remark])
 		}),
 		createdAt: now,
 		updatedAt: now,
@@ -162,17 +170,15 @@ export class BitableCustomerRepository implements CustomerSource {
 
 	private async contactLookup(): Promise<ContactPersonLookup> {
 		if (!this.contactTableId) return new Map();
-		const rows = await readBitableRecords(this.db, this.contactTableId);
-		return new Map(rows.map((row) => [row.recordId, mapContactPerson(row.recordId, row.fields)]));
+		return loadBitableLinkIndex(this.db, this.contactTableId, mapContactPerson);
 	}
 
 	private async all(): Promise<CustomerRow[]> {
-		const [records, contacts] = await Promise.all([
-			readBitableRecords(this.db, this.tableId),
-			this.contactLookup()
-		]);
-		return records
-			.map((r) => mapBusinessPartner(r.recordId, r.fields, contacts))
+		const contacts = await this.contactLookup();
+		const rows = await loadBitableProjection(this.db, this.tableId, (recordId, fields) =>
+			mapBusinessPartner(recordId, fields, contacts)
+		);
+		return rows
 			.filter((c) => CUSTOMER_TYPES.has(c.type))
 			.sort((a, b) => a.name.localeCompare(b.name));
 	}
