@@ -26,6 +26,7 @@ import { executeGuardedCapability } from '../execute-capability';
 import { buildRuntimeContext } from './context-builder';
 import { lookupAgent } from './agent-registry';
 import {
+	appendConversationTurns,
 	clearConversationState,
 	consumePendingConfirmation,
 	getConversationState,
@@ -33,6 +34,7 @@ import {
 } from './conversation-state';
 import { runWithTools } from './run-with-tools';
 import { buildAgentToolCatalog } from './tool-catalog';
+import { describeCurrentContext } from './current-context';
 import type {
 	ContextProvider,
 	DomainAgentPlugin,
@@ -213,10 +215,23 @@ export async function handleMessage(
 		};
 	}
 
+	// P4.1: current-page context seeding + prior conversation turns for continuity.
+	const contextPreamble = describeCurrentContext(context.routeContext) ?? undefined;
+	const convoBase = {
+		conversationId: message.conversationId,
+		source: message.source,
+		userId: message.userId,
+		tenantId: context.tenantId
+	};
+	const priorState = kv ? await getConversationState(kv, message.conversationId) : null;
+	const priorMessages = (priorState?.history ?? []).map((t) => ({ role: t.role, content: t.text }));
+
 	const loop = await runWithTools({
 		agentId: 'orchestrator',
 		agentVersion: '1.0.0',
 		userMessage: message.text,
+		contextPreamble,
+		priorMessages,
 		tools,
 		env: mc.env,
 		db: mc.db,
@@ -268,6 +283,8 @@ export async function handleMessage(
 			},
 			{ actionId, items, summary: combinedSummary }
 		);
+		// Record the user turn for continuity; the applied result is recorded on confirm.
+		await appendConversationTurns(kv, convoBase, [{ role: 'user', text: message.text }]);
 		return {
 			kind: 'confirmation',
 			message: `${preface}${combinedSummary}\n\nReply to confirm, or cancel.`,
@@ -289,6 +306,12 @@ export async function handleMessage(
 	}
 
 	// 'final' or 'max_steps' — natural-language answer (possibly partial).
+	if (kv) {
+		await appendConversationTurns(kv, convoBase, [
+			{ role: 'user', text: message.text },
+			{ role: 'assistant', text: loop.answer }
+		]);
+	}
 	return {
 		kind: 'answer',
 		message: loop.answer,

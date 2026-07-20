@@ -52,6 +52,10 @@ export interface RunWithToolsInput {
 	userMessage: string;
 	/** Persona / system preamble prepended to the loop prompt. */
 	systemPreamble?: string;
+	/** Current-page context (P4.1): "the user is looking at project X" — added to the system prompt. */
+	contextPreamble?: string;
+	/** Prior conversation turns (P4.1) fed before the current message for continuity. */
+	priorMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	/** Full cross-domain tool catalog the model may choose from (reads + writes). */
 	tools: ToolSpec[];
 	maxSteps?: number;
@@ -100,7 +104,7 @@ function truncate(value: string, max = 6000): string {
 	return value.length > max ? `${value.slice(0, max)}… (truncated)` : value;
 }
 
-function buildSystemPrompt(tools: ToolSpec[], preamble?: string): string {
+function buildSystemPrompt(tools: ToolSpec[], preamble?: string, contextPreamble?: string): string {
 	const toolLines = tools
 		.map((tool) => {
 			const tag = isWriteTool(tool) ? ' [WRITE — will be proposed for confirmation, not executed now]' : '';
@@ -109,6 +113,7 @@ function buildSystemPrompt(tools: ToolSpec[], preamble?: string): string {
 		.join('\n');
 	return [
 		preamble ?? 'You are the SmartFin/MiniERP assistant, a governed cross-domain agent.',
+		...(contextPreamble ? ['', contextPreamble] : []),
 		'You can call the tools below to read ERP business data and to propose changes.',
 		'Work step by step: call a read tool, look at its result, and call more tools (across domains) until you can fully answer. For questions that need business data, ALWAYS call the relevant tool before answering — do not answer from memory and do not refuse authorized data that a listed tool can retrieve.',
 		'To make changes, call the matching WRITE tool(s) with the full intended input and a clear one-line "summary". A write is NEVER executed here — it is STAGED. You may stage several writes (call several write tools) and they are all confirmed together by the user at the end. After staging the write(s) you need, give your final answer; do NOT claim a change is already done.',
@@ -131,7 +136,8 @@ export async function runWithTools(input: RunWithToolsInput): Promise<RunWithToo
 	const stagedKeys = new Set<string>();
 	const specById = new Map(input.tools.map((tool) => [tool.id, tool]));
 	const allowed = new Set(input.tools.map((tool) => tool.id));
-	const system = buildSystemPrompt(input.tools, input.systemPreamble);
+	const system = buildSystemPrompt(input.tools, input.systemPreamble, input.contextPreamble);
+	const priorMessages = input.priorMessages ?? [];
 	let scratch = '';
 
 	for (let i = 1; i <= maxSteps; i++) {
@@ -139,6 +145,7 @@ export async function runWithTools(input: RunWithToolsInput): Promise<RunWithToo
 			task: 'agent_tool_loop',
 			messages: [
 				{ role: 'system', content: system },
+				...priorMessages,
 				{ role: 'user', content: input.userMessage + (scratch ? `\n\n${scratch}` : '') }
 			],
 			schema: decisionSchema,

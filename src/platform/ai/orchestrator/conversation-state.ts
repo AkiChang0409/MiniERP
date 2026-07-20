@@ -45,6 +45,12 @@ export interface AgentPendingConfirmation {
 	expiresAt: string;
 }
 
+/** One prior turn in the conversation (P4.1 layer 2 — multi-turn continuity). */
+export interface AgentConversationTurn {
+	role: 'user' | 'assistant';
+	text: string;
+}
+
 export interface AgentConversationState {
 	conversationId: string;
 	source: ChannelSource;
@@ -53,8 +59,13 @@ export interface AgentConversationState {
 	lastResolvedEntities?: ResolvedEntities;
 	pendingClarification?: AgentPendingClarification;
 	pendingConfirmation?: AgentPendingConfirmation;
+	/** Recent turns (oldest→newest), capped; fed back to the loop as prior context. */
+	history?: AgentConversationTurn[];
 	updatedAt: string;
 }
+
+/** Default number of recent turns kept for continuity. */
+const DEFAULT_MAX_HISTORY_TURNS = 6;
 
 const TTL_SECONDS = 60 * 60; // 1 hour
 const CONFIRMATION_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -82,6 +93,28 @@ export async function saveConversationState(
 ): Promise<void> {
 	const next: AgentConversationState = { ...state, updatedAt: new Date().toISOString() };
 	await kv.put(key(state.conversationId), JSON.stringify(next), { expirationTtl: TTL_SECONDS });
+}
+
+/**
+ * Append turns to the conversation history (oldest→newest), capped to the last
+ * `maxTurns`. Creates the state if absent. Keyed by conversationId (already
+ * channel+user scoped), so history never crosses users/conversations.
+ */
+export async function appendConversationTurns(
+	kv: KVNamespace,
+	base: Pick<AgentConversationState, 'conversationId' | 'source' | 'userId' | 'tenantId'>,
+	turns: AgentConversationTurn[],
+	maxTurns = DEFAULT_MAX_HISTORY_TURNS
+): Promise<void> {
+	if (turns.length === 0) return;
+	const existing = await getConversationState(kv, base.conversationId);
+	const history = [...(existing?.history ?? []), ...turns].slice(-maxTurns);
+	const next: AgentConversationState = {
+		...(existing ?? { conversationId: base.conversationId, source: base.source, updatedAt: '' }),
+		...base,
+		history
+	};
+	await saveConversationState(kv, next);
 }
 
 export async function clearConversationState(

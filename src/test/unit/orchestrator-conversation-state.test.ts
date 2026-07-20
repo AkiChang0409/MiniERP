@@ -3,7 +3,8 @@ import {
 	setPendingConfirmation,
 	consumePendingConfirmation,
 	getConversationState,
-	saveConversationState
+	saveConversationState,
+	appendConversationTurns
 } from '$platform/ai/orchestrator/conversation-state';
 
 /** Minimal in-memory KVNamespace stub (only the methods conversation-state uses). */
@@ -142,5 +143,41 @@ describe('orchestrator conversation-state — confirmation loop', () => {
 			payloadHash: pending.payloadHash
 		});
 		expect(good.ok).toBe(true);
+	});
+});
+
+describe('conversation history (P4.1)', () => {
+	it('appends turns and caps to the last maxTurns', async () => {
+		const kv = makeKv();
+		await appendConversationTurns(kv, base, [
+			{ role: 'user', text: 'a' },
+			{ role: 'assistant', text: 'A' }
+		]);
+		await appendConversationTurns(
+			kv,
+			base,
+			[
+				{ role: 'user', text: 'b' },
+				{ role: 'assistant', text: 'B' }
+			],
+			3
+		);
+		const state = await getConversationState(kv, base.conversationId);
+		// capped to last 3: A, b, B (oldest 'a' dropped)
+		expect(state?.history?.map((t) => t.text)).toEqual(['A', 'b', 'B']);
+	});
+
+	it('keeps history isolated per conversationId', async () => {
+		const kv = makeKv();
+		await appendConversationTurns(kv, base, [{ role: 'user', text: 'mine' }]);
+		await appendConversationTurns(
+			kv,
+			{ ...base, conversationId: 'ai_panel:other' },
+			[{ role: 'user', text: 'theirs' }]
+		);
+		const a = await getConversationState(kv, base.conversationId);
+		const b = await getConversationState(kv, 'ai_panel:other');
+		expect(a?.history?.map((t) => t.text)).toEqual(['mine']);
+		expect(b?.history?.map((t) => t.text)).toEqual(['theirs']);
 	});
 });

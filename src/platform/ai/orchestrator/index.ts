@@ -66,9 +66,11 @@ export {
 	getConversationState,
 	saveConversationState,
 	clearConversationState,
+	appendConversationTurns,
 	setPendingConfirmation,
 	consumePendingConfirmation,
 	type AgentConversationState,
+	type AgentConversationTurn,
 	type AgentPendingClarification,
 	type AgentPendingConfirmation,
 	type ConfirmationOutcome

@@ -9,8 +9,11 @@ import type { ToolSpec } from '$platform/ai/capability-registry';
 
 // Queue of decisions the mocked LLM returns, one per loop step.
 const decisions: unknown[] = [];
+// Capture the messages passed on the last runStructuredOutput call (P4.1 assertions).
+let lastMessages: Array<{ role: string; content: string }> = [];
 vi.mock('$platform/ai/ai-runtime', () => ({
-	runStructuredOutput: vi.fn(async () => {
+	runStructuredOutput: vi.fn(async (args: { messages: Array<{ role: string; content: string }> }) => {
+		lastMessages = args.messages;
 		const value = decisions.shift();
 		return { status: 'success', result: { value } };
 	})
@@ -138,5 +141,28 @@ describe('runWithTools — unified cross-domain loop', () => {
 		expect(result.status).toBe('final');
 		expect(result.steps[0]).toMatchObject({ toolId: 'not.a.tool', ok: false, status: 'not_allowed' });
 		expect(execCalls).toHaveLength(0);
+	});
+
+	it('injects contextPreamble into the system prompt and priorMessages before the turn (P4.1)', async () => {
+		decisions.push({ action: 'final', answer: 'done' });
+
+		await runWithTools({
+			...baseInput,
+			userMessage: 'what about this project',
+			contextPreamble: 'CURRENT CONTEXT: project id=recABC',
+			priorMessages: [
+				{ role: 'user', content: 'list my projects' },
+				{ role: 'assistant', content: 'You have 2 projects.' }
+			],
+			tools: [salesRead]
+		});
+
+		expect(lastMessages[0].role).toBe('system');
+		expect(lastMessages[0].content).toContain('CURRENT CONTEXT: project id=recABC');
+		// prior turns sit between system and the current user message.
+		expect(lastMessages[1]).toEqual({ role: 'user', content: 'list my projects' });
+		expect(lastMessages[2]).toEqual({ role: 'assistant', content: 'You have 2 projects.' });
+		expect(lastMessages[lastMessages.length - 1].role).toBe('user');
+		expect(lastMessages[lastMessages.length - 1].content).toContain('what about this project');
 	});
 });
