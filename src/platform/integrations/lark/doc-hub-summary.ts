@@ -21,6 +21,7 @@ import {
 	bitableGetRecord,
 	bitableUpdateRecord,
 	bitableListFields,
+	bitableTableRevision,
 	type BitableFieldDef
 } from './bitable';
 import { extractAttachmentsText } from './doc-hub-attachment-text';
@@ -170,12 +171,17 @@ export async function summarizeDocHubRecord(env: Env, recordId: string): Promise
 		}
 	}
 
-	const extracted = await extractAttachmentsText(env, record.fields);
+	// Bitable-owned attachments need the table id + rev on the media download,
+	// else Lark 400s. Missing rev degrades gracefully (download simply omits it).
+	const rev = await bitableTableRevision(env, { appToken: schema.appToken, tableId: schema.tableId });
+	const perm = rev !== undefined ? { tableId: schema.tableId, rev } : undefined;
+
+	const extracted = await extractAttachmentsText(env, record.fields, perm);
 	if (!extracted.text.trim()) {
 		const diagnostics: DocHubFileDiagnostic[] = extracted.files.map((f) => ({
 			name: f.name,
 			status: f.status,
-			chars: f.text.trim().length,
+			chars: (f.text ?? '').trim().length,
 			error: f.error
 		}));
 		const reason = extracted.files.length

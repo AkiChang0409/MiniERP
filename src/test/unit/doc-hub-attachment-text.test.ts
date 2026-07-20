@@ -14,7 +14,8 @@ vi.mock('$platform/integrations/lark/bitable', async (orig) => {
 		...actual,
 		larkDocHubTarget: () => ({ appToken: 'appTok', tableId: 'tblDocHub' }),
 		bitableGetRecord: (...args: unknown[]) => bitableGetRecord(...args),
-		bitableDownloadMedia: (...args: unknown[]) => bitableDownloadMedia(...args)
+		bitableDownloadMedia: (...args: unknown[]) => bitableDownloadMedia(...args),
+		bitableTableRevision: async () => 1
 	};
 });
 

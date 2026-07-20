@@ -17,7 +17,8 @@ vi.mock('$platform/integrations/lark/bitable', async (orig) => {
 		larkDocHubTarget: () => ({ appToken: 'appTok', tableId: 'tblDocHub' }),
 		bitableListFields: (...a: unknown[]) => bitableListFields(...a),
 		bitableGetRecord: (...a: unknown[]) => bitableGetRecord(...a),
-		bitableUpdateRecord: (...a: unknown[]) => bitableUpdateRecord(...a)
+		bitableUpdateRecord: (...a: unknown[]) => bitableUpdateRecord(...a),
+		bitableTableRevision: async () => 1
 	};
 });
 
@@ -79,7 +80,10 @@ describe('summarizeDocHubRecord', () => {
 
 	it('marks the record Failed when no text could be extracted', async () => {
 		bitableGetRecord.mockResolvedValueOnce({ record_id: 'rec1', fields: {} });
-		extractAttachmentsText.mockResolvedValueOnce({ files: [{}], text: '   ' });
+		extractAttachmentsText.mockResolvedValueOnce({
+			files: [{ name: 'x.pdf', status: 'failed', text: '', error: 'Lark media download failed: 400' }],
+			text: '   '
+		});
 
 		const result = await summarizeDocHubRecord(env, 'rec1');
 

@@ -6,8 +6,13 @@
  * extraction used everywhere else in MiniERP, just fed by bytes downloaded
  * straight from Lark Drive instead of R2.
  */
-import { larkDocHubTarget, bitableGetRecord, bitableDownloadMedia } from './bitable';
-import type { BitableFields } from './bitable';
+import {
+	larkDocHubTarget,
+	bitableGetRecord,
+	bitableDownloadMedia,
+	bitableTableRevision
+} from './bitable';
+import type { BitableFields, BitableMediaPerm } from './bitable';
 import { extractTextFromBytesRaw } from '$platform/ai/text-extraction';
 
 interface RawAttachment {
@@ -77,7 +82,8 @@ export interface DocHubRecordTextResult extends DocHubTextResult {
  */
 export async function extractAttachmentsText(
 	env: Env,
-	fields: BitableFields
+	fields: BitableFields,
+	perm?: BitableMediaPerm
 ): Promise<DocHubTextResult> {
 	const attachments = collectAttachmentFiles(fields);
 	if (attachments.length === 0) {
@@ -87,7 +93,7 @@ export async function extractAttachmentsText(
 	const files: DocHubFileTextResult[] = [];
 	for (const att of attachments) {
 		try {
-			const { bytes, mimeType } = await bitableDownloadMedia(env, att.fileToken);
+			const { bytes, mimeType } = await bitableDownloadMedia(env, att.fileToken, perm);
 			const result = await extractTextFromBytesRaw(bytes, mimeType || att.mimeType, att.name, env);
 			files.push({
 				name: att.name,
@@ -117,6 +123,8 @@ export async function extractAttachmentsText(
 export async function extractDocHubRecordText(env: Env, recordId: string): Promise<DocHubRecordTextResult> {
 	const { appToken, tableId } = larkDocHubTarget(env);
 	const record = await bitableGetRecord(env, { appToken, tableId, recordId });
-	const result = await extractAttachmentsText(env, record.fields);
+	const rev = await bitableTableRevision(env, { appToken, tableId });
+	const perm = rev !== undefined ? { tableId, rev } : undefined;
+	const result = await extractAttachmentsText(env, record.fields, perm);
 	return { recordId, ...result };
 }

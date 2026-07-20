@@ -298,18 +298,39 @@ export interface BitableTableInfo {
 }
 
 /**
+ * Bitable-attachment permission context for downloading attachment media.
+ * Bitable-owned files require the `extra` query param on the Drive download
+ * call (otherwise it 400s), carrying the owning table id + its current
+ * revision. Build with `bitableTableRevision`.
+ */
+export interface BitableMediaPerm {
+	tableId: string;
+	rev: number;
+}
+
+/**
  * Download attachment bytes for a Bitable file_token. Attachment field values
  * come back from `bitableGetRecord`/`bitableSearchRecords` as
  * `[{ file_token, name, type, size }]` — no ready-to-fetch URL, so the actual
  * bytes need this separate Drive call.
+ *
+ * IMPORTANT for Bitable attachments: pass `perm` (the owning table id + rev).
+ * The Drive media endpoint requires an `extra={"bitablePerm":{tableId,rev}}`
+ * query param for base-owned files; without it Lark returns 400 Bad Request.
  * Docs: GET /open-apis/drive/v1/medias/{file_token}/download
  */
 export async function bitableDownloadMedia(
 	env: Env,
-	fileToken: string
+	fileToken: string,
+	perm?: BitableMediaPerm
 ): Promise<{ bytes: Uint8Array; mimeType: string }> {
 	const token = await getTenantAccessToken(env);
-	const res = await fetch(`${larkBaseUrl(env)}/open-apis/drive/v1/medias/${enc(fileToken)}/download`, {
+	let url = `${larkBaseUrl(env)}/open-apis/drive/v1/medias/${enc(fileToken)}/download`;
+	if (perm) {
+		const extra = JSON.stringify({ bitablePerm: { tableId: perm.tableId, rev: perm.rev } });
+		url += `?extra=${enc(extra)}`;
+	}
+	const res = await fetch(url, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	const contentType = res.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
@@ -356,4 +377,17 @@ export async function bitableListTables(
 		pageToken = data.has_more ? data.page_token : undefined;
 	} while (pageToken);
 	return out;
+}
+
+/**
+ * Current revision of one table (needed for the `bitablePerm` on attachment
+ * media downloads). Resolved via the table list; returns undefined if the
+ * table isn't found.
+ */
+export async function bitableTableRevision(
+	env: Env,
+	args: { appToken: string; tableId: string }
+): Promise<number | undefined> {
+	const tables = await bitableListTables(env, { appToken: args.appToken });
+	return tables.find((t) => t.tableId === args.tableId)?.revision;
 }
