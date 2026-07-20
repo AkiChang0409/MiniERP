@@ -12,6 +12,7 @@ interface ProjectListRow {
 }
 
 
+
 export const projectEntityResolver: EntityResolver = {
 	type: 'project',
 	async resolve(input: EntityResolverInput): Promise<EntityCandidate[]> {
