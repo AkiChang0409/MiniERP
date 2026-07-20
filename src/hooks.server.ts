@@ -64,7 +64,8 @@ function isPublicAuthApi(pathname: string) {
 function isPublicWebhook(pathname: string) {
 	return (
 		pathname === '/api/integrations/lark/webhook' ||
-		pathname === '/api/integrations/lark/card-callback'
+		pathname === '/api/integrations/lark/card-callback' ||
+		pathname === '/api/integrations/lark/doc-hub-summary'
 	);
 }
 
