@@ -77,9 +77,17 @@ function resolveSelectOption(
 	return undefined;
 }
 
+/** Per-attachment extraction diagnostics surfaced on the failure path. */
+export interface DocHubFileDiagnostic {
+	name: string;
+	status: string;
+	chars: number;
+	error?: string;
+}
+
 export type DocHubSummaryResult =
 	| { ok: true; recordId: string; summary: string; provider: string; skipped?: boolean }
-	| { ok: false; recordId: string; reason: string };
+	| { ok: false; recordId: string; reason: string; files?: DocHubFileDiagnostic[] };
 
 interface ResolvedSchema {
 	appToken: string;
@@ -164,11 +172,17 @@ export async function summarizeDocHubRecord(env: Env, recordId: string): Promise
 
 	const extracted = await extractAttachmentsText(env, record.fields);
 	if (!extracted.text.trim()) {
+		const diagnostics: DocHubFileDiagnostic[] = extracted.files.map((f) => ({
+			name: f.name,
+			status: f.status,
+			chars: f.text.trim().length,
+			error: f.error
+		}));
 		const reason = extracted.files.length
 			? `No usable text from ${extracted.files.length} attachment(s)`
 			: 'Record has no attachment';
 		await trySetStatus(env, schema, recordId, schema.failedValue);
-		return { ok: false, recordId, reason };
+		return { ok: false, recordId, reason, files: diagnostics };
 	}
 
 	const { summary, provider } = await summarizeDocumentText(env, extracted.text);
