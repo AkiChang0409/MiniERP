@@ -16,6 +16,8 @@ export type {
 	OrchestratorResultKind,
 	OrchestratorCandidate,
 	OrchestratorResult,
+	OrchestratorConfirmationDraft,
+	OrchestratorConfirmationDraftItem,
 	ApplyRequest,
 	BuildApplyRequestArgs,
 	PlannedAction,

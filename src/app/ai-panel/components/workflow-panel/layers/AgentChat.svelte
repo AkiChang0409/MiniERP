@@ -1,6 +1,8 @@
 <script lang="ts">
-	import type { OrchestratorResult } from '$platform/ai/orchestrator';
+	import type { OrchestratorResult, OrchestratorConfirmationDraft } from '$platform/ai/orchestrator';
 	import { sendAgentMessage } from '$app-layer/ai-panel/agent/agent-api';
+	import { renderMarkdownLite } from '$app-layer/ai-panel/agent/markdown-lite';
+	import { agentPageContext } from '$app-layer/ai-panel/state/context';
 
 	interface ChatMessage {
 		role: 'user' | 'agent';
@@ -8,16 +10,11 @@
 		result?: OrchestratorResult;
 	}
 
-	interface DraftChange {
-		taskId?: string;
-		action: string;
-		before?: unknown;
-		after?: unknown;
-		reason?: string;
-	}
-	interface DraftView {
-		changes?: DraftChange[];
-		risks?: string[];
+	interface TraceStep {
+		step: number;
+		toolId: string;
+		ok: boolean;
+		status: string;
 	}
 
 	// One conversation per panel session.
@@ -29,19 +26,32 @@
 	/** The actionId of the currently-previewed confirmation, if any. */
 	let pendingActionId = $state<string | null>(null);
 
-	function currentProjectId(): string | undefined {
-		if (typeof window === 'undefined') return undefined;
-		const m = window.location.pathname.match(/\/projects\/([^/]+)/);
-		return m?.[1];
-	}
-
 	function routeContext() {
 		if (typeof window === 'undefined') return undefined;
-		return { route: window.location.pathname, projectId: currentProjectId() };
+		// Prefer the page-provided context store (project/task/document), fall back
+		// to parsing the URL so a project id is always available.
+		const page = $agentPageContext as Record<string, unknown>;
+		const fromUrl = window.location.pathname.match(/\/projects\/([^/]+)/)?.[1];
+		const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+		return {
+			route: window.location.pathname,
+			projectId: str(page.project_id) ?? fromUrl,
+			taskId: str(page.task_id),
+			documentId: str(page.document_id)
+		};
 	}
 
-	function draftOf(result?: OrchestratorResult): DraftView | null {
-		return (result?.draft as DraftView | undefined) ?? null;
+	function draftOf(result?: OrchestratorResult): OrchestratorConfirmationDraft | null {
+		return (result?.draft as OrchestratorConfirmationDraft | undefined) ?? null;
+	}
+
+	function traceSteps(result?: OrchestratorResult): TraceStep[] {
+		const steps = result?.trace?.steps;
+		return Array.isArray(steps) ? (steps as TraceStep[]) : [];
+	}
+
+	function isDanger(result?: OrchestratorResult): boolean {
+		return result?.kind === 'error' || result?.kind === 'denied' || result?.kind === 'no_route';
 	}
 
 	async function run(payload: Parameters<typeof sendAgentMessage>[0], echo?: string) {
@@ -98,13 +108,26 @@
 		{/if}
 
 		{#each messages as msg, i (i)}
-			<div class="bubble" class:is-user={msg.role === 'user'} class:is-agent={msg.role === 'agent'}>
-				<div class="bubble-text">{msg.text}</div>
+			<div
+				class="bubble"
+				class:is-user={msg.role === 'user'}
+				class:is-agent={msg.role === 'agent'}
+				class:is-danger={msg.role === 'agent' && isDanger(msg.result)}
+			>
+				{#if msg.role === 'agent'}
+					<!-- markdown-lite is XSS-safe: it escapes before formatting -->
+					<div class="bubble-text md">{@html renderMarkdownLite(msg.text)}</div>
+				{:else}
+					<div class="bubble-text">{msg.text}</div>
+				{/if}
 
 				{#if msg.result?.kind === 'clarification' && msg.result.candidates?.length}
 					<div class="chips">
 						{#each msg.result.candidates as c (c.id)}
-							<button class="chip" onclick={() => run({ message: c.label, conversationId, routeContext: routeContext() }, c.label)}>
+							<button
+								class="chip"
+								onclick={() => run({ message: c.label, conversationId, routeContext: routeContext() }, c.label)}
+							>
 								{c.label}
 							</button>
 						{/each}
@@ -113,38 +136,45 @@
 
 				{#if msg.result?.kind === 'confirmation'}
 					{@const draft = draftOf(msg.result)}
-					{#if draft?.changes?.length}
-						<div class="diff">
-							{#each draft.changes as ch, ci (ci)}
-								<div class="diff-row">
-									<span class="diff-action">{ch.action}</span>
-									<div class="diff-body">
-										{#if ch.reason}<div class="diff-reason">{ch.reason}</div>{/if}
-										<div class="diff-ba">
-											<span class="ba-before">{JSON.stringify(ch.before ?? {})}</span>
-											<span class="ba-arrow">→</span>
-											<span class="ba-after">{JSON.stringify(ch.after ?? {})}</span>
-										</div>
-									</div>
-								</div>
-							{/each}
-						</div>
-						{#if draft.risks?.length}
-							<ul class="risks">
-								{#each draft.risks as r, ri (ri)}<li>{r}</li>{/each}
+					<div class="draft">
+						{#if draft?.summary}<div class="draft-summary">{draft.summary}</div>{/if}
+						{#if draft?.items?.length}
+							<ul class="draft-items">
+								{#each draft.items as it, ii (ii)}
+									<li>
+										<span class="cap">{it.capabilityId}</span>
+										{#if it.riskLevel}<span class="risk">{it.riskLevel}</span>{/if}
+										<span class="item-summary">{it.summary}</span>
+									</li>
+								{/each}
 							</ul>
 						{/if}
-						{#if msg.result.actionId && pendingActionId === msg.result.actionId}
-							<div class="confirm-actions">
-								<button class="btn btn-confirm" disabled={busy} onclick={() => confirm(msg.result!.actionId!)}>
-									Confirm & apply
-								</button>
-								<button class="btn btn-cancel" disabled={busy} onclick={() => cancel()}>Cancel</button>
-							</div>
-						{:else}
-							<div class="confirm-done">This proposal is no longer pending.</div>
-						{/if}
+					</div>
+					{#if msg.result.actionId && pendingActionId === msg.result.actionId}
+						<div class="confirm-actions">
+							<button class="btn btn-confirm" disabled={busy} onclick={() => confirm(msg.result!.actionId!)}>
+								Confirm & apply
+							</button>
+							<button class="btn btn-cancel" disabled={busy} onclick={() => cancel()}>Cancel</button>
+						</div>
+					{:else}
+						<div class="confirm-done">This proposal is no longer pending.</div>
 					{/if}
+				{/if}
+
+				{#if msg.role === 'agent' && traceSteps(msg.result).length}
+					<details class="trace">
+						<summary>Agent ran {traceSteps(msg.result).length} step(s)</summary>
+						<ol>
+							{#each traceSteps(msg.result) as s (s.step)}
+								<li class:ok={s.ok} class:bad={!s.ok}>
+									<span class="tstep">{s.ok ? '✓' : '✕'}</span>
+									<span class="ttool">{s.toolId}</span>
+									<span class="tstatus">{s.status}</span>
+								</li>
+							{/each}
+						</ol>
+					</details>
 				{/if}
 			</div>
 		{/each}
@@ -199,6 +229,29 @@
 		background: var(--panel-surface-deep);
 		border: 1px solid var(--panel-divider);
 	}
+	.bubble.is-danger {
+		border-color: var(--panel-danger);
+		background: rgba(225, 118, 118, 0.1);
+	}
+	/* markdown-lite output */
+	.md :global(p) {
+		margin: 0 0 6px;
+	}
+	.md :global(p:last-child) {
+		margin-bottom: 0;
+	}
+	.md :global(ul),
+	.md :global(ol) {
+		margin: 4px 0;
+		padding-left: 18px;
+	}
+	.md :global(code) {
+		font-family: monospace;
+		font-size: 12px;
+		background: rgba(255, 255, 255, 0.06);
+		padding: 1px 4px;
+		border-radius: 4px;
+	}
 	.chips {
 		display: flex;
 		flex-wrap: wrap;
@@ -214,49 +267,51 @@
 		cursor: pointer;
 		font-size: 12px;
 	}
-	.diff {
+	.draft {
 		margin-top: 8px;
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
 	}
-	.diff-row {
+	.draft-summary {
+		font-size: 12px;
+		color: var(--panel-fg);
+		white-space: pre-wrap;
+	}
+	.draft-items {
+		margin: 0;
+		padding-left: 0;
+		list-style: none;
 		display: flex;
-		gap: 8px;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.draft-items li {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		flex-wrap: wrap;
 		padding: 6px 8px;
 		border-radius: 8px;
 		background: rgba(255, 255, 255, 0.03);
 	}
-	.diff-action {
+	.cap {
+		font-family: monospace;
+		font-size: 10px;
+		color: var(--panel-gold);
+	}
+	.risk {
 		font-size: 10px;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--panel-gold);
-		flex: 0 0 auto;
-		padding-top: 2px;
+		letter-spacing: 0.06em;
+		color: var(--panel-danger);
+		border: 1px solid var(--panel-danger);
+		border-radius: 4px;
+		padding: 0 4px;
 	}
-	.diff-body {
-		min-width: 0;
-	}
-	.diff-reason {
-		color: var(--panel-fg);
-	}
-	.diff-ba {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-		font-family: monospace;
-		font-size: 11px;
-		color: var(--panel-fg-muted);
-	}
-	.ba-after {
-		color: var(--panel-green-bright);
-	}
-	.risks {
-		margin: 8px 0 0;
-		padding-left: 18px;
+	.item-summary {
 		font-size: 12px;
-		color: var(--panel-fg-muted);
+		color: var(--panel-fg);
 	}
 	.confirm-actions {
 		display: flex;
@@ -267,6 +322,34 @@
 		margin-top: 8px;
 		font-size: 12px;
 		color: var(--panel-fg-muted);
+	}
+	.trace {
+		margin-top: 8px;
+		font-size: 12px;
+	}
+	.trace summary {
+		cursor: pointer;
+		color: var(--panel-fg-muted);
+	}
+	.trace ol {
+		margin: 6px 0 0;
+		padding-left: 18px;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+	.trace li {
+		display: flex;
+		gap: 6px;
+		font-family: monospace;
+		font-size: 11px;
+		color: var(--panel-fg-muted);
+	}
+	.trace li.ok .tstep {
+		color: var(--panel-green-bright);
+	}
+	.trace li.bad .tstep {
+		color: var(--panel-danger);
 	}
 	.agent-input {
 		flex: 0 0 auto;

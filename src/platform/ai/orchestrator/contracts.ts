@@ -253,6 +253,21 @@ export interface OrchestratorCandidate {
 	confidence: number;
 }
 
+/**
+ * Shape of `OrchestratorResult.draft` for `kind:'confirmation'` (P2 batch writes).
+ * The UI / Lark card render this to preview what will be applied on confirm.
+ */
+export interface OrchestratorConfirmationDraftItem {
+	capabilityId: string;
+	summary: string;
+	agentId?: string;
+	riskLevel?: PlatformRiskLevel;
+}
+export interface OrchestratorConfirmationDraft {
+	summary?: string;
+	items?: OrchestratorConfirmationDraftItem[];
+}
+
 export interface OrchestratorResult {
 	kind: OrchestratorResultKind;
 	message: string;

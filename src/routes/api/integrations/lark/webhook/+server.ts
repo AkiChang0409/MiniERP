@@ -22,6 +22,7 @@ import {
 	buildNoticeCard,
 	type ProjectOption
 } from '$platform/integrations/lark/cards/finance-intake-cards';
+import { buildOrchestratorConfirmCard } from '$platform/integrations/lark/cards/orchestrator-confirm-card';
 import { createDocumentIntakeService } from '$modules/document-intake';
 import { createProjectApi } from '$modules/project';
 import { runSmartFinOrchestrator } from '$app-layer/ai/orchestrator/create-smartfin-orchestrator';
@@ -144,6 +145,19 @@ async function handleLarkMessage(event: RequestEvent, body: Record<string, unkno
 		},
 		{ moduleContext: mc }
 	);
+
+	// A staged write → send an interactive card with Confirm/Cancel buttons that
+	// post the actionId back (card-callback → orchestrator confirm), instead of
+	// asking the user to type "确认".
+	if (result.kind === 'confirmation' && result.actionId) {
+		await sendInteractiveCard(
+			env,
+			chatId,
+			'chat_id',
+			buildOrchestratorConfirmCard(result.actionId, `lark:${openId}`, result.message)
+		).catch((e) => console.error('[lark] send card failed:', e));
+		return;
+	}
 
 	await send(renderResultForLark(result));
 }

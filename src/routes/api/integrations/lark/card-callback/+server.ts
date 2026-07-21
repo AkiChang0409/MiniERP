@@ -19,6 +19,7 @@ import {
 import { findCategoryById } from '$modules/finance';
 import { confirmInbox } from '$app-layer/finance-intake/confirm-inbox';
 import { processIntakeDocument } from '$app-layer/finance-intake/process-intake';
+import { runSmartFinOrchestrator } from '$app-layer/ai/orchestrator/create-smartfin-orchestrator';
 
 /**
  * Lark (Feishu) interactive-card callback — the "回调配置" endpoint.
@@ -50,6 +51,9 @@ interface CardAction {
 	project_id?: string;
 	/** QC intake: the Doc Hub (Bitable) record_id to confirm/reject. */
 	record_id?: string;
+	/** Orchestrator write confirmation (P5): staged-action id + conversation key. */
+	action_id?: string;
+	conversation_id?: string;
 }
 
 /** Lark `{ toast: { type, content } }` response (card 2.0 callback). */
@@ -186,6 +190,53 @@ export const POST: RequestHandler = async (event) => {
 		if (qcExec?.waitUntil) qcExec.waitUntil(work);
 		else void work;
 		return toast('info', kind === 'qc_confirm' ? '正在确认…' : '正在驳回…');
+	}
+
+	// --- Orchestrator write confirmation (P5): Confirm/Cancel on a staged write ---
+	// Carries action_id + conversation_id (no document_id), so handle before the
+	// finance documentId guard. Feeds {confirm:{actionId}} / {cancel} into the
+	// same orchestrator confirm path the AI Panel button uses.
+	if (kind === 'orch_confirm' || kind === 'orch_cancel') {
+		if (!openId) return toast('error', '无法识别操作者身份。');
+		const actionId = action?.action_id;
+		const conversationId = action?.conversation_id ?? `lark:${openId}`;
+		if (kind === 'orch_confirm' && !actionId) return toast('info', '无法识别待确认操作。');
+
+		let octx = await createWorkerContext(env);
+		const resolvedU = await resolveUserByExternalIdentity(octx.db, LARK_PROVIDER, openId);
+		if (!resolvedU) return toast('error', '你的 Lark 账号尚未绑定 MiniERP 账号。');
+		octx = await createWorkerContext(env, resolvedU);
+
+		const work = runSmartFinOrchestrator(
+			{
+				source: 'lark',
+				userId: resolvedU.id,
+				externalUserId: openId,
+				roles: resolvedU.roles,
+				conversationId,
+				text: '',
+				channel: { type: 'direct' },
+				...(kind === 'orch_confirm' ? { confirm: { actionId: actionId! } } : { cancel: true })
+			},
+			{ moduleContext: octx }
+		)
+			.then((result) => {
+				const template =
+					kind === 'orch_cancel' ? 'grey' : result.kind === 'answer' ? 'green' : 'red';
+				const title =
+					kind === 'orch_cancel' ? '已取消' : result.kind === 'answer' ? '✅ 已执行' : '未能执行';
+				return sendInteractiveCard(
+					env,
+					openId,
+					'open_id',
+					buildResultCard(title, result.message, template)
+				);
+			})
+			.catch((e) => console.error('[lark] orch action failed:', e));
+		const exec = event.platform?.ctx;
+		if (exec?.waitUntil) exec.waitUntil(work);
+		else void work;
+		return toast('info', kind === 'orch_confirm' ? '正在执行…' : '正在取消…');
 	}
 
 	if (!action || !kind || !documentId) {
