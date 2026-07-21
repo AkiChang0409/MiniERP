@@ -130,33 +130,32 @@ export async function listSuppliersForSend(env: Env): Promise<SupplierOption[]> 
 	const tableId = env.LARK_SUPPLIER_TABLE_ID;
 	if (!tableId) throw new Error('LARK_SUPPLIER_TABLE_ID is not configured');
 
+	// Tolerant field lookup (handles renames / trailing spaces / case differences).
+	// The Business Partner table has NO `Type` field — supplier vs customer is
+	// expressed via relations elsewhere — so we list all partners. Passing a rigid
+	// field_names list here previously hard-failed with FieldNameNotFound (1254045)
+	// whenever the Base was edited; fetch all fields and match tolerantly instead.
+	const pick = (fields: Record<string, unknown>, name: string): unknown => {
+		if (name in fields) return fields[name];
+		const target = name.trim().toLowerCase();
+		for (const k of Object.keys(fields)) if (k.trim().toLowerCase() === target) return fields[k];
+		return undefined;
+	};
+
 	const out: SupplierOption[] = [];
 	let pageToken: string | undefined;
 	do {
-		const res = await bitableSearchRecords(env, {
-			appToken,
-			tableId,
-			fieldNames: ['Name', 'Email', 'Type', 'Email Domain'],
-			pageSize: 200,
-			pageToken
-		});
+		const res = await bitableSearchRecords(env, { appToken, tableId, pageSize: 200, pageToken });
 		for (const r of res.records) {
 			out.push({
 				recordId: r.record_id,
-				name: cellText(r.fields['Name']),
-				email: cellText(r.fields['Email']),
-				type: cellText(r.fields['Type']),
-				emailDomain: cellText(r.fields['Email Domain'])
+				name: cellText(pick(r.fields, 'Name')),
+				email: cellText(pick(r.fields, 'Email')),
+				type: cellText(pick(r.fields, 'Type')),
+				emailDomain: cellText(pick(r.fields, 'Email Domain'))
 			});
 		}
 		pageToken = res.hasMore ? res.pageToken : undefined;
 	} while (pageToken);
-	// QC goes to suppliers; keep partners typed as supplier/both, else keep all
-	// when Type is blank (avoids dropping records if the option label differs).
-	const isSupplier = (t: string) => {
-		const s = t.toLowerCase();
-		return s.includes('supplier') || s.includes('both') || s.includes('供应');
-	};
-	const suppliers = out.filter((s) => !s.type || isSupplier(s.type));
-	return suppliers.length ? suppliers : out;
+	return out;
 }

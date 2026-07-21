@@ -68,7 +68,9 @@
     "LARK_DOCHUB_TABLE_ID": "tblQ4XMPWLVALfrF",
     "LARK_PROJECT_TABLE_ID": "tblQzG5SD2URlzs6",
     "LARK_TASK_TABLE_ID": "tblW3ug6R6JTDPvd",
-    "LARK_SUPPLIER_TABLE_ID": "tblsYri9cgxgfYrB",
+    // QC send targets suppliers. The old "Business Partner" table (tblsYri9cgxgfYrB)
+    // was split into "Customers" (kept that id) + a new "Suppliers" table below.
+    "LARK_SUPPLIER_TABLE_ID": "tblBbsCszL823vz9",
     "LARK_DICT_TABLE_ID": "tblJcL3sRLYqhX7G",
     // OCR.space "OCR API" route (ocrStrategy=ocr_api). Engine 3 = auto-language LSTM.
     "OCR_SPACE_ENGINE": "3"

@@ -78,20 +78,20 @@ export async function receiveQcUpload(
 			fields: keep({
 				'Doc Title': args.file.fileName,
 				'Attachment File': [{ file_token: fileToken }],
-				Projects: [ids.projectId],
-				'Customer/Supplier': [ids.supplierId],
+				Project: [ids.projectId],
+				Supplier: [ids.supplierId],
 				'Doc Status': DOC_STATUS_PENDING,
 				Source: SOURCE_UPLOAD_LINK,
 				'Match Confidence': MATCH_CONFIDENCE_HIGH
 			})
 		});
 
-		// 2) Category / File Type are single-selects whose options are referenced
-		//    from the dictionary. A value Lark can't resolve raises
-		//    SingleSelectFieldConvFail — so set them as a BEST-EFFORT follow-up
-		//    update that never loses the already-saved record.
+		// 2) File Type is a single-select whose options are referenced from the
+		//    dictionary. A value Lark can't resolve raises SingleSelectFieldConvFail
+		//    — so set it as a BEST-EFFORT follow-up update that never loses the
+		//    already-saved record. (Doc Hub `Category` is now a Lookup — read-only,
+		//    derived from File Type — so we no longer write it.)
 		const classify = keep({
-			...(ids.category ? { Category: ids.category } : {}),
 			...(ids.fileType ? { 'File Type': ids.fileType } : {})
 		});
 		if (Object.keys(classify).length) {

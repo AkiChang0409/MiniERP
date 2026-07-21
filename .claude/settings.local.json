@@ -166,7 +166,10 @@
       "Bash(grep -n \"^\\\\s*\\\\\"binding\\\\\"\\\\|d1_databases\\\\|kv_namespaces\\\\|\\\\\\\\[ai\\\\\\\\]\" wrangler.jsonc)",
       "Bash(node scripts/bench-agent-latency.mjs --email bench-tester@smartfin.local --password Bench1234! --register --requests 2 --warmup 1 --out reports/agent-latency-smoketest.json)",
       "Bash(node scripts/bench-agent-latency.mjs --email bench-tester@smartfin.local --password Bench1234! --register --auth-origin https://smartfin-v4.aki-wang.workers.dev --requests 2 --warmup 1 --out reports/agent-latency-smoketest.json)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(node scripts/introspect-fields.mjs)",
+      "Bash(rm -f scripts/introspect-projects.mjs)",
+      "Bash(node scripts/bitable-schema-audit.mjs)"
     ]
   }
 }
