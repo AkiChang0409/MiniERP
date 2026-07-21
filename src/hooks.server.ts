@@ -32,8 +32,14 @@ function isPublicAppPath(pathname: string) {
 	);
 }
 
+// QC Send is intentionally public — no login required. (Note: its `send` action
+// emails suppliers and reads project/supplier lists; consider a shared-token gate.)
+function isPublicQcSend(pathname: string) {
+	return pathname === '/projects/qc-send' || pathname.startsWith('/projects/qc-send/');
+}
+
 function needsAppAuth(pathname: string) {
-	if (isPublicAppPath(pathname)) return false;
+	if (isPublicAppPath(pathname) || isPublicQcSend(pathname)) return false;
 	return (
 		pathname.startsWith('/finance/dashboard') ||
 		pathname.startsWith('/finance/expenses') ||
@@ -113,7 +119,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 			if (wantApiAuth) {
 				return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 });
 			}
-			throw redirect(303, '/login');
+			// Send anonymous users to an explanation page (not straight to login),
+			// carrying the attempted path so it can offer a way back.
+			throw redirect(303, `/login-required?from=${encodeURIComponent(path)}`);
 		}
 
 		if (

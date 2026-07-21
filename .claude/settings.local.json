@@ -169,7 +169,9 @@
       "Bash(node -e ' *)",
       "Bash(node scripts/introspect-fields.mjs)",
       "Bash(rm -f scripts/introspect-projects.mjs)",
-      "Bash(node scripts/bitable-schema-audit.mjs)"
+      "Bash(node scripts/bitable-schema-audit.mjs)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,1\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/finance/dashboard)"
     ]
   }
 }
