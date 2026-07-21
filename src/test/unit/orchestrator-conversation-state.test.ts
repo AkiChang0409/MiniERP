@@ -160,11 +160,42 @@ describe('conversation history (P4.1)', () => {
 				{ role: 'user', text: 'b' },
 				{ role: 'assistant', text: 'B' }
 			],
-			3
+			{ maxTurns: 3 }
 		);
 		const state = await getConversationState(kv, base.conversationId);
 		// capped to last 3: A, b, B (oldest 'a' dropped)
 		expect(state?.history?.map((t) => t.text)).toEqual(['A', 'b', 'B']);
+	});
+
+	it('folds overflow turns into a rolling summary', async () => {
+		const kv = makeKv();
+		const summarize = async (prior: string | undefined, dropped: { text: string }[]) =>
+			`${prior ?? ''}[${dropped.map((d) => d.text).join(',')}]`;
+		await appendConversationTurns(
+			kv,
+			base,
+			[
+				{ role: 'user', text: 't1' },
+				{ role: 'assistant', text: 't2' },
+				{ role: 'user', text: 't3' }
+			],
+			{ maxTurns: 2, summarize }
+		);
+		const state = await getConversationState(kv, base.conversationId);
+		expect(state?.history?.map((t) => t.text)).toEqual(['t2', 't3']); // last 2 kept
+		expect(state?.summary).toBe('[t1]'); // dropped t1 folded into summary
+	});
+
+	it('merges remembered entities into lastResolvedEntities', async () => {
+		const kv = makeKv();
+		await appendConversationTurns(kv, base, [{ role: 'user', text: 'x' }], {
+			entities: { projectId: 'recP1' }
+		});
+		await appendConversationTurns(kv, base, [{ role: 'user', text: 'y' }], {
+			entities: { taskId: 'recT1' }
+		});
+		const state = await getConversationState(kv, base.conversationId);
+		expect(state?.lastResolvedEntities).toEqual({ projectId: 'recP1', taskId: 'recT1' });
 	});
 
 	it('keeps history isolated per conversationId', async () => {

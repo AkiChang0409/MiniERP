@@ -61,6 +61,8 @@ export interface AgentConversationState {
 	pendingConfirmation?: AgentPendingConfirmation;
 	/** Recent turns (oldest→newest), capped; fed back to the loop as prior context. */
 	history?: AgentConversationTurn[];
+	/** Rolling summary of turns that aged out of `history` (P4.2 layer 3). */
+	summary?: string;
 	updatedAt: string;
 }
 
@@ -95,24 +97,57 @@ export async function saveConversationState(
 	await kv.put(key(state.conversationId), JSON.stringify(next), { expirationTtl: TTL_SECONDS });
 }
 
+export interface AppendTurnsOptions {
+	maxTurns?: number;
+	/**
+	 * Fold overflow turns (those aging out of `history`) into a rolling summary
+	 * (P4.2 layer 3). Best-effort — if it throws, the prior summary is kept.
+	 */
+	summarize?: (priorSummary: string | undefined, dropped: AgentConversationTurn[]) => Promise<string>;
+	/** Merge into `lastResolvedEntities` for pronoun continuity (P4.2 layer 4). */
+	entities?: ResolvedEntities;
+}
+
 /**
  * Append turns to the conversation history (oldest→newest), capped to the last
- * `maxTurns`. Creates the state if absent. Keyed by conversationId (already
- * channel+user scoped), so history never crosses users/conversations.
+ * `maxTurns`. Overflow turns can be folded into a rolling `summary`, and recent
+ * entities merged into `lastResolvedEntities`. Creates the state if absent. Keyed
+ * by conversationId (channel+user scoped), so nothing crosses users.
  */
 export async function appendConversationTurns(
 	kv: KVNamespace,
 	base: Pick<AgentConversationState, 'conversationId' | 'source' | 'userId' | 'tenantId'>,
 	turns: AgentConversationTurn[],
-	maxTurns = DEFAULT_MAX_HISTORY_TURNS
+	opts: AppendTurnsOptions = {}
 ): Promise<void> {
-	if (turns.length === 0) return;
+	const maxTurns = opts.maxTurns ?? DEFAULT_MAX_HISTORY_TURNS;
 	const existing = await getConversationState(kv, base.conversationId);
-	const history = [...(existing?.history ?? []), ...turns].slice(-maxTurns);
+
+	const merged = [...(existing?.history ?? []), ...turns];
+	let history = merged;
+	let summary = existing?.summary;
+	if (merged.length > maxTurns) {
+		const dropped = merged.slice(0, merged.length - maxTurns);
+		history = merged.slice(-maxTurns);
+		if (opts.summarize && dropped.length > 0) {
+			try {
+				summary = await opts.summarize(existing?.summary, dropped);
+			} catch {
+				/* keep the prior summary — summarization is best-effort */
+			}
+		}
+	}
+
+	const lastResolvedEntities = opts.entities
+		? { ...(existing?.lastResolvedEntities ?? {}), ...opts.entities }
+		: existing?.lastResolvedEntities;
+
 	const next: AgentConversationState = {
 		...(existing ?? { conversationId: base.conversationId, source: base.source, updatedAt: '' }),
 		...base,
-		history
+		history,
+		summary,
+		lastResolvedEntities
 	};
 	await saveConversationState(kv, next);
 }

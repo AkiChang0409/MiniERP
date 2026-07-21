@@ -34,7 +34,8 @@ import {
 } from './conversation-state';
 import { runWithTools } from './run-with-tools';
 import { buildAgentToolCatalog } from './tool-catalog';
-import { describeCurrentContext } from './current-context';
+import { describeCurrentContext, extractRouteEntities } from './current-context';
+import { summarizeConversation } from './conversation-summary';
 import type {
 	ContextProvider,
 	DomainAgentPlugin,
@@ -215,8 +216,7 @@ export async function handleMessage(
 		};
 	}
 
-	// P4.1: current-page context seeding + prior conversation turns for continuity.
-	const contextPreamble = describeCurrentContext(context.routeContext) ?? undefined;
+	// P4.1/P4.2: current-page seeding + remembered entities + rolling summary + history.
 	const convoBase = {
 		conversationId: message.conversationId,
 		source: message.source,
@@ -225,6 +225,18 @@ export async function handleMessage(
 	};
 	const priorState = kv ? await getConversationState(kv, message.conversationId) : null;
 	const priorMessages = (priorState?.history ?? []).map((t) => ({ role: t.role, content: t.text }));
+	const pagePreamble = describeCurrentContext(context.routeContext, priorState?.lastResolvedEntities);
+	const summaryLine = priorState?.summary?.trim()
+		? `CONVERSATION SUMMARY SO FAR:\n${priorState.summary.trim()}`
+		: null;
+	const contextPreamble = [summaryLine, pagePreamble].filter(Boolean).join('\n\n') || undefined;
+	// Entities to remember this turn (current page); folds into lastResolvedEntities.
+	const turnEntities = extractRouteEntities(context.routeContext);
+	const summarize = (prior: string | undefined, dropped: Parameters<typeof summarizeConversation>[2]) =>
+		summarizeConversation(mc.env, prior, dropped, {
+			tenantId: context.tenantId,
+			userId: message.userId ?? undefined
+		});
 
 	const loop = await runWithTools({
 		agentId: 'orchestrator',
@@ -284,7 +296,9 @@ export async function handleMessage(
 			{ actionId, items, summary: combinedSummary }
 		);
 		// Record the user turn for continuity; the applied result is recorded on confirm.
-		await appendConversationTurns(kv, convoBase, [{ role: 'user', text: message.text }]);
+		await appendConversationTurns(kv, convoBase, [{ role: 'user', text: message.text }], {
+			entities: turnEntities
+		});
 		return {
 			kind: 'confirmation',
 			message: `${preface}${combinedSummary}\n\nReply to confirm, or cancel.`,
@@ -307,10 +321,15 @@ export async function handleMessage(
 
 	// 'final' or 'max_steps' — natural-language answer (possibly partial).
 	if (kv) {
-		await appendConversationTurns(kv, convoBase, [
-			{ role: 'user', text: message.text },
-			{ role: 'assistant', text: loop.answer }
-		]);
+		await appendConversationTurns(
+			kv,
+			convoBase,
+			[
+				{ role: 'user', text: message.text },
+				{ role: 'assistant', text: loop.answer }
+			],
+			{ summarize, entities: turnEntities }
+		);
 	}
 	return {
 		kind: 'answer',

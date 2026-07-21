@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { describeCurrentContext } from '$platform/ai/orchestrator/current-context';
+import {
+	describeCurrentContext,
+	extractRouteEntities
+} from '$platform/ai/orchestrator/current-context';
 
 /**
  * P4.1 layer 1: route/context → a "current page" preamble so pronouns like
@@ -34,5 +37,23 @@ describe('describeCurrentContext', () => {
 	it('returns null when there is nothing to seed', () => {
 		expect(describeCurrentContext(undefined)).toBeNull();
 		expect(describeCurrentContext({})).toBeNull();
+	});
+
+	it('falls back to remembered entities when the route has none (P4.2)', () => {
+		const out = describeCurrentContext({}, { projectId: 'recMem', customerId: 'recCust' });
+		expect(out).toContain('Recently discussed project: id=recMem');
+		expect(out).toContain('Recently discussed customer: id=recCust');
+	});
+
+	it('current-page entity wins over a remembered one of the same kind', () => {
+		const out = describeCurrentContext({ route: '/projects/recNow' }, { projectId: 'recOld' });
+		expect(out).toContain('Current project: id=recNow');
+		expect(out).not.toContain('recOld');
+	});
+
+	it('extractRouteEntities pulls project/task/document ids', () => {
+		expect(extractRouteEntities({ route: '/projects/recP/tasks' })).toEqual({ projectId: 'recP' });
+		expect(extractRouteEntities({ documentId: 'd1' })).toEqual({ documentId: 'd1' });
+		expect(extractRouteEntities(undefined)).toEqual({});
 	});
 });

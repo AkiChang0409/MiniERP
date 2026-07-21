@@ -11,6 +11,7 @@
  * when the channel provides them.
  */
 import type { RouteContext } from './contracts';
+import type { ResolvedEntities } from './entity-resolver';
 
 /** Route segments under /projects/<seg> that are pages, not project ids. */
 const PROJECT_NON_ID_SEGMENTS = new Set(['new', 'gantt', 'dashboard', 'calendar']);
@@ -36,35 +37,63 @@ function parseRoute(route: string): { projectId?: string; taskId?: string; docum
 	return out;
 }
 
-/**
- * Build a "current context" preamble from the route context, or null when there
- * is nothing to seed. Explicit ids on `routeContext` win over parsed ones.
- */
-export function describeCurrentContext(routeContext: RouteContext | undefined): string | null {
-	if (!routeContext) return null;
+/** Entities derivable from the route context (page the user is on). */
+export function extractRouteEntities(routeContext: RouteContext | undefined): ResolvedEntities {
+	if (!routeContext) return {};
 	const parsed = routeContext.route ? parseRoute(routeContext.route) : {};
-
+	const out: ResolvedEntities = {};
 	const projectId = routeContext.projectId ?? parsed.projectId;
 	const taskId = routeContext.taskId ?? parsed.taskId;
 	const documentId = routeContext.documentId ?? parsed.documentId;
+	if (projectId) out.projectId = projectId;
+	if (taskId) out.taskId = taskId;
+	if (documentId) out.documentId = documentId;
+	return out;
+}
 
+/**
+ * Build a "current context" preamble from the route context (what the user is
+ * looking at now) plus `remembered` entities from earlier in the conversation
+ * (P4.2 pronoun continuity). Current-page entities win; remembered ones fill the
+ * gaps and are labelled "recently discussed". Returns null when nothing to seed.
+ */
+export function describeCurrentContext(
+	routeContext: RouteContext | undefined,
+	remembered?: ResolvedEntities
+): string | null {
+	const current = extractRouteEntities(routeContext);
 	const lines: string[] = [];
-	if (projectId) {
+
+	// Current-page entities.
+	if (current.projectId) {
 		lines.push(
-			`Current project: id=${projectId} — if the user says "this project" / "current project" / "当前项目" / "这个项目", it refers to this id.`
+			`Current project: id=${current.projectId} — if the user says "this project" / "当前项目" / "这个项目", it refers to this id.`
 		);
 	}
-	if (taskId) {
-		lines.push(`Current task: id=${taskId} — "this task" / "当前任务" refers to this id.`);
-	}
-	if (documentId) {
-		lines.push(`Current document: id=${documentId} — "this document" refers to this id.`);
-	}
-	if (lines.length === 0) {
-		// No specific entity — still tell the model where the user is, if known.
-		return routeContext.route ? `The user is currently on page "${routeContext.route}".` : null;
+	if (current.taskId) lines.push(`Current task: id=${current.taskId} — "this task" / "当前任务" refers to this id.`);
+	if (current.documentId) lines.push(`Current document: id=${current.documentId} — "this document" refers to this id.`);
+
+	// Remembered entities (fill gaps only) — "this/that X" likely refers to them.
+	if (remembered) {
+		const remembers: Array<[keyof ResolvedEntities, string]> = [
+			['projectId', 'project'],
+			['taskId', 'task'],
+			['documentId', 'document'],
+			['customerId', 'customer'],
+			['supplierId', 'supplier'],
+			['employeeId', 'employee']
+		];
+		for (const [key, label] of remembers) {
+			const id = remembered[key];
+			if (id && !current[key]) {
+				lines.push(`Recently discussed ${label}: id=${id} — "this/that ${label}" likely refers to this id.`);
+			}
+		}
 	}
 
-	const where = routeContext.route ? `The user is on page "${routeContext.route}".\n` : '';
-	return `CURRENT CONTEXT (what the user is looking at right now):\n${where}${lines.join('\n')}`;
+	if (lines.length === 0) {
+		return routeContext?.route ? `The user is currently on page "${routeContext.route}".` : null;
+	}
+	const where = routeContext?.route ? `The user is on page "${routeContext.route}".\n` : '';
+	return `CURRENT CONTEXT (what the user is looking at / recently discussed):\n${where}${lines.join('\n')}`;
 }
