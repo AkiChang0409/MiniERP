@@ -5,11 +5,10 @@ import { listDocHubLibrary, type DocHubLibrary } from '$platform/integrations/la
  * My Space → Doc Hub. Reads the Lark Bitable "Doc Hub" table (source of truth)
  * and hands the decoded, display-ready library to the page for client-side
  * filtering by project / category / type / search. Read-only.
+ *
+ * Public (no login) — see the `isPublicDocHub` bypass in hooks.server.ts.
  */
 export const load: PageServerLoad = async (event) => {
-	if (!event.locals.user) {
-		return { library: null as DocHubLibrary | null, error: 'Sign in to view the Doc Hub.' };
-	}
 	if (!event.platform) {
 		return {
 			library: null as DocHubLibrary | null,

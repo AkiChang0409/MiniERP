@@ -38,8 +38,20 @@ function isPublicQcSend(pathname: string) {
 	return pathname === '/projects/qc-send' || pathname.startsWith('/projects/qc-send/');
 }
 
+// My Space → Doc Hub is intentionally public (no login) per product decision.
+// SECURITY: this exposes the Lark Doc Hub listing to anyone with the URL; the
+// companion attachment API (`isPublicDocHubApi`) likewise streams files without
+// a session. Add a shared-token / signed-link gate if the documents are
+// sensitive.
+function isPublicDocHub(pathname: string) {
+	return pathname === '/employee/doc-hub' || pathname.startsWith('/employee/doc-hub/');
+}
+function isPublicDocHubApi(pathname: string) {
+	return pathname.startsWith('/api/employee/doc-hub');
+}
+
 function needsAppAuth(pathname: string) {
-	if (isPublicAppPath(pathname) || isPublicQcSend(pathname)) return false;
+	if (isPublicAppPath(pathname) || isPublicQcSend(pathname) || isPublicDocHub(pathname)) return false;
 	return (
 		pathname.startsWith('/finance/dashboard') ||
 		pathname.startsWith('/finance/expenses') ||
@@ -122,7 +134,14 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const wantApiAuth = needsApiAuth(path);
 	const wantAppAuth = needsAppAuth(path);
 
-	if (wantAppAuth || (wantApiAuth && !isPublicAuthApi(path) && !isPublicWebhook(path) && !isPublicToolApi(path))) {
+	if (
+		wantAppAuth ||
+		(wantApiAuth &&
+			!isPublicAuthApi(path) &&
+			!isPublicWebhook(path) &&
+			!isPublicToolApi(path) &&
+			!isPublicDocHubApi(path))
+	) {
 		if (!event.locals.user) {
 			if (wantApiAuth) {
 				return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 });
