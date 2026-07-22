@@ -31,10 +31,10 @@
 >
 	<div class="mx-auto grid min-h-[78vh] w-full max-w-7xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white/70 shadow-sm backdrop-blur-[1px] lg:grid-cols-2">
 		<section class="relative hidden lg:block">
-			<img src={coverArt} alt="SmartFin cover art" class="h-full w-full object-cover" />
+			<img src={coverArt} alt="MiniERP cover art" class="h-full w-full object-cover" />
 			<div class="absolute inset-0 bg-gradient-to-tr from-slate-900/50 via-slate-900/20 to-transparent"></div>
 			<div class="absolute bottom-8 left-8 right-8 text-white">
-				<p class="mb-2 inline-flex rounded-full bg-white/20 px-3 py-1 text-xs font-medium backdrop-blur">SmartFin</p>
+				<p class="mb-2 inline-flex rounded-full bg-white/20 px-3 py-1 text-xs font-medium backdrop-blur">MiniERP</p>
 				<h1 class="text-3xl font-semibold leading-tight">Welcome to your financial operations workspace</h1>
 				<p class="mt-3 text-sm text-slate-100/90">AR, projects, expenses, tax and reporting in one cloud console.</p>
 			</div>
@@ -43,7 +43,7 @@
 		<section class="flex items-center justify-center bg-white/40 p-6 sm:p-10">
 			<div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 				<p class="text-xs font-medium uppercase tracking-wide text-[var(--sf-green)]">Welcome back</p>
-				<h2 class="mt-1 text-2xl font-semibold text-slate-900">Sign in to SmartFin</h2>
+				<h2 class="mt-1 text-2xl font-semibold text-slate-900">Sign in to MiniERP</h2>
 				<p class="mt-2 text-sm text-slate-600">Use your registered email and password.</p>
 				{#if error}
 					<p class="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>

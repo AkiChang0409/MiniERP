@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import axiomLogo from '$app-layer/assets/axiom-logo.svg';
 
 	let { data, form } = $props();
 	let submitting = $state(false);
@@ -15,11 +16,8 @@
 	<div class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 		<!-- Brand header -->
 		<div class="flex items-center gap-2.5 border-b border-slate-100 px-6 py-4">
-			<span
-				class="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--sf-green)] text-sm font-bold text-white"
-				>SF</span
-			>
-			<span class="text-sm font-semibold text-slate-800">SmartFin&nbsp;·&nbsp;QC Portal</span>
+			<img src={axiomLogo} alt="MiniERP" class="h-8 w-8 rounded-lg" />
+			<span class="text-sm font-semibold text-slate-800">MiniERP&nbsp;·&nbsp;QC Portal</span>
 		</div>
 
 		<div class="p-6">

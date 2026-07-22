@@ -5,6 +5,7 @@
 	import WorkflowPanel from '$app-layer/ai-panel/components/workflow-panel/WorkflowPanel.svelte';
 	import PanelTrigger from '$app-layer/ai-panel/components/workflow-panel/PanelTrigger.svelte';
 	import NotificationBell from '$lib/components/NotificationBell.svelte';
+	import axiomLogo from '$app-layer/assets/axiom-logo.svg';
 
 	type Primary =
 		| 'finance'
@@ -140,6 +141,13 @@
 			title: 'AI (Test)',
 			items: [
 				{ href: '/employee/ai-console', label: 'AI Capability Console', moduleId: null, icon: 'A' }
+			]
+		},
+		{
+			title: 'Tools',
+			items: [
+				// Public, no-login PO generator — lives outside the (app) shell at /po/generate.
+				{ href: '/po/generate', label: 'Generate PO', moduleId: null, icon: 'P' }
 			]
 		}
 	];
@@ -419,8 +427,8 @@
 			<!-- Logo and primary nav -->
 			<div class="flex items-center gap-6">
 				<a class="flex items-center gap-2 text-lg font-semibold text-[var(--sf-green)]" href={homeHref}>
-					<span class="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--sf-green)] text-white text-sm">SF</span>
-					SmartFin
+					<img src={axiomLogo} alt="MiniERP" class="h-8 w-8 rounded-lg" />
+					MiniERP
 				</a>
 				<nav class="hidden items-center gap-1 md:flex" aria-label="Primary navigation">
 					{#each visiblePrimaryTabs as tab}

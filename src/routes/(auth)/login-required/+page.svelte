@@ -13,7 +13,7 @@
 	}
 </script>
 
-<svelte:head><title>需要登录 · SmartFin</title></svelte:head>
+<svelte:head><title>需要登录 · MiniERP</title></svelte:head>
 
 <main class="flex min-h-screen w-full items-center justify-center bg-slate-50 px-6 py-12">
 	<div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -22,7 +22,7 @@
 		</div>
 		<h1 class="mt-5 text-2xl font-semibold text-slate-900">需要登录</h1>
 		<p class="mt-2 text-sm leading-relaxed text-slate-600">
-			你访问的页面需要登录后才能查看。请登录你的 SmartFin 账号，或返回上一页。
+			你访问的页面需要登录后才能查看。请登录你的 MiniERP 账号，或返回上一页。
 		</p>
 		{#if from}
 			<p class="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">

@@ -68,7 +68,7 @@
 
 <main class="mx-auto flex min-h-[70vh] w-full max-w-md flex-col justify-center px-6 py-12">
 	<div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-		<h1 class="text-2xl font-semibold text-slate-900">Sign in to SmartFin</h1>
+		<h1 class="text-2xl font-semibold text-slate-900">Sign in to MiniERP</h1>
 		<p class="mt-2 text-sm text-slate-600">Use the email and password you registered with.</p>
 		{#if message}
 			<p class="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{message}</p>

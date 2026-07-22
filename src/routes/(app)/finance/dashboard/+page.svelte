@@ -435,7 +435,7 @@
 
 <PageShell
 	eyebrow="Dashboard"
-	title="SmartFin Console"
+	title="MiniERP Console"
 	description="Financial overview with P&L, trial balance, and project profitability."
 >
 	<div class="relative h-1 overflow-hidden rounded-full bg-slate-200">

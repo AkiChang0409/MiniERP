@@ -61,7 +61,7 @@
 
 <main class="mx-auto flex min-h-[70vh] w-full max-w-md flex-col justify-center px-6 py-12">
 	<div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-		<h1 class="text-2xl font-semibold text-slate-900">Create your SmartFin account</h1>
+		<h1 class="text-2xl font-semibold text-slate-900">Create your MiniERP account</h1>
 		{#if isFirstUser}
 			<p class="mt-2 text-sm text-emerald-700">
 				No users exist yet. You will be registered as the workspace owner.
