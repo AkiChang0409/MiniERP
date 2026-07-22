@@ -104,6 +104,13 @@
 <svelte:head>
 	<title>Generate Purchase Order · MiniERP</title>
 	<style>
+		/* Zero the page margin so the browser drops its auto header/footer
+		   (date, title, URL, page number). Whitespace comes from the
+		   .sf-print-root padding instead. */
+		@page {
+			margin: 0;
+		}
+
 		@media print {
 			body * {
 				visibility: hidden;
@@ -151,6 +158,14 @@
 				</div>
 
 				<div class="space-y-0 divide-y divide-slate-200">
+					<!-- Rarely-changed fields (company header + bill-to) — collapsed by default -->
+					<details class="group">
+						<summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-medium text-slate-500 hover:bg-slate-50">
+							<span class="transition-transform group-open:rotate-90">›</span>
+							More edit · Company &amp; Bill To
+							<span class="ml-auto font-normal normal-case text-slate-400">rarely changes</span>
+						</summary>
+						<div class="divide-y divide-slate-200 border-t border-slate-200">
 					<!-- Company (issuer) -->
 					<div class="p-4">
 						<p class="text-xs font-medium uppercase tracking-wide text-slate-500">Company (issuer)</p>
@@ -184,6 +199,8 @@
 							</label>
 						</div>
 					</div>
+						</div>
+					</details>
 
 					<!-- PO info -->
 					<div class="p-4">
