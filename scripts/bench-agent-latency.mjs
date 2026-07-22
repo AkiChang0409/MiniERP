@@ -32,6 +32,8 @@
 
 import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 
 function parseArgs(argv) {
 	const out = {};
@@ -89,38 +91,53 @@ const QUERIES = [
 	{ domain: 'hr', message: 'Show pending leave requests.' }
 ];
 
-function extractSetCookie(headers) {
-	const raw = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [headers.get('set-cookie')].filter(Boolean);
-	return raw.map((c) => c.split(';')[0]).join('; ');
+// Node's global fetch (undici) silently overrides a manually-set `Origin`
+// header instead of sending ours, which breaks better-auth's CSRF origin
+// check. Use raw http/https for the two auth calls to send it verbatim.
+function rawPost(urlStr, bodyObj, extraHeaders) {
+	return new Promise((resolve, reject) => {
+		const url = new URL(urlStr);
+		const body = JSON.stringify(bodyObj);
+		const mod = url.protocol === 'https:' ? https : http;
+		const req = mod.request(
+			{
+				hostname: url.hostname,
+				port: url.port || (url.protocol === 'https:' ? 443 : 80),
+				path: url.pathname + url.search,
+				method: 'POST',
+				headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), ...extraHeaders }
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (c) => (data += c));
+				res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
+			}
+		);
+		req.on('error', reject);
+		req.write(body);
+		req.end();
+	});
 }
 
-function authHeaders(origin) {
-	const headers = { 'content-type': 'application/json' };
-	if (origin) headers.origin = origin;
-	return headers;
+function cookieFromSetCookie(setCookieHeader) {
+	if (!setCookieHeader) return null;
+	const arr = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+	const cookie = arr.map((c) => c.split(';')[0]).join('; ');
+	return cookie || null;
 }
 
 async function signIn(baseUrl, email, password, origin) {
-	const res = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
-		method: 'POST',
-		headers: authHeaders(origin),
-		body: JSON.stringify({ email, password })
-	});
-	const cookie = extractSetCookie(res.headers);
-	if (!res.ok || !cookie) return null;
+	const res = await rawPost(`${baseUrl}/api/auth/sign-in/email`, { email, password }, origin ? { origin } : {});
+	const cookie = cookieFromSetCookie(res.headers['set-cookie']);
+	if (res.status < 200 || res.status >= 300 || !cookie) return null;
 	return cookie;
 }
 
 async function signUp(baseUrl, email, password, origin) {
-	const res = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
-		method: 'POST',
-		headers: authHeaders(origin),
-		body: JSON.stringify({ email, password, name: 'Bench User' })
-	});
-	const cookie = extractSetCookie(res.headers);
-	if (!res.ok) {
-		const body = await res.text().catch(() => '');
-		throw new Error(`sign-up failed (${res.status}): ${body}`);
+	const res = await rawPost(`${baseUrl}/api/auth/sign-up/email`, { email, password, name: 'Bench User' }, origin ? { origin } : {});
+	const cookie = cookieFromSetCookie(res.headers['set-cookie']);
+	if (res.status < 200 || res.status >= 300) {
+		throw new Error(`sign-up failed (${res.status}): ${res.body}`);
 	}
 	return cookie;
 }

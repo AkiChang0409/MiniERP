@@ -171,7 +171,12 @@
       "Bash(rm -f scripts/introspect-projects.mjs)",
       "Bash(node scripts/bitable-schema-audit.mjs)",
       "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,1\\)\\)\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/finance/dashboard)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/finance/dashboard)",
+      "Bash(curl -s -i -X POST http://localhost:5173/api/auth/sign-up/email -H 'content-type: application/json' -H 'origin: https://smartfin-v4.aki-wang.workers.dev' -d '{\"email\":\"bench-tester2@smartfin.local\",\"password\":\"Bench1234!\",\"name\":\"Bench User\"}')",
+      "Bash(curl -s -i --max-time 20 -X POST http://localhost:5173/api/auth/sign-up/email -H 'content-type: application/json' -H 'origin: https://smartfin-v4.aki-wang.workers.dev' -d '{\"email\":\"bench-tester3@smartfin.local\",\"password\":\"Bench1234!\",\"name\":\"Bench User\"}')",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(node scripts/bench-agent-latency.mjs --email bench-tester3@smartfin.local --password Bench1234! --auth-origin https://smartfin-v4.aki-wang.workers.dev --requests 2 --warmup 1 --out reports/agent-latency-smoketest.json)",
+      "Bash(curl -s -i --max-time 20 -X POST http://localhost:5173/api/auth/sign-in/email -H 'content-type: application/json' -H 'origin: https://smartfin-v4.aki-wang.workers.dev' -d '{\"email\":\"bench-tester3@smartfin.local\",\"password\":\"Bench1234!\"}')"
     ]
   }
 }

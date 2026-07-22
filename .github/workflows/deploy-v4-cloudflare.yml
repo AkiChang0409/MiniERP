@@ -68,75 +68,25 @@ jobs:
       - name: Build
         run: npm run build
 
-      # ── 6. Sync Secrets ───────────────────────────────────────────────────
-      - name: Sync app worker secrets
-        shell: bash
-        run: |
-          test -n "$BETTER_AUTH_SECRET"
-          test -n "$RESEND_API_KEY"
-          test -n "$OPENAI_API_KEY"
-
-          printf '%s' "$BETTER_AUTH_SECRET" | npx wrangler secret put BETTER_AUTH_SECRET
-          printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY
-          printf '%s' "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY
-          printf '%s' "$OPENAI_API_KEY" | npx wrangler secret put OPENAI_API_KEY --config workers/wrangler.document-processor.jsonc
-
-          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-            printf '%s' "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY
-          fi
-
-          # OCR.space "OCR API" route (optional). The async pipeline runs text
-          # extraction in the document-processor worker, so the key must be set
-          # on BOTH workers. Skipped silently when the secret is not configured.
-          if [ -n "${OCR_SPACE_API_KEY:-}" ]; then
-            printf '%s' "$OCR_SPACE_API_KEY" | npx wrangler secret put OCR_SPACE_API_KEY
-            printf '%s' "$OCR_SPACE_API_KEY" | npx wrangler secret put OCR_SPACE_API_KEY --config workers/wrangler.document-processor.jsonc
-          fi
-
-          # Lark (Feishu) integration (optional). Only the app worker serves the
-          # /api/integrations/lark/webhook route, so these are app-worker only.
-          # VERIFICATION_TOKEN gates the webhook (url_verification + event auth);
-          # APP_ID/APP_SECRET let the bot reply via the Lark API. Skipped silently
-          # until the secrets are configured in GitHub.
-          if [ -n "${LARK_VERIFICATION_TOKEN:-}" ]; then
-            printf '%s' "$LARK_VERIFICATION_TOKEN" | npx wrangler secret put LARK_VERIFICATION_TOKEN
-          fi
-          # APP_ID / APP_SECRET mint the tenant token used to SEND messages/cards.
-          # They must be set on BOTH workers: the app worker (webhook + card-callback)
-          # AND the document-processor worker, because the ready_for_review review
-          # card is pushed from inside the queue consumer's processDocument run.
-          # The bitable-sync Cron worker (B3b) also mints the tenant token to pull
-          # the Base into the D1 mirror, so it needs APP_ID/APP_SECRET too.
-          if [ -n "${LARK_APP_ID:-}" ]; then
-            printf '%s' "$LARK_APP_ID" | npx wrangler secret put LARK_APP_ID
-            printf '%s' "$LARK_APP_ID" | npx wrangler secret put LARK_APP_ID --config workers/wrangler.document-processor.jsonc
-            printf '%s' "$LARK_APP_ID" | npx wrangler secret put LARK_APP_ID --config workers/wrangler.bitable-sync.jsonc
-          fi
-          if [ -n "${LARK_APP_SECRET:-}" ]; then
-            printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET
-            printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET --config workers/wrangler.document-processor.jsonc
-            printf '%s' "$LARK_APP_SECRET" | npx wrangler secret put LARK_APP_SECRET --config workers/wrangler.bitable-sync.jsonc
-          fi
-          # QC intake secrets. Fixed DocHub/QC Base/table ids live in wrangler.jsonc vars.
-          if [ -n "${QC_TOKEN_SECRET:-}" ]; then
-            printf '%s' "$QC_TOKEN_SECRET" | npx wrangler secret put QC_TOKEN_SECRET
-          fi
-          if [ -n "${QC_INBOX_EMAIL:-}" ]; then
-            printf '%s' "$QC_INBOX_EMAIL" | npx wrangler secret put QC_INBOX_EMAIL
-          fi
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OCR_SPACE_API_KEY: ${{ secrets.OCR_SPACE_API_KEY }}
-          LARK_VERIFICATION_TOKEN: ${{ secrets.LARK_VERIFICATION_TOKEN }}
-          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
-          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
-          QC_TOKEN_SECRET: ${{ secrets.QC_TOKEN_SECRET }}
-          QC_INBOX_EMAIL: ${{ secrets.QC_INBOX_EMAIL }}
+      # ── 6. Secrets ────────────────────────────────────────────────────────
+      # Secrets are NO LONGER synced from GitHub on every deploy. Cloudflare keeps
+      # Worker secrets across deploys (`wrangler deploy` never wipes them), so each
+      # environment's secrets are set ONCE, out-of-band, and owned by whoever runs
+      # that environment. This keeps API keys out of the CI pipeline entirely and
+      # lets the receiving company inject their own keys without repo access.
+      #
+      # One-time setup per environment (Cloudflare Dashboard → the Worker →
+      # Settings → Variables and Secrets, OR `wrangler secret put <NAME>`).
+      # See docs/SECRETS.md for the full per-worker matrix. Summary:
+      #   app worker (smartfin-v4):
+      #     BETTER_AUTH_SECRET, RESEND_API_KEY, OPENAI_API_KEY,
+      #     ANTHROPIC_API_KEY?, OCR_SPACE_API_KEY?, LARK_VERIFICATION_TOKEN?,
+      #     LARK_APP_ID?, LARK_APP_SECRET?, QC_TOKEN_SECRET?, QC_INBOX_EMAIL?
+      #   document-processor worker:
+      #     OPENAI_API_KEY, OCR_SPACE_API_KEY?, LARK_APP_ID?, LARK_APP_SECRET?
+      #   bitable-sync worker:
+      #     LARK_APP_ID?, LARK_APP_SECRET?
+      # (? = optional; only needed if that integration is enabled.)
 
       # ── 7. D1 Migrations ──────────────────────────────────────────────────
       - name: Run personal v4 migrations
