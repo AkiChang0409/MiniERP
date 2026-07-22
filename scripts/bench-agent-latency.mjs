@@ -165,6 +165,8 @@ async function callAgent(cookie, message) {
 	let status = 0;
 	let kind = null;
 	let ok = false;
+	let toolFailed = false;
+	let toolError = null;
 	try {
 		const res = await fetch(`${config.baseUrl}/api/ai/agent`, {
 			method: 'POST',
@@ -173,14 +175,26 @@ async function callAgent(cookie, message) {
 		});
 		status = res.status;
 		const body = await res.json().catch(() => null);
-		ok = res.ok && body?.ok === true;
+		const steps = body?.data?.trace?.steps;
+		if (Array.isArray(steps)) {
+			const failedStep = steps.find((s) => s.ok === false || s.status === 'failed');
+			if (failedStep) {
+				toolFailed = true;
+				toolError = `${failedStep.toolId}: ${failedStep.error ?? failedStep.status}`;
+			}
+		}
 		kind = body?.data?.kind ?? null;
+		// A 200 + {ok:true} envelope only means the orchestrator loop completed and
+		// produced *some* answer — it says nothing about whether the underlying
+		// capability/tool call actually succeeded. Both must hold for this sample
+		// to count as a real, representative business-API round trip.
+		ok = res.ok && body?.ok === true && kind !== 'error' && kind !== 'denied' && !toolFailed;
 	} catch (err) {
 		status = -1;
 		kind = `network_error: ${err.message}`;
 	}
 	const ms = performance.now() - start;
-	return { ms, status, kind, ok };
+	return { ms, status, kind, ok, toolFailed, toolError };
 }
 
 async function runWithConcurrency(tasks, limit) {
@@ -249,6 +263,10 @@ async function main() {
 			`[${query.domain}] "${query.message}" -> p50=${fmt(s.p50)} p95=${fmt(s.p95)} p99=${fmt(s.p99)} ` +
 				`min=${fmt(s.min)} max=${fmt(s.max)} errors=${s.errorCount}/${s.count}`
 		);
+		const sampleFailure = tagged.find((t) => t.toolFailed || t.status < 0 || t.status >= 400);
+		if (sampleFailure) {
+			console.log(`  sample failure: status=${sampleFailure.status} kind=${sampleFailure.kind} toolError=${sampleFailure.toolError}`);
+		}
 	}
 
 	console.log('\n--- By domain ---');

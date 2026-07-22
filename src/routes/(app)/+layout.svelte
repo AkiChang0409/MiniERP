@@ -134,6 +134,7 @@
 			title: 'Self-Service',
 			items: [
 				{ href: '/employee/workplace', label: 'My Workplace', moduleId: null, icon: 'W' },
+				{ href: '/employee/doc-hub', label: 'Doc Hub', moduleId: null, icon: 'D' },
 				{ href: '/employee/leave', label: 'My Leave', moduleId: null, icon: 'L' }
 			]
 		},
@@ -370,6 +371,10 @@
 		// Employee / Workplace
 		if (itemPath === '/employee/workplace') {
 			return path.startsWith('/employee/workplace');
+		}
+		// Employee / Doc Hub
+		if (itemPath === '/employee/doc-hub') {
+			return path.startsWith('/employee/doc-hub');
 		}
 		// Employee / Review Inbox
 		if (itemPath === '/employee/review') {
