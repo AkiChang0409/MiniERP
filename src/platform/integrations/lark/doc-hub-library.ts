@@ -12,11 +12,17 @@
  */
 import {
 	larkDocHubTarget,
+	larkBitableAppToken,
 	bitableListAllRecords,
 	bitableTableRevision,
 	type BitableFields
 } from './bitable';
-import { bitablePlainText, bitableNumber } from './bitable-field-codec';
+import { bitableNumber } from './bitable-field-codec';
+
+/** Projects table id (for resolving Project link record ids → names). */
+const PROJECTS_TABLE_FALLBACK = 'tblQzG5SD2URlzs6';
+/** Primary (title) field of the Projects table. */
+const PROJECT_NAME_FIELD = 'Project';
 
 /** Doc Hub table field names (must match the Bitable schema, see reports/bitable-schema.json). */
 const FIELD = {
@@ -80,23 +86,55 @@ export interface DocHubLibrary {
 }
 
 /**
- * Text extraction that also understands Lark link/lookup shapes which carry
- * their display text under `text_arr` (an array) rather than `text`.
- * Falls back to the shared `bitablePlainText` codec for everything else.
+ * Human-readable text out of any Bitable field value. Handles the shapes the
+ * `records/search` API actually returns:
+ *   - Text: `[{ text, type }]` segment arrays
+ *   - Single/multi-select: plain string / string[]
+ *   - Lookup: `{ type, value: [...] }` (recurse into `value`)
+ *   - Link fields sometimes carry display text under `text` / `text_arr`
  */
 function displayText(value: unknown): string | null {
+	if (value == null) return null;
+	if (typeof value === 'string') return value.trim() || null;
+	if (typeof value === 'number' || typeof value === 'boolean') return String(value);
 	if (Array.isArray(value)) {
 		const parts = value.map(displayText).filter((p): p is string => Boolean(p));
 		return parts.length ? Array.from(new Set(parts)).join(', ') : null;
 	}
-	if (value && typeof value === 'object') {
+	if (typeof value === 'object') {
 		const o = value as Record<string, unknown>;
+		if (typeof o.text === 'string' && o.text.trim()) return o.text.trim();
+		if (o.name != null) {
+			const n = displayText(o.name);
+			if (n) return n;
+		}
 		if (Array.isArray(o.text_arr)) {
-			const joined = displayText(o.text_arr);
-			if (joined) return joined;
+			const t = displayText(o.text_arr);
+			if (t) return t;
+		}
+		if (o.value != null) {
+			const v = displayText(o.value);
+			if (v) return v;
 		}
 	}
-	return bitablePlainText(value);
+	return null;
+}
+
+/**
+ * Linked record ids from a Bitable link/duplex-link field. The search API
+ * returns these as `{ link_record_ids: [...] }` (no display text), so the
+ * linked names must be resolved separately against the target table.
+ */
+function linkRecordIds(value: unknown): string[] {
+	if (!value) return [];
+	if (Array.isArray(value)) return value.flatMap(linkRecordIds);
+	if (typeof value === 'object') {
+		const o = value as Record<string, unknown>;
+		const ids = o.link_record_ids ?? o.record_ids ?? o.recordIds;
+		if (Array.isArray(ids)) return ids.filter((x): x is string => typeof x === 'string');
+		if (typeof o.record_id === 'string') return [o.record_id];
+	}
+	return [];
 }
 
 /** Split a comma-joined display value into distinct trimmed labels. */
@@ -166,7 +204,17 @@ function sortedFacet(values: Array<string | null>): string[] {
 	);
 }
 
-function decodeItem(recordId: string, fields: BitableFields): DocHubLibraryItem {
+function decodeItem(
+	recordId: string,
+	fields: BitableFields,
+	projectNameById: Map<string, string>
+): DocHubLibraryItem {
+	// Project is a duplex link with no inline text — resolve ids → names.
+	const projectNames = linkRecordIds(fields[FIELD.project])
+		.map((id) => projectNameById.get(id))
+		.filter((name): name is string => Boolean(name));
+	const project = projectNames.length ? Array.from(new Set(projectNames)).join(', ') : null;
+
 	return {
 		recordId,
 		title: displayText(fields[FIELD.title]) ?? '(untitled)',
@@ -175,7 +223,7 @@ function decodeItem(recordId: string, fields: BitableFields): DocHubLibraryItem 
 		attachments: decodeAttachments(fields[FIELD.attachment]),
 		content: displayText(fields[FIELD.content]),
 		category: displayText(fields[FIELD.category]),
-		project: displayText(fields[FIELD.project]),
+		project,
 		fileType: displayText(fields[FIELD.fileType]),
 		source: displayText(fields[FIELD.source]),
 		status: displayText(fields[FIELD.status]),
@@ -188,15 +236,36 @@ function decodeItem(recordId: string, fields: BitableFields): DocHubLibraryItem 
 	};
 }
 
+/**
+ * Build a `record_id → project name` map from the Projects table so Doc Hub's
+ * duplex-link Project field (ids only) can be shown as names. Best-effort: on
+ * any failure returns an empty map (Project simply shows blank).
+ */
+async function loadProjectNames(env: Env, appToken: string): Promise<Map<string, string>> {
+	const tableId = env.LARK_PROJECT_TABLE_ID || PROJECTS_TABLE_FALLBACK;
+	const map = new Map<string, string>();
+	try {
+		const records = await bitableListAllRecords(env, { appToken, tableId });
+		for (const rec of records) {
+			const name = displayText(rec.fields[PROJECT_NAME_FIELD]);
+			if (name) map.set(rec.record_id, name);
+		}
+	} catch (err) {
+		console.error('[doc-hub-library] failed to resolve project names:', err);
+	}
+	return map;
+}
+
 /** Fetch + decode the whole Doc Hub table into a display-ready library. */
 export async function listDocHubLibrary(env: Env): Promise<DocHubLibrary> {
 	const { appToken, tableId } = larkDocHubTarget(env);
-	const [records, revision] = await Promise.all([
+	const [records, revision, projectNameById] = await Promise.all([
 		bitableListAllRecords(env, { appToken, tableId }),
-		bitableTableRevision(env, { appToken, tableId })
+		bitableTableRevision(env, { appToken, tableId }),
+		loadProjectNames(env, larkBitableAppToken(env))
 	]);
 
-	const items = records.map((r) => decodeItem(r.record_id, r.fields));
+	const items = records.map((r) => decodeItem(r.record_id, r.fields, projectNameById));
 	// Newest first: sort by created date desc, undated last.
 	items.sort((a, b) => (b.createdDate ?? '').localeCompare(a.createdDate ?? ''));
 
