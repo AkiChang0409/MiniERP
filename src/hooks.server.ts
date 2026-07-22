@@ -75,6 +75,14 @@ function isPublicWebhook(pathname: string) {
 	);
 }
 
+// Endpoints backing intentionally public, no-login tools (e.g. the /po/generate
+// PO generator's quotation OCR helper). Scoped to the `/api/public/` namespace
+// so nothing else is accidentally exposed. These run without a user session —
+// keep them side-effect-free (no DB writes) and mindful of AI-quota abuse.
+function isPublicToolApi(pathname: string) {
+	return pathname.startsWith('/api/public/');
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
 	if (building) {
 		return resolve(event);
@@ -114,7 +122,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const wantApiAuth = needsApiAuth(path);
 	const wantAppAuth = needsAppAuth(path);
 
-	if (wantAppAuth || (wantApiAuth && !isPublicAuthApi(path) && !isPublicWebhook(path))) {
+	if (wantAppAuth || (wantApiAuth && !isPublicAuthApi(path) && !isPublicWebhook(path) && !isPublicToolApi(path))) {
 		if (!event.locals.user) {
 			if (wantApiAuth) {
 				return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 });

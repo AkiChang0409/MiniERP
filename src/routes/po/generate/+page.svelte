@@ -96,6 +96,73 @@
 		return `${day} ${months[month - 1]} ${year}`;
 	}
 
+	// -- Quotation upload → OCR + LLM extraction → prefill variable fields --
+	type QuotationSuggestions = {
+		supplierName: string | null;
+		currency: string | null;
+		quotationDate: string | null;
+		description: string | null;
+		lineItems: Array<{ description: string; unit: number; unitPrice: number }>;
+	};
+
+	let extracting = $state(false);
+	let extractError = $state('');
+	let extractSuccess = $state('');
+	let dragOver = $state(false);
+
+	function onFileSelect(e: Event) {
+		const input = e.target as HTMLInputElement;
+		if (input.files?.[0]) startExtraction(input.files[0]);
+		input.value = '';
+	}
+
+	function onDrop(e: DragEvent) {
+		e.preventDefault();
+		dragOver = false;
+		const file = e.dataTransfer?.files?.[0];
+		if (file) startExtraction(file);
+	}
+
+	async function startExtraction(file: File) {
+		extractError = '';
+		extractSuccess = '';
+		extracting = true;
+		try {
+			const fd = new FormData();
+			fd.append('file', file);
+			const res = await fetch('/api/public/po/extract-quotation', { method: 'POST', body: fd });
+			const json = (await res.json()) as {
+				ok: boolean;
+				data?: { suggestions: QuotationSuggestions; confidence: number };
+				error?: string;
+			};
+			if (!res.ok || !json.ok || !json.data) {
+				extractError = json.error ?? 'Extraction failed';
+				return;
+			}
+			applySuggestions(json.data.suggestions);
+			const conf = Math.round((json.data.confidence ?? 0) * 100);
+			extractSuccess = `Prefilled from ${file.name} (confidence: ${conf}%). Review before printing.`;
+		} catch (e) {
+			extractError = e instanceof Error ? e.message : 'Network error';
+		} finally {
+			extracting = false;
+		}
+	}
+
+	function applySuggestions(s: QuotationSuggestions) {
+		if (s.supplierName) supplierName = s.supplierName;
+		if (s.currency) currency = s.currency;
+		if (s.lineItems.length > 0) {
+			lineItems = s.lineItems.map((item) => ({
+				id: crypto.randomUUID(),
+				description: item.description || '',
+				unit: String(item.unit ?? 1),
+				unitPrice: String(item.unitPrice ?? 0)
+			}));
+		}
+	}
+
 	function printPreview() {
 		window.print();
 	}
@@ -153,6 +220,44 @@
 		<div class="grid gap-5 lg:grid-cols-2 lg:items-start">
 			<!-- ── Form ── -->
 			<div class="sf-no-print overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+				<!-- Auto-fill from a supplier quotation / pro-forma (OCR + AI) -->
+				<div class="border-b border-slate-200 bg-indigo-50 p-4">
+					<p class="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-700">Auto-fill from quotation</p>
+					<div
+						class="relative rounded-lg border-2 border-dashed transition-colors {dragOver ? 'border-indigo-400 bg-indigo-50' : 'border-slate-300 bg-white'}"
+						role="region"
+						aria-label="Upload quotation file"
+						ondragover={(e: DragEvent) => { e.preventDefault(); dragOver = true; }}
+						ondragleave={() => { dragOver = false; }}
+						ondrop={onDrop}
+					>
+						<label class="flex cursor-pointer flex-col items-center gap-1 px-4 py-5 text-center">
+							{#if extracting}
+								<svg class="h-6 w-6 animate-spin text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+								</svg>
+								<span class="text-sm text-indigo-600">Reading quotation…</span>
+							{:else}
+								<svg class="h-6 w-6 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+								</svg>
+								<span class="text-sm text-slate-600">
+									Drop a quotation here or <span class="font-medium text-indigo-600 hover:underline">browse</span>
+								</span>
+								<span class="text-[11px] text-slate-400">PDF, image, or DOCX — AI extracts supplier, items, and currency</span>
+							{/if}
+							<input type="file" class="sr-only" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx" onchange={onFileSelect} disabled={extracting} />
+						</label>
+					</div>
+					{#if extractError}
+						<p class="mt-2 text-xs text-red-600">{extractError}</p>
+					{/if}
+					{#if extractSuccess}
+						<p class="mt-2 text-xs text-emerald-600">{extractSuccess}</p>
+					{/if}
+				</div>
+
 				<div class="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
 					Purchase Order details
 				</div>
