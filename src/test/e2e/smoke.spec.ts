@@ -5,14 +5,14 @@ import { test, expect } from "@playwright/test";
 // human-confirmed. Extend with authenticated flows once a test account and
 // storageState fixture are added.
 
-test.describe("SmartFin v4 smoke", () => {
+test.describe("MiniERP v4 smoke", () => {
   test("landing page loads", async ({ page }) => {
     const res = await page.goto("/");
     expect(res?.status()).toBeLessThan(400);
-    // The root route IS the SmartFin sign-in screen. The app does not set a
+    // The root route IS the MiniERP sign-in screen. The app does not set a
     // <title>, so we assert on visible rendered content instead.
     await expect(
-      page.getByRole("heading", { name: /sign in to smartfin/i }),
+      page.getByRole("heading", { name: /sign in to minierp/i }),
     ).toBeVisible();
   });
 

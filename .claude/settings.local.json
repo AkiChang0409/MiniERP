@@ -183,7 +183,8 @@
       "Bash(grep -iE \"doc-hub|employee\\\\\\\\\\\\\\\\doc|Error|Warning\")",
       "Bash(grep -iE \"doc-hub\\\\\\\\\\\\\\\\\\\\+page|employee\\\\\\\\\\\\\\\\doc\")",
       "Bash(wrangler d1 *)",
-      "Bash(node scripts/dump-dochub-record.mjs)"
+      "Bash(node scripts/dump-dochub-record.mjs)",
+      "Bash(npx playwright *)"
     ]
   }
 }
