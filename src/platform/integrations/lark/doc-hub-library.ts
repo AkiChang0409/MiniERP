@@ -14,6 +14,9 @@ import {
 	larkDocHubTarget,
 	larkBitableAppToken,
 	bitableListAllRecords,
+	bitableGetRecord,
+	bitableUpdateRecord,
+	bitableUploadMedia,
 	bitableTableRevision,
 	type BitableFields
 } from './bitable';
@@ -282,4 +285,97 @@ export async function listDocHubLibrary(env: Env): Promise<DocHubLibrary> {
 /** Attachment target (table id) needed to build the media-download perm. */
 export function docHubTableId(env: Env): string {
 	return larkDocHubTarget(env).tableId;
+}
+
+/** Fetch + decode a single Doc Hub record (with project names + table revision). */
+export async function getDocHubItem(
+	env: Env,
+	recordId: string
+): Promise<{ item: DocHubLibraryItem; revision: number | null }> {
+	const { appToken, tableId } = larkDocHubTarget(env);
+	const [record, revision, projectNameById] = await Promise.all([
+		bitableGetRecord(env, { appToken, tableId, recordId }),
+		bitableTableRevision(env, { appToken, tableId }),
+		loadProjectNames(env, larkBitableAppToken(env))
+	]);
+	return {
+		item: decodeItem(record.record_id, record.fields, projectNameById),
+		revision: revision ?? null
+	};
+}
+
+/** New-file payload for an attachment upload. */
+export interface DocHubUploadFile {
+	name: string;
+	mimeType: string;
+	bytes: Uint8Array;
+}
+
+/** Read the record's current attachment file_tokens (to preserve on write). */
+async function currentAttachmentTokens(
+	env: Env,
+	appToken: string,
+	tableId: string,
+	recordId: string
+): Promise<Array<{ file_token: string }>> {
+	const record = await bitableGetRecord(env, { appToken, tableId, recordId });
+	return decodeAttachments(record.fields[FIELD.attachment]).map((a) => ({ file_token: a.fileToken }));
+}
+
+/**
+ * Append one or more uploaded files to a record's attachment field. Uploads
+ * each to Lark Drive (→ file_token) then rewrites the field as
+ * `[...existing, ...new]`. Returns the updated attachment list.
+ */
+export async function appendDocHubAttachments(
+	env: Env,
+	recordId: string,
+	files: DocHubUploadFile[]
+): Promise<DocHubAttachmentRef[]> {
+	const appToken = larkBitableAppToken(env);
+	const tableId = docHubTableId(env);
+
+	const existing = await currentAttachmentTokens(env, appToken, tableId, recordId);
+	const uploaded: Array<{ file_token: string }> = [];
+	for (const f of files) {
+		const fileToken = await bitableUploadMedia(env, {
+			appToken,
+			fileName: f.name,
+			mimeType: f.mimeType,
+			bytes: f.bytes
+		});
+		uploaded.push({ file_token: fileToken });
+	}
+
+	const updated = await bitableUpdateRecord(env, {
+		appToken,
+		tableId,
+		recordId,
+		fields: { [FIELD.attachment]: [...existing, ...uploaded] }
+	});
+	return decodeAttachments(updated.fields[FIELD.attachment]);
+}
+
+/**
+ * Remove a single attachment (by file_token) from a record's attachment field.
+ * Returns the remaining attachment list.
+ */
+export async function removeDocHubAttachment(
+	env: Env,
+	recordId: string,
+	fileToken: string
+): Promise<DocHubAttachmentRef[]> {
+	const appToken = larkBitableAppToken(env);
+	const tableId = docHubTableId(env);
+
+	const remaining = (await currentAttachmentTokens(env, appToken, tableId, recordId)).filter(
+		(a) => a.file_token !== fileToken
+	);
+	const updated = await bitableUpdateRecord(env, {
+		appToken,
+		tableId,
+		recordId,
+		fields: { [FIELD.attachment]: remaining }
+	});
+	return decodeAttachments(updated.fields[FIELD.attachment]);
 }

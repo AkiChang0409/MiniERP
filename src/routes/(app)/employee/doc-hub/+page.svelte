@@ -201,7 +201,12 @@
 						class="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md"
 					>
 						<div class="flex items-start justify-between gap-2">
-							<h3 class="min-w-0 text-sm font-semibold text-slate-900">{it.title}</h3>
+							<a
+								href={`/employee/doc-hub/${it.recordId}`}
+								class="min-w-0 text-sm font-semibold text-slate-900 transition hover:text-[var(--sf-green)] hover:underline"
+							>
+								{it.title}
+							</a>
 							{#if it.status}
 								<span
 									class={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusTone(it.status)}`}
@@ -304,6 +309,13 @@
 									<FileText size={14} /> No file or link
 								</p>
 							{/if}
+
+							<a
+								href={`/employee/doc-hub/${it.recordId}`}
+								class="inline-flex items-center justify-center gap-1 text-xs font-medium text-slate-500 transition hover:text-[var(--sf-green)]"
+							>
+								View details & manage files →
+							</a>
 						</div>
 					</article>
 				{/each}
