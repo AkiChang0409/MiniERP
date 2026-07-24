@@ -103,7 +103,8 @@
 		try {
 			schema = t.fieldSchema ? (JSON.parse(t.fieldSchema) as FieldSchema) : null;
 		} catch (e) {
-			notice = `「${t.name}」的 Field Schema JSON 解析失败：${(e as Error).message}`;
+			const snippet = (t.fieldSchema ?? '').slice(0, 60).replace(/\n/g, '⏎');
+			notice = `「${t.name}」的 Field Schema JSON 解析失败：${(e as Error).message}。开头内容：${snippet}`;
 			return;
 		}
 		if (!schema || !Array.isArray(schema.fields) || schema.fields.length === 0) {

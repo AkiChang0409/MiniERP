@@ -104,6 +104,28 @@ function displayText(value: unknown): string | null {
 	return null;
 }
 
+/**
+ * Raw text out of a Bitable text field, preserving the value EXACTLY. A text
+ * field comes back as an array of `{ text, type }` segments (Lark splits on
+ * newlines etc.); they must be concatenated with NO separator and NO dedup —
+ * unlike `displayText`, which comma-joins for display. Used for `Field Schema`
+ * (JSON) and `Info`, where any inserted separator would corrupt the value.
+ */
+function rawText(value: unknown): string | null {
+	if (value == null) return null;
+	if (typeof value === 'string') return value.length ? value : null;
+	if (Array.isArray(value)) {
+		const s = value.map((v) => rawText(v) ?? '').join('');
+		return s.length ? s : null;
+	}
+	if (typeof value === 'object') {
+		const o = value as Record<string, unknown>;
+		if (typeof o.text === 'string') return o.text;
+		if (o.value != null) return rawText(o.value);
+	}
+	return null;
+}
+
 /** Bitable checkbox → boolean (comes back as a real boolean, but be lenient). */
 function decodeBool(value: unknown): boolean {
 	if (typeof value === 'boolean') return value;
@@ -146,8 +168,8 @@ function decodeItem(recordId: string, fields: BitableFields): FileTemplateItem {
 		needApproval: decodeBool(fields[FIELD.needApproval]),
 		isActive: decodeBool(fields[FIELD.isActive]),
 		referenceOnly: decodeBool(fields[FIELD.referenceOnly]),
-		fieldSchema: displayText(fields[FIELD.fieldSchema]),
-		info: displayText(fields[FIELD.info]),
+		fieldSchema: rawText(fields[FIELD.fieldSchema]),
+		info: rawText(fields[FIELD.info]),
 		file: decodeAttachments(fields[FIELD.file])[0] ?? null
 	};
 }
