@@ -189,7 +189,8 @@
       "mcp__claude-in-chrome__tabs_context_mcp",
       "mcp__claude-in-chrome__navigate",
       "mcp__claude-in-chrome__computer",
-      "mcp__claude-in-chrome__read_page"
+      "mcp__claude-in-chrome__read_page",
+      "Bash(node -e \"const p=require\\('./package.json'\\); const d={...p.dependencies,...p.devDependencies}; const keys=Object.keys\\(d\\).filter\\(k=>/docx|pizzip|pdf|xlsx|excel|exceljs|mammoth|jszip/i.test\\(k\\)\\); console.log\\(keys.map\\(k=>k+': '+d[k]\\).join\\('\\\\n'\\)||'\\(none of docx/pdf/xlsx libs found\\)'\\);\")"
     ]
   }
 }

@@ -16,6 +16,9 @@
 		isActive: boolean;
 		description: string | null;
 		orderIndex: number;
+		fieldSchema: string | null;
+		fileTemplateUrl: string | null;
+		fileTemplateName: string | null;
 	};
 
 	const TASK_TYPES = [
@@ -32,6 +35,54 @@
 	];
 
 	const templates = $derived((data.templates as Template[]) ?? []);
+
+	// -- Library / generate view (ISO 9001 file gallery) --------------------
+	// Two tabs on the same page: a user-facing "文件库 / 生成" gallery and the
+	// existing metadata "模板管理" table. Fill + upload are stubs for now — this
+	// is the shell; the docx/xlsx/pdf generation gets wired in next.
+	let view = $state<'library' | 'manage'>('library');
+	let notice = $state<string | null>(null);
+
+	type Fmt = 'docx' | 'xlsx' | 'pdf' | 'zip' | 'other';
+	function formatOf(t: Template): Fmt {
+		const name = (t.fileTemplateName ?? '').toLowerCase();
+		if (name.endsWith('.docx') || name.endsWith('.doc')) return 'docx';
+		if (name.endsWith('.xlsx') || name.endsWith('.xls')) return 'xlsx';
+		if (name.endsWith('.pdf')) return 'pdf';
+		if (name.endsWith('.zip')) return 'zip';
+		return 'other';
+	}
+
+	// Fillable = has a field schema to render a form from. Otherwise it's a
+	// reference/download-only document (e.g. the ISO implementation guide).
+	function isFillable(t: Template): boolean {
+		return !!t.fieldSchema && t.fieldSchema.trim().length > 0;
+	}
+
+	const fmtBadge: Record<Fmt, string> = {
+		docx: 'bg-sky-50 text-sky-700 ring-sky-200',
+		xlsx: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+		pdf: 'bg-rose-50 text-rose-700 ring-rose-200',
+		zip: 'bg-amber-50 text-amber-700 ring-amber-200',
+		other: 'bg-slate-100 text-slate-600 ring-slate-200'
+	};
+
+	// Active templates grouped by module category for the gallery.
+	const libraryGroups = $derived.by(() => {
+		const groups = new Map<string, Template[]>();
+		for (const t of templates) {
+			if (!t.isActive) continue;
+			const key = t.moduleCategory?.trim() || '未分类';
+			const arr = groups.get(key) ?? [];
+			arr.push(t);
+			groups.set(key, arr);
+		}
+		return [...groups.entries()].map(([category, items]) => ({ category, items }));
+	});
+
+	function startFill(t: Template) {
+		notice = `「${t.name}」的填写生成即将接入：fieldSchema → 动态表单 → 生成 ${formatOf(t).toUpperCase()} 文件下载。`;
+	}
 
 	type Editor = {
 		mode: 'create' | 'edit';
@@ -158,7 +209,7 @@
 <PageShell
 	eyebrow="Settings · ISO 9001"
 	title="QMS 文件模板库"
-	description="公司级质量管理体系文件清单。task-scope 模板按 Task type 自动建议给 Gantt 任务；company/project 模板为登记用途。"
+	description="公司级质量管理体系文件库。「文件库 / 生成」按模块浏览 ISO 9001 模板，可填写生成或下载阅读；「模板管理」维护模板元数据（task-scope 模板按 Task type 自动建议给 Gantt 任务）。"
 >
 	{#snippet actions()}
 		<button
@@ -170,13 +221,107 @@
 		</button>
 	{/snippet}
 
+	<!-- View toggle: user-facing gallery vs. metadata admin table -->
+	<div class="mb-4 inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm">
+		<button
+			type="button"
+			class="rounded-md px-3 py-1.5 font-medium transition {view === 'library' ? 'bg-[var(--sf-green)] text-white' : 'text-slate-600 hover:bg-slate-50'}"
+			onclick={() => (view = 'library')}
+		>
+			文件库 / 生成
+		</button>
+		<button
+			type="button"
+			class="rounded-md px-3 py-1.5 font-medium transition {view === 'manage' ? 'bg-[var(--sf-green)] text-white' : 'text-slate-600 hover:bg-slate-50'}"
+			onclick={() => (view = 'manage')}
+		>
+			模板管理
+		</button>
+	</div>
+
+	{#if notice}
+		<div class="mb-4 flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+			<span class="flex-1">{notice}</span>
+			<button type="button" class="text-sky-500 hover:text-sky-700" onclick={() => (notice = null)} aria-label="关闭">×</button>
+		</div>
+	{/if}
+
 	{#if data.dataMessage}
 		<p class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
 			{data.dataMessage}
 		</p>
 	{/if}
 
-	<div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+	{#if view === 'library'}
+		<!-- ── ISO 9001 file gallery (shell) ── -->
+		{#if libraryGroups.length === 0}
+			<div class="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
+				<p class="text-sm font-medium text-slate-700">文件库还是空的</p>
+				<p class="mx-auto mt-1 max-w-md text-xs leading-relaxed text-slate-500">
+					在「模板管理」里新建 ISO 9001 模板并上传原始文件（.docx / .xlsx / .pdf）。配了字段（fieldSchema）的模板会出现
+					<span class="font-medium text-slate-700">「填写生成」</span>，纯参考文件（如实施指南）只提供
+					<span class="font-medium text-slate-700">「下载阅读」</span>。
+				</p>
+				<button
+					type="button"
+					class="mt-4 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+					onclick={() => (view = 'manage')}
+				>
+					去添加模板
+				</button>
+			</div>
+		{:else}
+			<div class="space-y-6">
+				{#each libraryGroups as group (group.category)}
+					<section>
+						<h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{group.category}</h2>
+						<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+							{#each group.items as t (t.id)}
+								<div class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+									<div class="flex items-start justify-between gap-2">
+										<span class="rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase ring-1 {fmtBadge[formatOf(t)]}">
+											{formatOf(t)}
+										</span>
+										<span class="font-mono text-[11px] text-slate-400">{t.code}</span>
+									</div>
+									<p class="mt-2 line-clamp-2 text-sm font-medium text-slate-800">{t.name}</p>
+									{#if t.description}
+										<p class="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{t.description}</p>
+									{/if}
+									<div class="mt-auto flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+										{#if isFillable(t)}
+											<button
+												type="button"
+												class="rounded-md bg-[var(--sf-green)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#2f5e2c]"
+												onclick={() => startFill(t)}
+											>
+												填写生成
+											</button>
+										{:else}
+											<span class="text-[11px] text-slate-400">参考文件 · 不填写</span>
+										{/if}
+										{#if t.fileTemplateUrl}
+											<a
+												href={t.fileTemplateUrl}
+												download={t.fileTemplateName ?? ''}
+												class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+											>
+												下载
+											</a>
+										{:else}
+											<span class="text-[11px] text-slate-300">未上传文件</span>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					</section>
+				{/each}
+			</div>
+		{/if}
+	{:else}
+		<!-- ── Metadata admin table (existing) ── -->
+		<div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
 		<table class="w-full text-sm">
 			<thead class="bg-slate-50 text-left text-xs text-slate-500">
 				<tr>
@@ -216,7 +361,8 @@
 				{/each}
 			</tbody>
 		</table>
-	</div>
+		</div>
+	{/if}
 </PageShell>
 
 <!-- Editor modal -->
