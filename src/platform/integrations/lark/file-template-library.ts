@@ -12,6 +12,7 @@
 import {
 	larkBitableAppToken,
 	bitableListAllRecords,
+	bitableGetRecord,
 	bitableTableRevision,
 	type BitableFields
 } from './bitable';
@@ -194,4 +195,20 @@ export async function listFileTemplates(env: Env): Promise<FileTemplateLibrary> 
 	).sort((a, b) => a.localeCompare(b));
 
 	return { items, revision: revision ?? null, categories };
+}
+
+/** Fetch + decode a single File Template record (for the detail page). Returns
+ * null if the record doesn't exist. */
+export async function getFileTemplate(
+	env: Env,
+	recordId: string
+): Promise<{ item: FileTemplateItem; revision: number | null } | null> {
+	const appToken = larkBitableAppToken(env);
+	const tableId = fileTemplateTableId();
+	const [record, revision] = await Promise.all([
+		bitableGetRecord(env, { appToken, tableId, recordId }),
+		bitableTableRevision(env, { appToken, tableId })
+	]);
+	if (!record) return null;
+	return { item: decodeItem(record.record_id, record.fields), revision: revision ?? null };
 }
