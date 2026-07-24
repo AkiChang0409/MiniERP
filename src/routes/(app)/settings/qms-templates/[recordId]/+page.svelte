@@ -244,39 +244,91 @@
 			</p>
 		{/if}
 
+		<!-- Reusable: description panel (intro + Info) -->
+		{#snippet descriptionPanel()}
+			{#if schema?.intro || item.info}
+				<div class="rounded-xl border border-sky-100 bg-sky-50/60 p-4">
+					{#if schema?.intro?.clause}
+						<span class="inline-block rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+							{schema.intro.clause}
+						</span>
+					{/if}
+					{#if schema?.intro?.purpose}
+						<p class="mt-2 text-sm leading-relaxed text-slate-700">{schema.intro.purpose}</p>
+					{/if}
+					{#if item.info}
+						<p class="mt-2 whitespace-pre-line text-xs leading-relaxed text-slate-600">{item.info}</p>
+					{/if}
+					{#if schema?.intro?.notes}
+						<details class="mt-2" open>
+							<summary class="cursor-pointer text-[11px] font-medium text-sky-700 hover:underline">{kind === 'reference' ? '说明 / 备注' : '填写说明 / 注意事项'}</summary>
+							<p class="mt-1 whitespace-pre-line text-[11px] leading-relaxed text-slate-500">{schema.intro.notes}</p>
+						</details>
+					{/if}
+				</div>
+			{:else if kind === 'reference'}
+				<div class="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-xs leading-relaxed text-slate-400">
+					尚未填写文件描述。可在 Bitable 的 Info 字段写简介，或用 Field Schema 的 intro 提供「条款 / 用途 / 说明」。
+				</div>
+			{/if}
+		{/snippet}
+
+		<!-- Reusable: file preview (live-filled docx / pdf iframe / download) -->
+		{#snippet previewBlock(tall: boolean)}
+			<div class="flex items-center justify-between rounded-t-xl border border-b-0 border-slate-200 bg-slate-50 px-4 py-2.5">
+				<p class="text-sm font-medium text-slate-600">
+					{#if isDocx && schema && kind !== 'reference'}预览（填写效果）{:else}文件预览{/if}
+				</p>
+				{#if previewBusy}<span class="text-[11px] text-slate-400">渲染中…</span>{/if}
+			</div>
+			<div class="rounded-b-xl border border-slate-200 bg-white">
+				{#if isPdf && inlineUrl}
+					<iframe src={inlineUrl} title="预览" class="{tall ? 'h-[84vh]' : 'h-[78vh]'} w-full rounded-b-xl"></iframe>
+				{:else if isDocx}
+					{#if previewError}
+						<div class="m-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">预览失败：{previewError}</div>
+					{/if}
+					<div class="{tall ? 'max-h-[84vh]' : 'max-h-[78vh]'} overflow-auto bg-slate-100" bind:this={previewContainer}>
+						<div bind:this={previewInner}></div>
+					</div>
+				{:else if inlineUrl}
+					<div class="flex flex-col items-center gap-3 p-10 text-center">
+						<p class="text-sm text-slate-500">浏览器无法内嵌预览此类型文件（{fmt.toUpperCase()}）。</p>
+						<a href={dlUrl} class="rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载查看</a>
+					</div>
+				{:else}
+					<div class="p-10 text-center text-sm text-slate-400">该记录还没上传文件。</div>
+				{/if}
+			</div>
+		{/snippet}
+
+		{#if kind === 'reference'}
+			<!-- ── Reference doc: description sidebar + large preview ── -->
+			<div class="mt-4 grid gap-5 lg:grid-cols-3 lg:items-start">
+				<div class="space-y-4 lg:col-span-1">
+					{@render descriptionPanel()}
+					<div class="rounded-xl border border-slate-200 bg-white p-4">
+						<p class="text-sm text-slate-600">参考文件，无需填写，仅供查阅。</p>
+						{#if dlUrl}
+							<a href={dlUrl} class="mt-3 inline-block rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载阅读</a>
+						{/if}
+					</div>
+				</div>
+				<div class="lg:col-span-2 lg:sticky lg:top-4">
+					{@render previewBlock(true)}
+				</div>
+			</div>
+		{:else}
+		<!-- ── Fillable / pending: form + live preview ── -->
 		<div class="mt-4 grid gap-5 lg:grid-cols-2 lg:items-start">
 			<!-- ── Left: info + form ── -->
 			<div class="space-y-4">
-				<!-- Info / explanation -->
-				{#if schema?.intro || item.info}
-					<div class="rounded-xl border border-sky-100 bg-sky-50/60 p-4">
-						{#if schema?.intro?.clause}
-							<span class="inline-block rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-								{schema.intro.clause}
-							</span>
-						{/if}
-						{#if schema?.intro?.purpose}
-							<p class="mt-2 text-xs leading-relaxed text-slate-700">{schema.intro.purpose}</p>
-						{/if}
-						{#if item.info}
-							<p class="mt-2 whitespace-pre-line text-xs leading-relaxed text-slate-600">{item.info}</p>
-						{/if}
-						{#if schema?.intro?.notes}
-							<details class="mt-2" open>
-								<summary class="cursor-pointer text-[11px] font-medium text-sky-700 hover:underline">填写说明 / 注意事项</summary>
-								<p class="mt-1 whitespace-pre-line text-[11px] leading-relaxed text-slate-500">{schema.intro.notes}</p>
-							</details>
-						{/if}
-					</div>
-				{/if}
+				{@render descriptionPanel()}
 
-				{#if kind === 'reference'}
-					<div class="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-600">
-						这是参考文件,无需填写。可在右侧预览,或下载阅读。
-					</div>
-				{:else if kind === 'pending'}
+				{#if kind === 'pending'}
 					<div class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-700">
 						该模板还没配置 Field Schema,暂时无法填写。可先下载空白模板。
+						{#if dlUrl}<a href={dlUrl} class="ml-1 font-medium underline">下载</a>{/if}
 					</div>
 				{:else if schema}
 					<!-- Structured fill form -->
@@ -358,34 +410,10 @@
 				{/if}
 			</div>
 
-			<!-- ── Right: live WYSIWYG preview of the filled template ── -->
 			<div class="lg:sticky lg:top-4">
-				<div class="flex items-center justify-between rounded-t-xl border border-b-0 border-slate-200 bg-slate-50 px-4 py-2.5">
-					<p class="text-sm font-medium text-slate-600">
-						{#if isDocx && schema && kind !== 'reference'}预览（填写效果）{:else}原始文件预览{/if}
-					</p>
-					{#if previewBusy}<span class="text-[11px] text-slate-400">渲染中…</span>{/if}
-				</div>
-				<div class="rounded-b-xl border border-slate-200 bg-white">
-					{#if isPdf && inlineUrl}
-						<iframe src={inlineUrl} title="预览" class="h-[78vh] w-full rounded-b-xl"></iframe>
-					{:else if isDocx}
-						{#if previewError}
-							<div class="m-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">预览失败：{previewError}</div>
-						{/if}
-						<div class="max-h-[78vh] overflow-auto bg-slate-100" bind:this={previewContainer}>
-							<div bind:this={previewInner}></div>
-						</div>
-					{:else if inlineUrl}
-						<div class="flex flex-col items-center gap-3 p-10 text-center">
-							<p class="text-sm text-slate-500">浏览器无法内嵌预览此类型文件（{fmt.toUpperCase()}）。</p>
-							<a href={dlUrl} class="rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载查看</a>
-						</div>
-					{:else}
-						<div class="p-10 text-center text-sm text-slate-400">该记录还没上传文件。</div>
-					{/if}
-				</div>
+				{@render previewBlock(false)}
 			</div>
 		</div>
+		{/if}
 	</div>
 </div>
