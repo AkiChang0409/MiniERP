@@ -23,7 +23,7 @@
 		"preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
 		"prepare": "svelte-kit sync || echo ''",
 		"check:modular-boundary": "node scripts/check-modular-boundary.mjs",
-	"bench:agent": "node scripts/bench-agent-latency.mjs",
+		"bench:agent": "node scripts/bench-agent-latency.mjs",
 		"check:architecture-report": "node scripts/check-modular-boundary.mjs --report-only",
 		"check": "npm run check:modular-boundary && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
@@ -80,6 +80,7 @@
 		"@techstark/opencv-js": "^4.12.0-release.1",
 		"@thednp/dommatrix": "^3.0.4",
 		"better-auth": "^1.5.6",
+		"docxtemplater": "^3.69.3",
 		"drizzle-orm": "^0.45.2",
 		"fflate": "^0.8.2",
 		"html2canvas": "^1.4.1",
@@ -87,6 +88,7 @@
 		"lucide-svelte": "^1.0.1",
 		"pdf-lib": "^1.17.1",
 		"pdfjs-dist": "^5.6.205",
+		"pizzip": "^3.2.0",
 		"utif2": "^4.1.0",
 		"zod": "^4.3.6"
 	}
