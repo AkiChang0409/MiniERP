@@ -37,12 +37,6 @@
 		other: 'bg-slate-100 text-slate-600 ring-slate-200'
 	};
 
-	type Kind = 'reference' | 'fillable' | 'pending';
-	function kindOf(t: FileTemplate): Kind {
-		if (t.referenceOnly) return 'reference';
-		return t.fieldSchema && t.fieldSchema.trim().length > 0 ? 'fillable' : 'pending';
-	}
-
 	function downloadUrl(t: FileTemplate): string | null {
 		if (!t.file) return null;
 		const params = new URLSearchParams({ token: t.file.fileToken, name: t.file.name, download: '1' });
@@ -104,18 +98,11 @@
 								{#if t.info}
 									<p class="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{t.info}</p>
 								{/if}
-								<div class="relative mt-auto flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-									{#if kindOf(t) === 'fillable'}
-										<span class="rounded-md bg-[var(--sf-green)] px-2 py-0.5 text-[11px] font-medium text-white">填写生成 →</span>
-									{:else if kindOf(t) === 'reference'}
-										<span class="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">参考文件</span>
-									{:else}
-										<span class="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-600">待配置字段</span>
-									{/if}
-									{#if dl}
-										<a href={dl} class="relative z-10 ml-auto text-[11px] font-medium text-slate-500 hover:text-slate-700">下载</a>
-									{/if}
-								</div>
+								{#if dl}
+									<div class="relative mt-auto flex items-center justify-end border-t border-slate-100 pt-3">
+										<a href={dl} class="relative z-10 text-[11px] font-medium text-slate-500 hover:text-slate-700">下载</a>
+									</div>
+								{/if}
 							</div>
 						{/each}
 					</div>

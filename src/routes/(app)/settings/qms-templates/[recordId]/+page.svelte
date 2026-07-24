@@ -94,24 +94,39 @@
 	const isDocx = $derived(fmt === 'docx');
 
 	let previewContainer = $state<HTMLDivElement | undefined>();
+	let previewInner = $state<HTMLDivElement | undefined>();
 	let previewBuf: ArrayBuffer | null = null; // cached blank-template bytes
 	let previewBusy = $state(false);
 	let previewError = $state<string | null>(null);
 	let previewTimer: ReturnType<typeof setTimeout> | null = null;
 	const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+	// Scale the rendered doc (which uses the Word page's natural width — often wider
+	// than the column) down to fit the container width exactly.
+	function fitPreview() {
+		const inner = previewInner;
+		const cont = previewContainer;
+		if (!inner || !cont) return;
+		inner.style.zoom = '1';
+		const natW = inner.scrollWidth;
+		const availW = cont.clientWidth;
+		if (natW > 0 && availW > 0 && natW > availW) {
+			inner.style.zoom = String(availW / natW);
+		}
+	}
+
 	// Re-render the preview (debounced) whenever the form values or record change.
 	const valuesSig = $derived(JSON.stringify(fillValues));
 	$effect(() => {
 		void valuesSig;
 		void item.recordId;
-		if (!isDocx || !previewContainer || !inlineUrl) return;
+		if (!isDocx || !previewInner || !inlineUrl) return;
 		if (previewTimer) clearTimeout(previewTimer);
 		previewTimer = setTimeout(() => void renderPreview(), 350);
 	});
 
 	async function renderPreview() {
-		if (!previewContainer || !inlineUrl) return;
+		if (!previewInner || !inlineUrl) return;
 		previewBusy = true;
 		previewError = null;
 		try {
@@ -135,8 +150,9 @@
 				blob = new Blob([previewBuf], { type: DOCX_MIME });
 			}
 			const { renderAsync } = await import('docx-preview');
-			previewContainer.innerHTML = '';
-			await renderAsync(blob, previewContainer, undefined, { inWrapper: true, ignoreWidth: false });
+			previewInner.innerHTML = '';
+			await renderAsync(blob, previewInner, undefined, { inWrapper: true, ignoreWidth: false });
+			fitPreview();
 		} catch (e) {
 			previewError = (e as Error).message;
 		} finally {
@@ -145,17 +161,21 @@
 	}
 
 	// Field groups for the quadrant layout (SWOT-like): text/date → header row,
-	// list fields → 2×2 grid, textarea → footer. Falls back to a flat stack.
+	// list fields → colored grid (2×2 for SWOT, 2×3 for PESTLE…), text/date →
+	// header row, textarea → footer. Any non-'stack' layout uses the grid.
 	const layout = $derived(schema?.layout ?? 'stack');
+	const isGrid = $derived(layout !== 'stack');
 	const headerFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'text' || f.type === 'date'));
-	const quadFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'list').slice(0, 4));
+	const quadFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'list').slice(0, 8));
 	const footerFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'textarea'));
 
 	const quadTone = [
 		{ head: 'bg-emerald-600', ring: 'border-emerald-200' },
 		{ head: 'bg-rose-600', ring: 'border-rose-200' },
 		{ head: 'bg-sky-600', ring: 'border-sky-200' },
-		{ head: 'bg-amber-600', ring: 'border-amber-200' }
+		{ head: 'bg-amber-600', ring: 'border-amber-200' },
+		{ head: 'bg-violet-600', ring: 'border-violet-200' },
+		{ head: 'bg-slate-600', ring: 'border-slate-200' }
 	];
 
 	// --- generate ---
@@ -199,6 +219,8 @@
 		}
 	}
 </script>
+
+<svelte:window onresize={fitPreview} />
 
 <div class="min-h-screen bg-slate-50">
 	<div class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
@@ -259,7 +281,7 @@
 				{:else if schema}
 					<!-- Structured fill form -->
 					<div class="rounded-xl border border-slate-200 bg-white p-4">
-						{#if layout === 'quadrant'}
+						{#if isGrid}
 							{#if headerFields.length}
 								<div class="mb-4 grid gap-3 sm:grid-cols-3">
 									{#each headerFields as f (f.key)}
@@ -272,8 +294,8 @@
 							{/if}
 							<div class="grid gap-3 sm:grid-cols-2">
 								{#each quadFields as f, i (f.key)}
-									<div class="rounded-lg border {quadTone[i % 4].ring} overflow-hidden">
-										<div class="{quadTone[i % 4].head} px-3 py-1.5 text-xs font-semibold text-white">{f.label}</div>
+									<div class="rounded-lg border {quadTone[i % quadTone.length].ring} overflow-hidden">
+										<div class="{quadTone[i % quadTone.length].head} px-3 py-1.5 text-xs font-semibold text-white">{f.label}</div>
 										<div class="p-2.5">
 											{#if f.help}<p class="mb-1 text-[11px] leading-relaxed text-slate-400">{f.help}</p>{/if}
 											<textarea bind:value={fillValues[f.key]} rows="5" placeholder="每行一条" class="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"></textarea>
@@ -351,7 +373,9 @@
 						{#if previewError}
 							<div class="m-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">预览失败：{previewError}</div>
 						{/if}
-						<div class="max-h-[78vh] overflow-auto bg-slate-100 p-3" bind:this={previewContainer}></div>
+						<div class="max-h-[78vh] overflow-auto bg-slate-100" bind:this={previewContainer}>
+							<div bind:this={previewInner}></div>
+						</div>
 					{:else if inlineUrl}
 						<div class="flex flex-col items-center gap-3 p-10 text-center">
 							<p class="text-sm text-slate-500">浏览器无法内嵌预览此类型文件（{fmt.toUpperCase()}）。</p>
