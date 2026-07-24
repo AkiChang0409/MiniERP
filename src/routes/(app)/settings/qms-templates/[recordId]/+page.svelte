@@ -83,50 +83,64 @@
 		if (item.recordId !== lastRecord) {
 			lastRecord = item.recordId;
 			fillValues = schema ? Object.fromEntries(schema.fields.map((f) => [f.key, ''])) : {};
-			// reset the original-template preview for the new record
-			tplRendered = false;
-			tplError = null;
-			previewTab = 'live';
+			// drop the cached template bytes for the new record
+			previewBuf = null;
+			previewError = null;
 		}
 	});
 
-	// --- right-side views: live preview vs. original template ---
+	// --- right-side preview: live-render the FILLED template via docx-preview ---
 	const isPdf = $derived(fmt === 'pdf');
 	const isDocx = $derived(fmt === 'docx');
-	const hasLive = $derived(kind !== 'reference' && !!schema);
 
-	let previewTab = $state<'live' | 'template'>('live');
-	let tplContainer = $state<HTMLDivElement | undefined>();
-	let tplRendered = $state(false);
-	let tplRendering = $state(false);
-	let tplError = $state<string | null>(null);
+	let previewContainer = $state<HTMLDivElement | undefined>();
+	let previewBuf: ArrayBuffer | null = null; // cached blank-template bytes
+	let previewBusy = $state(false);
+	let previewError = $state<string | null>(null);
+	let previewTimer: ReturnType<typeof setTimeout> | null = null;
+	const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-	// Render the blank .docx template into the container when its view is active
-	// (lazy: only fetch/render on first switch to 「原始模板」, or immediately for
-	// reference docs that have no live view).
-	const wantTemplate = $derived((hasLive && previewTab === 'template') || (!hasLive && isDocx));
+	// Re-render the preview (debounced) whenever the form values or record change.
+	const valuesSig = $derived(JSON.stringify(fillValues));
 	$effect(() => {
-		if (wantTemplate && isDocx && tplContainer && !tplRendered && !tplRendering) {
-			void renderTemplate();
-		}
+		void valuesSig;
+		void item.recordId;
+		if (!isDocx || !previewContainer || !inlineUrl) return;
+		if (previewTimer) clearTimeout(previewTimer);
+		previewTimer = setTimeout(() => void renderPreview(), 350);
 	});
 
-	async function renderTemplate() {
-		if (!inlineUrl || !tplContainer) return;
-		tplRendering = true;
-		tplError = null;
+	async function renderPreview() {
+		if (!previewContainer || !inlineUrl) return;
+		previewBusy = true;
+		previewError = null;
 		try {
-			const res = await fetch(inlineUrl);
-			if (!res.ok) throw new Error(`模板文件下载失败 (HTTP ${res.status})`);
-			const blob = await res.blob();
+			if (!previewBuf) {
+				const res = await fetch(inlineUrl);
+				if (!res.ok) throw new Error(`模板文件下载失败 (HTTP ${res.status})`);
+				previewBuf = await res.arrayBuffer();
+			}
+			let blob: Blob;
+			if (schema && kind !== 'reference') {
+				// Fill the real template with the current values → true WYSIWYG.
+				const [{ default: PizZip }, { default: Docxtemplater }] = await Promise.all([
+					import('pizzip'),
+					import('docxtemplater')
+				]);
+				const zip = new PizZip(previewBuf);
+				const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+				doc.render(Object.fromEntries(schema.fields.map((f) => [f.key, fillValues[f.key] ?? ''])));
+				blob = doc.getZip().generate({ type: 'blob', mimeType: DOCX_MIME });
+			} else {
+				blob = new Blob([previewBuf], { type: DOCX_MIME });
+			}
 			const { renderAsync } = await import('docx-preview');
-			tplContainer.innerHTML = '';
-			await renderAsync(blob, tplContainer, undefined, { inWrapper: true, ignoreWidth: false });
-			tplRendered = true;
+			previewContainer.innerHTML = '';
+			await renderAsync(blob, previewContainer, undefined, { inWrapper: true, ignoreWidth: false });
 		} catch (e) {
-			tplError = (e as Error).message;
+			previewError = (e as Error).message;
 		} finally {
-			tplRendering = false;
+			previewBusy = false;
 		}
 	}
 
@@ -143,13 +157,6 @@
 		{ head: 'bg-sky-600', ring: 'border-sky-200' },
 		{ head: 'bg-amber-600', ring: 'border-amber-200' }
 	];
-
-	function lines(v: string | undefined): string[] {
-		return (v ?? '')
-			.split('\n')
-			.map((s) => s.trim())
-			.filter(Boolean);
-	}
 
 	// --- generate ---
 	let generating = $state(false);
@@ -329,86 +336,30 @@
 				{/if}
 			</div>
 
-			<!-- ── Right: live preview + original template ── -->
+			<!-- ── Right: live WYSIWYG preview of the filled template ── -->
 			<div class="lg:sticky lg:top-4">
-				<div class="flex items-center gap-1 rounded-t-xl border border-b-0 border-slate-200 bg-slate-50 px-3 py-2">
-					{#if hasLive}
-						<button type="button" class="rounded-md px-2.5 py-1 text-xs font-medium transition {previewTab === 'live' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}" onclick={() => (previewTab = 'live')}>实时预览</button>
-						<button type="button" class="rounded-md px-2.5 py-1 text-xs font-medium transition {previewTab === 'template' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}" onclick={() => (previewTab = 'template')}>原始模板</button>
-					{:else}
-						<p class="text-sm font-medium text-slate-600">原始模板 / 预览</p>
-					{/if}
+				<div class="flex items-center justify-between rounded-t-xl border border-b-0 border-slate-200 bg-slate-50 px-4 py-2.5">
+					<p class="text-sm font-medium text-slate-600">
+						{#if isDocx && schema && kind !== 'reference'}预览（填写效果）{:else}原始文件预览{/if}
+					</p>
+					{#if previewBusy}<span class="text-[11px] text-slate-400">渲染中…</span>{/if}
 				</div>
 				<div class="rounded-b-xl border border-slate-200 bg-white">
-					<!-- LIVE preview (fillable only) -->
-					{#if hasLive}
-						<div class:hidden={previewTab !== 'live'}>
-							{#if layout === 'quadrant'}
-								<div class="space-y-3 p-5 text-xs text-slate-800">
-									{#if headerFields.length}
-										<div class="grid grid-cols-3 gap-2 border-b border-slate-200 pb-2">
-											{#each headerFields as f (f.key)}
-												<div><span class="font-semibold text-slate-500">{f.label}:</span> {fillValues[f.key] || '—'}</div>
-											{/each}
-										</div>
-									{/if}
-									<div class="grid grid-cols-2 gap-2">
-										{#each quadFields as f, i (f.key)}
-											<div class="overflow-hidden rounded border {quadTone[i % 4].ring}">
-												<div class="{quadTone[i % 4].head} px-2 py-1 text-[11px] font-semibold text-white">{f.label}</div>
-												<ul class="min-h-[80px] list-disc space-y-0.5 p-2 pl-5">
-													{#each lines(fillValues[f.key]) as it}<li>{it}</li>{:else}<li class="list-none text-slate-300">（待填写）</li>{/each}
-												</ul>
-											</div>
-										{/each}
-									</div>
-									{#each footerFields as f (f.key)}
-										<div class="border-t border-slate-200 pt-2">
-											<p class="font-semibold text-slate-600">{f.label}</p>
-											<p class="mt-0.5 whitespace-pre-line text-slate-700">{fillValues[f.key] || '—'}</p>
-										</div>
-									{/each}
-								</div>
-							{:else}
-								<div class="space-y-3 p-5 text-xs text-slate-800">
-									{#each schema?.fields ?? [] as f (f.key)}
-										<div>
-											<p class="font-semibold text-slate-600">{f.label}</p>
-											{#if f.type === 'list'}
-												<ul class="mt-0.5 list-disc space-y-0.5 pl-5">
-													{#each lines(fillValues[f.key]) as it}<li>{it}</li>{:else}<li class="list-none text-slate-300">（待填写）</li>{/each}
-												</ul>
-											{:else}
-												<p class="mt-0.5 whitespace-pre-line text-slate-700">{fillValues[f.key] || '—'}</p>
-											{/if}
-										</div>
-									{/each}
-								</div>
-							{/if}
-						</div>
-					{/if}
-
-					<!-- ORIGINAL template view -->
-					<div class:hidden={hasLive && previewTab !== 'template'}>
-						{#if isPdf && inlineUrl}
-							<iframe src={inlineUrl} title="原始模板" class="h-[75vh] w-full rounded-b-xl"></iframe>
-						{:else if isDocx}
-							{#if tplError}
-								<div class="m-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">原始模板加载失败：{tplError}</div>
-							{/if}
-							{#if tplRendering}
-								<div class="p-6 text-center text-xs text-slate-400">加载原始模板…</div>
-							{/if}
-							<div class="max-h-[75vh] overflow-auto bg-slate-100 p-3" bind:this={tplContainer}></div>
-						{:else if inlineUrl}
-							<div class="flex flex-col items-center gap-3 p-10 text-center">
-								<p class="text-sm text-slate-500">浏览器无法内嵌预览此类型文件（{fmt.toUpperCase()}）。</p>
-								<a href={dlUrl} class="rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载查看</a>
-							</div>
-						{:else}
-							<div class="p-10 text-center text-sm text-slate-400">该记录还没上传文件。</div>
+					{#if isPdf && inlineUrl}
+						<iframe src={inlineUrl} title="预览" class="h-[78vh] w-full rounded-b-xl"></iframe>
+					{:else if isDocx}
+						{#if previewError}
+							<div class="m-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">预览失败：{previewError}</div>
 						{/if}
-					</div>
+						<div class="max-h-[78vh] overflow-auto bg-slate-100 p-3" bind:this={previewContainer}></div>
+					{:else if inlineUrl}
+						<div class="flex flex-col items-center gap-3 p-10 text-center">
+							<p class="text-sm text-slate-500">浏览器无法内嵌预览此类型文件（{fmt.toUpperCase()}）。</p>
+							<a href={dlUrl} class="rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载查看</a>
+						</div>
+					{:else}
+						<div class="p-10 text-center text-sm text-slate-400">该记录还没上传文件。</div>
+					{/if}
 				</div>
 			</div>
 		</div>
