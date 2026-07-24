@@ -37,26 +37,39 @@
 	const templates = $derived((data.templates as Template[]) ?? []);
 
 	// -- Library / generate view (ISO 9001 file gallery) --------------------
-	// Two tabs on the same page: a user-facing "文件库 / 生成" gallery and the
-	// existing metadata "模板管理" table. Fill + upload are stubs for now — this
-	// is the shell; the docx/xlsx/pdf generation gets wired in next.
+	// The gallery reads the Bitable **File Template** table (source of truth). The
+	// "模板管理" tab still reads the legacy D1 mirror. Fill + generate are stubs for
+	// now — this step just wires the gallery to Bitable so uploaded files show up.
+	type FileTemplate = {
+		recordId: string;
+		name: string;
+		code: string | null;
+		category: string | null;
+		scope: string | null;
+		taskMatch: string | null;
+		role: string | null;
+		needApproval: boolean;
+		isActive: boolean;
+		referenceOnly: boolean;
+		fieldSchema: string | null;
+		info: string | null;
+		file: { fileToken: string; name: string; mimeType: string; size: number | null } | null;
+	};
+
+	const fileTemplates = $derived((data.fileTemplates as FileTemplate[]) ?? []);
+	const fileTemplateRevision = $derived(data.fileTemplateRevision as number | null);
+
 	let view = $state<'library' | 'manage'>('library');
 	let notice = $state<string | null>(null);
 
 	type Fmt = 'docx' | 'xlsx' | 'pdf' | 'zip' | 'other';
-	function formatOf(t: Template): Fmt {
-		const name = (t.fileTemplateName ?? '').toLowerCase();
+	function formatOf(fileName: string | null | undefined): Fmt {
+		const name = (fileName ?? '').toLowerCase();
 		if (name.endsWith('.docx') || name.endsWith('.doc')) return 'docx';
 		if (name.endsWith('.xlsx') || name.endsWith('.xls')) return 'xlsx';
 		if (name.endsWith('.pdf')) return 'pdf';
 		if (name.endsWith('.zip')) return 'zip';
 		return 'other';
-	}
-
-	// Fillable = has a field schema to render a form from. Otherwise it's a
-	// reference/download-only document (e.g. the ISO implementation guide).
-	function isFillable(t: Template): boolean {
-		return !!t.fieldSchema && t.fieldSchema.trim().length > 0;
 	}
 
 	const fmtBadge: Record<Fmt, string> = {
@@ -67,12 +80,27 @@
 		other: 'bg-slate-100 text-slate-600 ring-slate-200'
 	};
 
-	// Active templates grouped by module category for the gallery.
+	// Per-card action state:
+	//   reference → download-only; fillable → 填写生成; pending → 待配置字段.
+	type Kind = 'reference' | 'fillable' | 'pending';
+	function kindOf(t: FileTemplate): Kind {
+		if (t.referenceOnly) return 'reference';
+		return t.fieldSchema && t.fieldSchema.trim().length > 0 ? 'fillable' : 'pending';
+	}
+
+	/** Streamed-download URL for a template's blank file (via the attachment API). */
+	function downloadUrl(t: FileTemplate): string | null {
+		if (!t.file) return null;
+		const params = new URLSearchParams({ token: t.file.fileToken, name: t.file.name, download: '1' });
+		if (fileTemplateRevision != null) params.set('rev', String(fileTemplateRevision));
+		return `/api/qms/file-template/attachment?${params.toString()}`;
+	}
+
+	// Templates grouped by category for the gallery.
 	const libraryGroups = $derived.by(() => {
-		const groups = new Map<string, Template[]>();
-		for (const t of templates) {
-			if (!t.isActive) continue;
-			const key = t.moduleCategory?.trim() || '未分类';
+		const groups = new Map<string, FileTemplate[]>();
+		for (const t of fileTemplates) {
+			const key = t.category?.trim() || '未分类';
 			const arr = groups.get(key) ?? [];
 			arr.push(t);
 			groups.set(key, arr);
@@ -80,8 +108,8 @@
 		return [...groups.entries()].map(([category, items]) => ({ category, items }));
 	});
 
-	function startFill(t: Template) {
-		notice = `「${t.name}」的填写生成即将接入：fieldSchema → 动态表单 → 生成 ${formatOf(t).toUpperCase()} 文件下载。`;
+	function startFill(t: FileTemplate) {
+		notice = `「${t.name}」的填写生成即将接入：fieldSchema → 动态表单 → 生成 ${formatOf(t.file?.name).toUpperCase()} 文件下载。`;
 	}
 
 	type Editor = {
@@ -212,13 +240,15 @@
 	description="公司级质量管理体系文件库。「文件库 / 生成」按模块浏览 ISO 9001 模板，可填写生成或下载阅读；「模板管理」维护模板元数据（task-scope 模板按 Task type 自动建议给 Gantt 任务）。"
 >
 	{#snippet actions()}
-		<button
-			type="button"
-			class="mt-3 rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c]"
-			onclick={openCreate}
-		>
-			+ 新建模板
-		</button>
+		{#if view === 'manage'}
+			<button
+				type="button"
+				class="mt-3 rounded-md bg-[var(--sf-green)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2f5e2c]"
+				onclick={openCreate}
+			>
+				+ 新建模板
+			</button>
+		{/if}
 	{/snippet}
 
 	<!-- View toggle: user-facing gallery vs. metadata admin table -->
@@ -246,29 +276,22 @@
 		</div>
 	{/if}
 
-	{#if data.dataMessage}
-		<p class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-			{data.dataMessage}
-		</p>
-	{/if}
-
 	{#if view === 'library'}
-		<!-- ── ISO 9001 file gallery (shell) ── -->
+		<!-- ── ISO 9001 file gallery — reads the Bitable File Template table ── -->
+		{#if data.fileTemplateMessage}
+			<p class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+				{data.fileTemplateMessage}
+			</p>
+		{/if}
 		{#if libraryGroups.length === 0}
 			<div class="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
 				<p class="text-sm font-medium text-slate-700">文件库还是空的</p>
 				<p class="mx-auto mt-1 max-w-md text-xs leading-relaxed text-slate-500">
-					在「模板管理」里新建 ISO 9001 模板并上传原始文件（.docx / .xlsx / .pdf）。配了字段（fieldSchema）的模板会出现
-					<span class="font-medium text-slate-700">「填写生成」</span>，纯参考文件（如实施指南）只提供
-					<span class="font-medium text-slate-700">「下载阅读」</span>。
+					在 Lark Base 的 <span class="font-medium text-slate-700">File Template</span> 表里新建模板并把原始文件传到
+					<span class="font-medium text-slate-700">File</span> 附件字段（.docx / .xlsx / .pdf）。勾选
+					<span class="font-medium text-slate-700">Reference Only</span> 的是参考文件（只下载）；配了
+					<span class="font-medium text-slate-700">Field Schema</span> 的可「填写生成」。
 				</p>
-				<button
-					type="button"
-					class="mt-4 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-					onclick={() => (view = 'manage')}
-				>
-					去添加模板
-				</button>
 			</div>
 		{:else}
 			<div class="space-y-6">
@@ -276,20 +299,21 @@
 					<section>
 						<h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{group.category}</h2>
 						<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-							{#each group.items as t (t.id)}
-								<div class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+							{#each group.items as t (t.recordId)}
+								{@const dl = downloadUrl(t)}
+								<div class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm" class:opacity-60={!t.isActive}>
 									<div class="flex items-start justify-between gap-2">
-										<span class="rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase ring-1 {fmtBadge[formatOf(t)]}">
-											{formatOf(t)}
+										<span class="rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase ring-1 {fmtBadge[formatOf(t.file?.name)]}">
+											{formatOf(t.file?.name)}
 										</span>
-										<span class="font-mono text-[11px] text-slate-400">{t.code}</span>
+										<span class="font-mono text-[11px] text-slate-400">{t.code ?? ''}</span>
 									</div>
 									<p class="mt-2 line-clamp-2 text-sm font-medium text-slate-800">{t.name}</p>
-									{#if t.description}
-										<p class="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{t.description}</p>
+									{#if t.info}
+										<p class="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{t.info}</p>
 									{/if}
 									<div class="mt-auto flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-										{#if isFillable(t)}
+										{#if kindOf(t) === 'fillable'}
 											<button
 												type="button"
 												class="rounded-md bg-[var(--sf-green)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#2f5e2c]"
@@ -297,19 +321,23 @@
 											>
 												填写生成
 											</button>
+										{:else if kindOf(t) === 'reference'}
+											<span class="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">参考文件 · 不填写</span>
 										{:else}
-											<span class="text-[11px] text-slate-400">参考文件 · 不填写</span>
+											<span class="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-600">待配置字段</span>
 										{/if}
-										{#if t.fileTemplateUrl}
+										{#if dl}
 											<a
-												href={t.fileTemplateUrl}
-												download={t.fileTemplateName ?? ''}
+												href={dl}
 												class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
 											>
 												下载
 											</a>
 										{:else}
 											<span class="text-[11px] text-slate-300">未上传文件</span>
+										{/if}
+										{#if !t.isActive}
+											<span class="text-[11px] text-slate-400">· 停用</span>
 										{/if}
 									</div>
 								</div>
@@ -320,7 +348,15 @@
 			</div>
 		{/if}
 	{:else}
-		<!-- ── Metadata admin table (existing) ── -->
+		<p class="mb-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+			旧的 D1 元数据镜像（<code>qms_templates</code>）。模板主数据现已迁往 Lark Base 的 File Template 表管理，此表将逐步退役——请以「文件库 / 生成」为准。
+		</p>
+		{#if data.dataMessage}
+			<p class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+				{data.dataMessage}
+			</p>
+		{/if}
+		<!-- ── Metadata admin table (legacy D1 mirror) ── -->
 		<div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
 		<table class="w-full text-sm">
 			<thead class="bg-slate-50 text-left text-xs text-slate-500">
