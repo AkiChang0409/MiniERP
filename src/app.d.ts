@@ -134,4 +134,7 @@ declare global {
 	}
 }
 
+// xlsx-populate ships no types; used client-side to fill .xlsx templates.
+declare module 'xlsx-populate';
+
 export {};

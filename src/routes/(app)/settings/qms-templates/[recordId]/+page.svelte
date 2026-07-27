@@ -18,8 +18,17 @@
 		/** For type='computed': product of column keys, e.g. "power*priority*relevance". */
 		formula?: string;
 		help?: string;
+		/** Excel engine: the column letter to write this value into (e.g. "C"). */
+		col?: string;
 	};
-	type ChecklistItem = { key: string; ref?: string; group?: string; label: string };
+	type ChecklistItem = {
+		key: string;
+		ref?: string;
+		group?: string;
+		label: string;
+		/** Excel engine: the sheet row this item maps to. */
+		row?: number;
+	};
 	type Choice = { value: string; label: string };
 	type SchemaField = {
 		key: string;
@@ -36,12 +45,16 @@
 		items?: ChecklistItem[];
 		choices?: Choice[];
 		noteLabel?: string;
+		/** Excel engine: cell address to write a scalar field into (e.g. "C1"). */
+		cell?: string;
 	};
 	type SchemaIntro = { clause?: string; purpose?: string; notes?: string };
 	type FieldSchema = {
 		version?: number;
-		engine?: string;
+		engine?: string; // 'docx' (default) | 'xlsx'
 		layout?: 'quadrant' | 'grid' | 'stack';
+		/** Excel engine: target sheet name (defaults to the first sheet). */
+		sheet?: string;
 		intro?: SchemaIntro;
 		fields: SchemaField[];
 	};
@@ -213,6 +226,8 @@
 	// --- right-side preview: live-render the FILLED template via docx-preview ---
 	const isPdf = $derived(fmt === 'pdf');
 	const isDocx = $derived(fmt === 'docx');
+	const isXlsx = $derived(fmt === 'xlsx');
+	const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 	let previewContainer = $state<HTMLDivElement | undefined>();
 	let previewInner = $state<HTMLDivElement | undefined>();
@@ -340,21 +355,12 @@
 			const res = await fetch(inlineUrl!);
 			if (!res.ok) throw new Error(`模板文件下载失败 (HTTP ${res.status})`);
 			const buf = await res.arrayBuffer();
-			const [{ default: PizZip }, { default: Docxtemplater }] = await Promise.all([
-				import('pizzip'),
-				import('docxtemplater')
-			]);
-			const zip = new PizZip(buf);
-			const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-			doc.render(buildData());
-			const out = doc.getZip().generate({
-				type: 'blob',
-				mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-			});
+			const xlsx = (schema.engine ?? 'docx') === 'xlsx';
+			const out = xlsx ? await fillXlsxBlob(buf) : await fillDocxBlob(buf);
 			const a = document.createElement('a');
 			a.href = URL.createObjectURL(out);
-			const base = (item.file.name || 'template').replace(/\.docx?$/i, '');
-			a.download = `${base} - filled.docx`;
+			const base = (item.file.name || 'template').replace(/\.(docx?|xlsx)$/i, '');
+			a.download = `${base} - filled.${xlsx ? 'xlsx' : 'docx'}`;
 			a.click();
 			URL.revokeObjectURL(a.href);
 		} catch (e) {
@@ -362,6 +368,43 @@
 		} finally {
 			generating = false;
 		}
+	}
+
+	/** Fill the .docx template with docxtemplater → blob. */
+	async function fillDocxBlob(buf: ArrayBuffer): Promise<Blob> {
+		const [{ default: PizZip }, { default: Docxtemplater }] = await Promise.all([
+			import('pizzip'),
+			import('docxtemplater')
+		]);
+		const zip = new PizZip(buf);
+		const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+		doc.render(buildData());
+		return doc.getZip().generate({ type: 'blob', mimeType: DOCX_MIME });
+	}
+
+	/** Fill the .xlsx template with xlsx-populate — write values by cell address
+	 * (checklist columns → `${col}${row}`, scalar fields → `field.cell`). */
+	async function fillXlsxBlob(buf: ArrayBuffer): Promise<Blob> {
+		// Literal specifier so Vite bundles it into a lazy chunk. xlsx-populate ships no types.
+		// @ts-expect-error – no type declarations for xlsx-populate
+		const XlsxPopulate = (await import('xlsx-populate')).default as any;
+		const wb = await XlsxPopulate.fromDataAsync(buf);
+		const ws = schema?.sheet ? wb.sheet(schema.sheet) : wb.sheet(0);
+		for (const f of schema?.fields ?? []) {
+			if (f.type === 'checklist' && f.items) {
+				for (const it of f.items) {
+					if (!it.row) continue;
+					const c = checkData[f.key]?.[it.key];
+					for (const col of f.columns ?? []) {
+						if (col.col) ws.cell(`${col.col}${it.row}`).value(c?.values[col.key] ?? '');
+					}
+				}
+			} else if (f.cell) {
+				ws.cell(f.cell).value(fillValues[f.key] ?? '');
+			}
+		}
+		const out = await wb.outputAsync();
+		return out instanceof Blob ? out : new Blob([out as BlobPart], { type: XLSX_MIME });
 	}
 </script>
 
@@ -445,7 +488,33 @@
 					<div class="{tall ? 'max-h-[84vh]' : 'max-h-[78vh]'} overflow-auto bg-slate-100" bind:this={previewContainer}>
 						<div bind:this={previewInner}></div>
 					</div>
-				{:else if inlineUrl}
+					{:else if isXlsx && schema && kind !== 'reference'}
+						<!-- Live content preview for Excel: checklist grids as HTML tables -->
+						<div class="{tall ? 'max-h-[84vh]' : 'max-h-[78vh]'} space-y-4 overflow-auto p-3">
+							{#each (schema.fields ?? []).filter((f) => f.type === 'checklist' && f.items) as f (f.key)}
+								<div class="overflow-x-auto">
+									<p class="mb-1 text-xs font-medium text-slate-600">{f.label}</p>
+									<table class="w-full border-collapse text-[11px]">
+										<thead><tr class="bg-slate-100 text-left text-slate-600">
+											<th class="border border-slate-200 px-1.5 py-1">Ref</th>
+											<th class="border border-slate-200 px-1.5 py-1">Item</th>
+											{#each f.columns ?? [] as col (col.key)}<th class="border border-slate-200 px-1.5 py-1">{col.label}</th>{/each}
+										</tr></thead>
+										<tbody>
+											{#each f.items ?? [] as it (it.key)}
+												<tr class="align-top">
+													<td class="border border-slate-200 px-1.5 py-1 font-mono text-slate-400">{it.ref ?? ''}</td>
+													<td class="border border-slate-200 px-1.5 py-1 text-slate-700">{it.label}</td>
+													{#each f.columns ?? [] as col (col.key)}
+														<td class="border border-slate-200 px-1.5 py-1 whitespace-pre-line text-slate-700">{checkData[f.key]?.[it.key]?.values[col.key] || ''}</td>
+													{/each}
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							{/each}
+						</div>
 					<div class="flex flex-col items-center gap-3 p-10 text-center">
 						<p class="text-sm text-slate-500">浏览器无法内嵌预览此类型文件（{fmt.toUpperCase()}）。</p>
 						<a href={dlUrl} class="rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载查看</a>
@@ -462,9 +531,16 @@
 				<div class="space-y-4 lg:col-span-1">
 					{@render descriptionPanel()}
 					<div class="rounded-xl border border-slate-200 bg-white p-4">
-						<p class="text-sm text-slate-600">参考文件，无需填写，仅供查阅。</p>
-						{#if dlUrl}
-							<a href={dlUrl} class="mt-3 inline-block rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载阅读</a>
+						{#if isPdf}
+							<p class="text-sm text-slate-600">参考文件，无需填写，仅供查阅。</p>
+							{#if dlUrl}
+								<a href={dlUrl} class="mt-3 inline-block rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载阅读</a>
+							{/if}
+						{:else}
+							<p class="text-sm text-slate-600">此模板在系统内暂不支持在线填写，请下载后自行填写。</p>
+							{#if dlUrl}
+								<a href={dlUrl} class="mt-3 inline-block rounded-md bg-[var(--sf-green)] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f5e2c]">下载模板</a>
+							{/if}
 						{/if}
 					</div>
 				</div>
@@ -572,7 +648,7 @@
 												{/if}
 											</div>
 										</div>
-									{:else if f.type === 'checklist' && f.items && f.choices}
+									{:else if f.type === 'checklist' && f.items}
 										<!-- Fixed-item checklist: label + choice(s) + note per item -->
 										<div>
 											<span class="text-sm font-medium text-slate-700">{f.label}</span>
@@ -585,7 +661,7 @@
 															{#if it.ref}<span class="mr-1 font-mono text-slate-400">{it.ref}.</span>{/if}{#if it.group}<span class="text-slate-400">{it.group} · </span>{/if}<span class="font-medium text-slate-700">{it.label}</span>
 														</div>
 														<div class="flex flex-wrap gap-1">
-															{#each f.choices as ch (ch.value)}
+															{#each f.choices ?? [] as ch (ch.value)}
 																<button
 																	type="button"
 																	onclick={() => setChoice(f, it.key, ch.value)}

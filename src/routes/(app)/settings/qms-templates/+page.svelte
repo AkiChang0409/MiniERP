@@ -44,22 +44,72 @@
 		return `/api/qms/file-template/attachment?${params.toString()}`;
 	}
 
+	// Group by ISO 9001 chapter, parsed from each template's schema intro clause
+	// (e.g. "· 4.1 组织环境" → 「4 组织环境」). Cross-clause fillables (Gap) and
+	// general guides fall into dedicated buckets. Order follows the standard.
+	const SECTION_ORDER = [
+		'4 组织环境',
+		'5 领导作用',
+		'6 策划',
+		'7 支持',
+		'8 运行',
+		'9 绩效评价',
+		'10 改进',
+		'综合 / 全条款',
+		'参考与指南',
+		'未分类'
+	];
+	const CHAPTER_LABEL: Record<string, string> = {
+		'4': '4 组织环境',
+		'5': '5 领导作用',
+		'6': '6 策划',
+		'7': '7 支持',
+		'8': '8 运行',
+		'9': '9 绩效评价',
+		'10': '10 改进'
+	};
+
+	function sectionOf(t: FileTemplate): string {
+		let clause = '';
+		if (t.fieldSchema) {
+			try {
+				clause = (JSON.parse(t.fieldSchema)?.intro?.clause ?? '') as string;
+			} catch {
+				/* ignore malformed schema */
+			}
+		}
+		const m = clause.match(/(\d{1,2})\.\d/); // a real ISO clause like 4.1 / 9.3
+		if (m && CHAPTER_LABEL[m[1]]) return CHAPTER_LABEL[m[1]];
+		if (t.referenceOnly) return '参考与指南';
+		return t.fieldSchema ? '综合 / 全条款' : '未分类';
+	}
+
 	const libraryGroups = $derived.by(() => {
 		const groups = new Map<string, FileTemplate[]>();
 		for (const t of fileTemplates) {
-			const key = t.category?.trim() || '未分类';
+			const key = sectionOf(t);
 			const arr = groups.get(key) ?? [];
 			arr.push(t);
 			groups.set(key, arr);
 		}
-		return [...groups.entries()].map(([category, items]) => ({ category, items }));
+		const rank = (s: string) => {
+			const i = SECTION_ORDER.indexOf(s);
+			return i < 0 ? 99 : i;
+		};
+		const kindRank = (t: FileTemplate) => (t.referenceOnly ? 1 : 0); // fillable first
+		return [...groups.entries()]
+			.map(([category, items]) => ({
+				category,
+				items: items.sort((a, b) => kindRank(a) - kindRank(b) || a.name.localeCompare(b.name))
+			}))
+			.sort((a, b) => rank(a.category) - rank(b.category));
 	});
 </script>
 
 <PageShell
 	eyebrow="Settings · ISO 9001"
 	title="QMS 文件模板库"
-	description="ISO 9001 质量管理体系文件库。主数据在 Lark Base 的 File Template 表维护,此处按模块浏览。点击文件进入详情:查看说明、按结构填写并实时预览,或下载阅读。"
+	description="ISO 9001 质量管理体系文件库,按标准条款分组。主数据在 Lark Base 的 File Template 表维护。点击文件进入详情:查看说明、按结构填写并实时预览,或下载阅读。"
 >
 	{#if data.fileTemplateMessage}
 		<p class="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
