@@ -11,22 +11,34 @@
 		info: string | null;
 		file: { fileToken: string; name: string; mimeType: string; size: number | null } | null;
 	};
+	type Column = {
+		key: string;
+		label: string;
+		type: 'text' | 'textarea' | 'date' | 'number' | 'computed';
+		/** For type='computed': product of column keys, e.g. "power*priority*relevance". */
+		formula?: string;
+		help?: string;
+	};
 	type SchemaField = {
 		key: string;
 		label: string;
-		type: 'text' | 'textarea' | 'date' | 'list';
+		type: 'text' | 'textarea' | 'date' | 'list' | 'table';
 		required?: boolean;
 		help?: string;
 		examples?: string[];
+		/** For type='table': repeatable-row columns (→ docxtemplater row loop). */
+		columns?: Column[];
 	};
 	type SchemaIntro = { clause?: string; purpose?: string; notes?: string };
 	type FieldSchema = {
 		version?: number;
 		engine?: string;
-		layout?: 'quadrant' | 'stack';
+		layout?: 'quadrant' | 'grid' | 'stack';
 		intro?: SchemaIntro;
 		fields: SchemaField[];
 	};
+
+	type Row = Record<string, string>;
 
 	const item = $derived(data.item as FileTemplate);
 	const revision = $derived(data.revision as number | null);
@@ -77,17 +89,75 @@
 	const dlUrl = $derived(attUrl(true));
 
 	// --- form model ---
-	let fillValues = $state<Record<string, string>>({});
+	let fillValues = $state<Record<string, string>>({}); // scalar fields
+	let tableData = $state<Record<string, Row[]>>({}); // table (repeatable-row) fields
 	let lastRecord = '';
+
+	function emptyRow(cols: Column[]): Row {
+		return Object.fromEntries(cols.map((c) => [c.key, '']));
+	}
+
 	$effect(() => {
 		if (item.recordId !== lastRecord) {
 			lastRecord = item.recordId;
-			fillValues = schema ? Object.fromEntries(schema.fields.map((f) => [f.key, ''])) : {};
+			const fields = schema?.fields ?? [];
+			fillValues = Object.fromEntries(
+				fields.filter((f) => f.type !== 'table').map((f) => [f.key, ''])
+			);
+			tableData = Object.fromEntries(
+				fields
+					.filter((f) => f.type === 'table' && f.columns)
+					.map((f) => [f.key, [emptyRow(f.columns!)]])
+			);
 			// drop the cached template bytes for the new record
 			previewBuf = null;
 			previewError = null;
+			userZoom = null;
 		}
 	});
+
+	// A computed column = product of the referenced numeric columns.
+	function computeCol(col: Column, row: Row): string {
+		if (col.type !== 'computed' || !col.formula) return row[col.key] ?? '';
+		const parts = col.formula.split('*').map((s) => s.trim());
+		let prod = 1;
+		for (const p of parts) {
+			const n = Number.parseFloat(row[p]);
+			if (Number.isNaN(n)) return ''; // not all inputs present yet
+			prod *= n;
+		}
+		return String(prod);
+	}
+
+	function addRow(f: SchemaField) {
+		if (!f.columns) return;
+		tableData[f.key] = [...(tableData[f.key] ?? []), emptyRow(f.columns)];
+	}
+	function removeRow(f: SchemaField, i: number) {
+		tableData[f.key] = (tableData[f.key] ?? []).filter((_, idx) => idx !== i);
+	}
+
+	const hasTable = $derived((schema?.fields ?? []).some((f) => f.type === 'table'));
+
+	// Build the docxtemplater payload: scalar fields as strings, table fields as
+	// arrays of row objects (with computed columns evaluated) for the row loop.
+	function buildData(): Record<string, unknown> {
+		const out: Record<string, unknown> = {};
+		for (const f of schema?.fields ?? []) {
+			if (f.type === 'table' && f.columns) {
+				out[f.key] = (tableData[f.key] ?? []).map((row) => {
+					const r: Row = {};
+					for (const col of f.columns!) {
+						r[col.key] = col.type === 'computed' ? computeCol(col, row) : (row[col.key] ?? '');
+					}
+					return r;
+				});
+			} else {
+				out[f.key] = fillValues[f.key] ?? '';
+			}
+		}
+		return out;
+	}
 
 	// --- right-side preview: live-render the FILLED template via docx-preview ---
 	const isPdf = $derived(fmt === 'pdf');
@@ -101,22 +171,44 @@
 	let previewTimer: ReturnType<typeof setTimeout> | null = null;
 	const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-	// Scale the rendered doc (which uses the Word page's natural width — often wider
-	// than the column) down to fit the container width exactly.
-	function fitPreview() {
+	// Preview zoom. `userZoom` null = auto fit-to-width; a number = manual scale.
+	let userZoom = $state<number | null>(null);
+	let fitScale = $state(1);
+
+	/** Measure the fit-to-width scale (Word page width ÷ column width). */
+	function measureFit(): number {
 		const inner = previewInner;
 		const cont = previewContainer;
-		if (!inner || !cont) return;
+		if (!inner || !cont) return 1;
 		inner.style.zoom = '1';
 		const natW = inner.scrollWidth;
 		const availW = cont.clientWidth;
-		if (natW > 0 && availW > 0 && natW > availW) {
-			inner.style.zoom = String(availW / natW);
-		}
+		return natW > 0 && availW > 0 && natW > availW ? availW / natW : 1;
+	}
+
+	/** Apply the effective zoom (manual if set, else fit-to-width). */
+	function applyZoom() {
+		const inner = previewInner;
+		if (!inner) return;
+		fitScale = measureFit();
+		inner.style.zoom = String(userZoom ?? fitScale);
+	}
+
+	function zoomIn() {
+		userZoom = Math.min(3, Math.round(((userZoom ?? fitScale) + 0.1) * 100) / 100);
+		applyZoom();
+	}
+	function zoomOut() {
+		userZoom = Math.max(0.2, Math.round(((userZoom ?? fitScale) - 0.1) * 100) / 100);
+		applyZoom();
+	}
+	function zoomFit() {
+		userZoom = null;
+		applyZoom();
 	}
 
 	// Re-render the preview (debounced) whenever the form values or record change.
-	const valuesSig = $derived(JSON.stringify(fillValues));
+	const valuesSig = $derived(JSON.stringify({ fillValues, tableData }));
 	$effect(() => {
 		void valuesSig;
 		void item.recordId;
@@ -144,7 +236,7 @@
 				]);
 				const zip = new PizZip(previewBuf);
 				const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-				doc.render(Object.fromEntries(schema.fields.map((f) => [f.key, fillValues[f.key] ?? ''])));
+				doc.render(buildData());
 				blob = doc.getZip().generate({ type: 'blob', mimeType: DOCX_MIME });
 			} else {
 				blob = new Blob([previewBuf], { type: DOCX_MIME });
@@ -152,7 +244,7 @@
 			const { renderAsync } = await import('docx-preview');
 			previewInner.innerHTML = '';
 			await renderAsync(blob, previewInner, undefined, { inWrapper: true, ignoreWidth: false });
-			fitPreview();
+			applyZoom();
 		} catch (e) {
 			previewError = (e as Error).message;
 		} finally {
@@ -164,7 +256,7 @@
 	// list fields → colored grid (2×2 for SWOT, 2×3 for PESTLE…), text/date →
 	// header row, textarea → footer. Any non-'stack' layout uses the grid.
 	const layout = $derived(schema?.layout ?? 'stack');
-	const isGrid = $derived(layout !== 'stack');
+	const isGrid = $derived(layout !== 'stack' && !hasTable);
 	const headerFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'text' || f.type === 'date'));
 	const quadFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'list').slice(0, 8));
 	const footerFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'textarea'));
@@ -184,7 +276,9 @@
 
 	async function generate() {
 		if (!item.file || !schema) return;
-		const missing = schema.fields.filter((f) => f.required && !fillValues[f.key]?.trim());
+		const missing = schema.fields.filter(
+			(f) => f.required && f.type !== 'table' && !fillValues[f.key]?.trim()
+		);
 		if (missing.length) {
 			genError = `请填写必填项：${missing.map((f) => f.label).join('、')}`;
 			return;
@@ -201,7 +295,7 @@
 			]);
 			const zip = new PizZip(buf);
 			const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-			doc.render(Object.fromEntries(schema.fields.map((f) => [f.key, fillValues[f.key] ?? ''])));
+			doc.render(buildData());
 			const out = doc.getZip().generate({
 				type: 'blob',
 				mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -220,7 +314,7 @@
 	}
 </script>
 
-<svelte:window onresize={fitPreview} />
+<svelte:window onresize={applyZoom} />
 
 <div class="min-h-screen bg-slate-50">
 	<div class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
@@ -279,7 +373,16 @@
 				<p class="text-sm font-medium text-slate-600">
 					{#if isDocx && schema && kind !== 'reference'}预览（填写效果）{:else}文件预览{/if}
 				</p>
-				{#if previewBusy}<span class="text-[11px] text-slate-400">渲染中…</span>{/if}
+				<div class="flex items-center gap-2">
+					{#if previewBusy}<span class="text-[11px] text-slate-400">渲染中…</span>{/if}
+					{#if isDocx}
+						<div class="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
+							<button type="button" class="rounded px-1.5 py-0.5 text-sm leading-none text-slate-600 hover:bg-slate-100" title="缩小" onclick={zoomOut}>−</button>
+							<button type="button" class="rounded px-1.5 py-0.5 text-[11px] font-medium leading-none text-slate-600 hover:bg-slate-100" title="适应宽度" onclick={zoomFit}>{Math.round((userZoom ?? fitScale) * 100)}%</button>
+							<button type="button" class="rounded px-1.5 py-0.5 text-sm leading-none text-slate-600 hover:bg-slate-100" title="放大" onclick={zoomIn}>+</button>
+						</div>
+					{/if}
+				</div>
 			</div>
 			<div class="rounded-b-xl border border-slate-200 bg-white">
 				{#if isPdf && inlineUrl}
@@ -320,7 +423,7 @@
 			</div>
 		{:else}
 		<!-- ── Fillable / pending: form + live preview ── -->
-		<div class="mt-4 grid gap-5 lg:grid-cols-2 lg:items-start">
+		<div class="mt-4 grid gap-5 lg:items-start {hasTable ? '' : 'lg:grid-cols-2'}">
 			<!-- ── Left: info + form ── -->
 			<div class="space-y-4">
 				{@render descriptionPanel()}
@@ -375,22 +478,64 @@
 								</div>
 							{/if}
 						{:else}
-							<!-- stack layout -->
-							<div class="space-y-3">
+							<!-- stack layout (also handles repeatable-row table fields) -->
+							<div class="space-y-4">
 								{#each schema.fields as f (f.key)}
-									<label class="block">
-										<span class="text-xs font-medium text-slate-600">{f.label}{#if f.required}<span class="text-rose-500"> *</span>{/if}</span>
-										{#if f.help}<span class="mt-0.5 block text-[11px] text-slate-400">{f.help}</span>{/if}
-										{#if f.type === 'text'}
-											<input bind:value={fillValues[f.key]} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm" />
-										{:else if f.type === 'date'}
-											<input type="date" bind:value={fillValues[f.key]} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm" />
-										{:else if f.type === 'list'}
-											<textarea bind:value={fillValues[f.key]} rows="4" placeholder="每行一条" class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"></textarea>
-										{:else}
-											<textarea bind:value={fillValues[f.key]} rows="3" class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"></textarea>
-										{/if}
-									</label>
+									{#if f.type === 'table' && f.columns}
+										<!-- Repeatable-row table: one card per row -->
+										<div>
+											<div class="mb-2 flex items-center justify-between">
+												<span class="text-sm font-medium text-slate-700">{f.label}</span>
+												<button type="button" class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50" onclick={() => addRow(f)}>+ 添加一行</button>
+											</div>
+											{#if f.help}<p class="mb-2 text-[11px] leading-relaxed text-slate-400">{f.help}</p>{/if}
+											<div class="space-y-3">
+												{#each tableData[f.key] ?? [] as row, ri (ri)}
+													<div class="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+														<div class="mb-2 flex items-center justify-between">
+															<span class="text-xs font-semibold text-slate-500">#{ri + 1}</span>
+															<button type="button" class="text-[11px] font-medium text-rose-500 hover:text-rose-700" onclick={() => removeRow(f, ri)}>删除</button>
+														</div>
+														<div class="grid gap-2 sm:grid-cols-2">
+															{#each f.columns as col (col.key)}
+																<label class="block">
+																	<span class="text-[11px] font-medium text-slate-600">{col.label}</span>
+																	{#if col.type === 'computed'}
+																		<input readonly value={computeCol(col, row)} class="mt-0.5 w-full rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-sm text-slate-500" />
+																	{:else if col.type === 'number'}
+																		<input type="number" bind:value={row[col.key]} class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+																	{:else if col.type === 'date'}
+																		<input type="date" bind:value={row[col.key]} class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+																	{:else if col.type === 'textarea'}
+																		<textarea bind:value={row[col.key]} rows="2" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"></textarea>
+																	{:else}
+																		<input bind:value={row[col.key]} class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+																	{/if}
+																</label>
+															{/each}
+														</div>
+													</div>
+												{/each}
+												{#if (tableData[f.key] ?? []).length === 0}
+													<p class="text-xs text-slate-400">还没有行，点「+ 添加一行」开始。</p>
+												{/if}
+											</div>
+										</div>
+									{:else}
+										<label class="block">
+											<span class="text-xs font-medium text-slate-600">{f.label}{#if f.required}<span class="text-rose-500"> *</span>{/if}</span>
+											{#if f.help}<span class="mt-0.5 block text-[11px] text-slate-400">{f.help}</span>{/if}
+											{#if f.type === 'text'}
+												<input bind:value={fillValues[f.key]} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm" />
+											{:else if f.type === 'date'}
+												<input type="date" bind:value={fillValues[f.key]} class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm" />
+											{:else if f.type === 'list'}
+												<textarea bind:value={fillValues[f.key]} rows="4" placeholder="每行一条" class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"></textarea>
+											{:else}
+												<textarea bind:value={fillValues[f.key]} rows="3" class="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm"></textarea>
+											{/if}
+										</label>
+									{/if}
 								{/each}
 							</div>
 						{/if}
@@ -410,7 +555,7 @@
 				{/if}
 			</div>
 
-			<div class="lg:sticky lg:top-4">
+			<div class={hasTable ? '' : 'lg:sticky lg:top-4'}>
 				{@render previewBlock(false)}
 			</div>
 		</div>
