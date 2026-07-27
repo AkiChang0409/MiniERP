@@ -19,15 +19,23 @@
 		formula?: string;
 		help?: string;
 	};
+	type ChecklistItem = { key: string; ref?: string; group?: string; label: string };
+	type Choice = { value: string; label: string };
 	type SchemaField = {
 		key: string;
 		label: string;
-		type: 'text' | 'textarea' | 'date' | 'list' | 'table';
+		type: 'text' | 'textarea' | 'date' | 'list' | 'table' | 'checklist';
 		required?: boolean;
 		help?: string;
 		examples?: string[];
 		/** For type='table': repeatable-row columns (→ docxtemplater row loop). */
 		columns?: Column[];
+		/** For type='checklist': fixed items + per-item choice(s) and a note. Each
+		 * item expands to flat placeholders `{itemKey_choiceValue}` (mark) and
+		 * `{itemKey_note}`. */
+		items?: ChecklistItem[];
+		choices?: Choice[];
+		noteLabel?: string;
 	};
 	type SchemaIntro = { clause?: string; purpose?: string; notes?: string };
 	type FieldSchema = {
@@ -89,8 +97,12 @@
 	const dlUrl = $derived(attUrl(true));
 
 	// --- form model ---
+	// A checklist item's captured state: the chosen option + a bag of extra values
+	// (the `note`, and/or per-column values when the checklist has `columns`).
+	type Check = { choice: string; values: Record<string, string> };
 	let fillValues = $state<Record<string, string>>({}); // scalar fields
 	let tableData = $state<Record<string, Row[]>>({}); // table (repeatable-row) fields
+	let checkData = $state<Record<string, Record<string, Check>>>({}); // checklist fields
 	let lastRecord = '';
 
 	function emptyRow(cols: Column[]): Row {
@@ -102,12 +114,31 @@
 			lastRecord = item.recordId;
 			const fields = schema?.fields ?? [];
 			fillValues = Object.fromEntries(
-				fields.filter((f) => f.type !== 'table').map((f) => [f.key, ''])
+				fields.filter((f) => f.type !== 'table' && f.type !== 'checklist').map((f) => [f.key, ''])
 			);
 			tableData = Object.fromEntries(
 				fields
 					.filter((f) => f.type === 'table' && f.columns)
 					.map((f) => [f.key, [emptyRow(f.columns!)]])
+			);
+			checkData = Object.fromEntries(
+				fields
+					.filter((f) => f.type === 'checklist' && f.items)
+					.map((f) => [
+						f.key,
+						Object.fromEntries(
+							(f.items ?? []).map((it) => [
+								it.key,
+								{
+									choice: '',
+									values: Object.fromEntries([
+										...(f.columns ?? []).map((c) => [c.key, '']),
+										...(f.noteLabel ? [['note', '']] : [])
+									])
+								}
+							])
+						)
+					])
 			);
 			// drop the cached template bytes for the new record
 			previewBuf = null;
@@ -115,6 +146,12 @@
 			userZoom = null;
 		}
 	});
+
+	function setChoice(f: SchemaField, itemKey: string, value: string) {
+		const cur = checkData[f.key]?.[itemKey];
+		if (!cur) return;
+		cur.choice = cur.choice === value ? '' : value; // toggle off if re-clicked
+	}
 
 	// A computed column = product of the referenced numeric columns.
 	function computeCol(col: Column, row: Row): string {
@@ -138,9 +175,12 @@
 	}
 
 	const hasTable = $derived((schema?.fields ?? []).some((f) => f.type === 'table'));
+	const hasChecklist = $derived((schema?.fields ?? []).some((f) => f.type === 'checklist'));
+	// Wide fields (table / checklist) → full-width stacked page layout.
+	const stacked = $derived(hasTable || hasChecklist);
 
-	// Build the docxtemplater payload: scalar fields as strings, table fields as
-	// arrays of row objects (with computed columns evaluated) for the row loop.
+	// Build the docxtemplater payload: scalar fields as strings; table fields as
+	// row arrays (row loop); checklist items expand to flat mark/note placeholders.
 	function buildData(): Record<string, unknown> {
 		const out: Record<string, unknown> = {};
 		for (const f of schema?.fields ?? []) {
@@ -152,6 +192,17 @@
 					}
 					return r;
 				});
+			} else if (f.type === 'checklist' && f.items) {
+				for (const it of f.items) {
+					const c = checkData[f.key]?.[it.key] ?? { choice: '', values: {} };
+					for (const ch of f.choices ?? []) {
+						out[`${it.key}_${ch.value}`] = c.choice === ch.value ? '✓' : '';
+					}
+					if (f.noteLabel) out[`${it.key}_note`] = c.values.note ?? '';
+					for (const col of f.columns ?? []) {
+						out[`${it.key}_${col.key}`] = c.values[col.key] ?? '';
+					}
+				}
 			} else {
 				out[f.key] = fillValues[f.key] ?? '';
 			}
@@ -208,7 +259,7 @@
 	}
 
 	// Re-render the preview (debounced) whenever the form values or record change.
-	const valuesSig = $derived(JSON.stringify({ fillValues, tableData }));
+	const valuesSig = $derived(JSON.stringify({ fillValues, tableData, checkData }));
 	$effect(() => {
 		void valuesSig;
 		void item.recordId;
@@ -256,7 +307,7 @@
 	// list fields → colored grid (2×2 for SWOT, 2×3 for PESTLE…), text/date →
 	// header row, textarea → footer. Any non-'stack' layout uses the grid.
 	const layout = $derived(schema?.layout ?? 'stack');
-	const isGrid = $derived(layout !== 'stack' && !hasTable);
+	const isGrid = $derived(layout !== 'stack' && !stacked);
 	const headerFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'text' || f.type === 'date'));
 	const quadFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'list').slice(0, 8));
 	const footerFields = $derived((schema?.fields ?? []).filter((f) => f.type === 'textarea'));
@@ -277,7 +328,7 @@
 	async function generate() {
 		if (!item.file || !schema) return;
 		const missing = schema.fields.filter(
-			(f) => f.required && f.type !== 'table' && !fillValues[f.key]?.trim()
+			(f) => f.required && f.type !== 'table' && f.type !== 'checklist' && !fillValues[f.key]?.trim()
 		);
 		if (missing.length) {
 			genError = `请填写必填项：${missing.map((f) => f.label).join('、')}`;
@@ -423,7 +474,7 @@
 			</div>
 		{:else}
 		<!-- ── Fillable / pending: form + live preview ── -->
-		<div class="mt-4 grid gap-5 lg:items-start {hasTable ? '' : 'lg:grid-cols-2'}">
+		<div class="mt-4 grid gap-5 lg:items-start {stacked ? '' : 'lg:grid-cols-2'}">
 			<!-- ── Left: info + form ── -->
 			<div class="space-y-4">
 				{@render descriptionPanel()}
@@ -521,6 +572,52 @@
 												{/if}
 											</div>
 										</div>
+									{:else if f.type === 'checklist' && f.items && f.choices}
+										<!-- Fixed-item checklist: label + choice(s) + note per item -->
+										<div>
+											<span class="text-sm font-medium text-slate-700">{f.label}</span>
+											{#if f.help}<p class="mb-2 mt-0.5 text-[11px] leading-relaxed text-slate-400">{f.help}</p>{/if}
+											<div class="divide-y divide-slate-100 rounded-lg border border-slate-200">
+												{#each f.items as it (it.key)}
+													<div class="space-y-2 p-2.5">
+														<div class="flex flex-wrap items-start justify-between gap-2">
+														<div class="min-w-[9rem] flex-1 text-xs leading-snug">
+															{#if it.ref}<span class="mr-1 font-mono text-slate-400">{it.ref}.</span>{/if}{#if it.group}<span class="text-slate-400">{it.group} · </span>{/if}<span class="font-medium text-slate-700">{it.label}</span>
+														</div>
+														<div class="flex flex-wrap gap-1">
+															{#each f.choices as ch (ch.value)}
+																<button
+																	type="button"
+																	onclick={() => setChoice(f, it.key, ch.value)}
+																	class="rounded-md border px-2 py-0.5 text-[11px] font-medium {checkData[f.key]?.[it.key]?.choice === ch.value ? 'border-[var(--sf-green)] bg-[var(--sf-green)] text-white' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}"
+																>
+																	{ch.label}
+																</button>
+															{/each}
+														</div>
+														</div>
+														{#if f.columns}
+															<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+																{#each f.columns as col (col.key)}
+																	<label class="block">
+																		<span class="text-[11px] font-medium text-slate-500">{col.label}</span>
+																		{#if col.type === 'date'}
+																			<input type="date" bind:value={checkData[f.key][it.key].values[col.key]} class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+																		{:else if col.type === 'textarea'}
+																			<textarea bind:value={checkData[f.key][it.key].values[col.key]} rows="2" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"></textarea>
+																		{:else}
+																			<input bind:value={checkData[f.key][it.key].values[col.key]} class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+																		{/if}
+																	</label>
+																{/each}
+															</div>
+														{:else if f.noteLabel}
+															<input placeholder={f.noteLabel} bind:value={checkData[f.key][it.key].values.note} class="w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+														{/if}
+													</div>
+												{/each}
+											</div>
+										</div>
 									{:else}
 										<label class="block">
 											<span class="text-xs font-medium text-slate-600">{f.label}{#if f.required}<span class="text-rose-500"> *</span>{/if}</span>
@@ -555,7 +652,7 @@
 				{/if}
 			</div>
 
-			<div class={hasTable ? '' : 'lg:sticky lg:top-4'}>
+			<div class={stacked ? '' : 'lg:sticky lg:top-4'}>
 				{@render previewBlock(false)}
 			</div>
 		</div>
