@@ -29,6 +29,7 @@ vite.config.ts.timestamp-*
 # Local docs / artifacts
 ref_files/
 *.log
+Deliverables/
 
 # CI / test artifacts (uploaded by GitHub Actions, not committed)
 /reports
