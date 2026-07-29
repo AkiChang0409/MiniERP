@@ -4,7 +4,7 @@
   // Dedicated worker for the async document-processing queue.
   // Top-level = personal v4 consumer.
   "name": "smartfin-document-processor-v4",
-  "account_id": "c09bb2823904032b6ec648b23411f2e0",
+  "account_id": "e8bc57519de766f2b7f4f4d1b333ee2e",
   "compatibility_date": "2026-03-30",
   "compatibility_flags": ["nodejs_compat"],
   "main": "document-processor.ts",
@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "smartfin-db-v4",
-      "database_id": "e802fb76-fdbf-4884-a2f6-bc2d826b8b50",
+      "database_id": "8b3e170a-4ef2-412c-92cd-a7065b6832a6",
       "migrations_dir": "../drizzle/migrations"
     }
   ],
@@ -28,7 +28,7 @@
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "7bd4733bae7c460ba265549b3f468e1f"
+      "id": "c04e64ab7222455a87ceb495b6fa65ef"
     }
   ],
 
@@ -49,7 +49,7 @@
     "APP_ENV": "personal-v4",
     // Used by the Lark review-card notifier (pushed from this worker at
     // ready_for_review) to build the "open in app" link.
-    "BETTER_AUTH_URL": "https://smartfin-v4.aki-wang.workers.dev",
+    "BETTER_AUTH_URL": "https://smartfin-v4.wangchang0409.workers.dev",
     "LLM_PROVIDER": "heuristic",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "WORKERS_AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",

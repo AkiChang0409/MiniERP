@@ -36,7 +36,7 @@ jobs:
       - name: Run Playwright tests
         run: npx playwright test
         env:
-          E2E_BASE_URL: "https://smartfin-v4.aki-wang.workers.dev"
+          E2E_BASE_URL: "https://smartfin-v4.wangchang0409.workers.dev"
 
       - name: Upload Playwright report
         if: always()

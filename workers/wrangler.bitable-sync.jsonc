@@ -4,7 +4,7 @@
   // Dedicated Cron worker: pulls the Lark Bitable Base into the D1 mirror
   // (Bitable-as-source-of-truth). Top-level = personal v4.
   "name": "smartfin-bitable-sync-v4",
-  "account_id": "c09bb2823904032b6ec648b23411f2e0",
+  "account_id": "e8bc57519de766f2b7f4f4d1b333ee2e",
   "compatibility_date": "2026-03-30",
   "compatibility_flags": ["nodejs_compat"],
   "main": "bitable-sync.ts",
@@ -19,7 +19,7 @@
     {
       "binding": "DB",
       "database_name": "smartfin-db-v4",
-      "database_id": "e802fb76-fdbf-4884-a2f6-bc2d826b8b50",
+      "database_id": "8b3e170a-4ef2-412c-92cd-a7065b6832a6",
       "migrations_dir": "../drizzle/migrations"
     }
   ],

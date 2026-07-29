@@ -3,7 +3,7 @@
 
   // v4 默认开发/测试环境
   "name": "smartfin-v4",
-  "account_id": "c09bb2823904032b6ec648b23411f2e0",
+  "account_id": "e8bc57519de766f2b7f4f4d1b333ee2e",
   "compatibility_date": "2026-03-30",
   "compatibility_flags": ["nodejs_compat"],
   "main": ".svelte-kit/cloudflare/_worker.js",
@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "smartfin-db-v4",
-      "database_id": "e802fb76-fdbf-4884-a2f6-bc2d826b8b50",
+      "database_id": "8b3e170a-4ef2-412c-92cd-a7065b6832a6",
       "migrations_dir": "drizzle/migrations"
     }
   ],
@@ -27,7 +27,7 @@
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "7bd4733bae7c460ba265549b3f468e1f"
+      "id": "c04e64ab7222455a87ceb495b6fa65ef"
     }
   ],
 
@@ -47,7 +47,7 @@
   },
   "vars": {
     "APP_ENV": "personal-v4",
-    "BETTER_AUTH_URL": "https://smartfin-v4.aki-wang.workers.dev",
+    "BETTER_AUTH_URL": "https://smartfin-v4.wangchang0409.workers.dev",
     "EMAIL_FROM": "SmartFin <onboarding@resend.dev>",
     "LLM_PROVIDER": "heuristic",
     // Agent orchestrator uses structured/tool JSON — prefer the OpenAI model

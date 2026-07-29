@@ -196,7 +196,7 @@ jobs:
       - name: ZAP baseline scan
         uses: zaproxy/action-baseline@v0.12.0
         with:
-          target: "https://smartfin-v4.aki-wang.workers.dev/"
+          target: "https://smartfin-v4.wangchang0409.workers.dev/"
           # -I = do not fail the build on warnings; -r = HTML report
           cmd_options: "-a -I -r zap-report.html"
           allow_issue_writing: false

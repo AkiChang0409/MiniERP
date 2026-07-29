@@ -24,7 +24,7 @@ jobs:
 
     environment:
       name: personal-v4
-      url: https://smartfin.aki-wang.workers.dev
+      url: https://smartfin-v4.wangchang0409.workers.dev
 
     permissions:
       contents: read
