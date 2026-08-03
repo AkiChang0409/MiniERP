@@ -631,50 +631,23 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 	};
 
 	const getProjectsProfitCsv = async (input: ProjectsProfitInput = {}) => {
-		const projectId = input.projectId ?? '';
-		const projectStatus = input.projectStatus ?? '';
-		const from = input.from ?? '';
-		const to = input.to ?? '';
-		const hasRange = isIsoDate(from) && isIsoDate(to) && from <= to;
-		const dateOutClause = hasRange ? sql` and io.date between ${from} and ${to}` : sql``;
-		const dateInClause = hasRange ? sql` and ii.invoice_date between ${from} and ${to}` : sql``;
-		const datePrClause = hasRange ? sql` and pr.period between ${from} and ${to}` : sql``;
-		const dateExClause = hasRange ? sql` and ex.date between ${from} and ${to}` : sql``;
-
-		const projectConditions = [isNull(projects.deletedAt)];
-		if (projectId) projectConditions.push(eq(projects.id, projectId));
-		if (projectStatus) projectConditions.push(eq(projects.status, projectStatus));
-
-		const rows = await ctx.db
-			.select({
-				projectId: projects.id,
-				projectName: projects.name,
-				projectStatus: projects.status,
-				revenue: sql<number>`coalesce((select sum(io.total) from invoices_out io where io.project_id = ${projects.id} and io.deleted_at is null ${dateOutClause}), 0)`,
-				purchaseCost: sql<number>`coalesce((select sum(ii.amount) from invoices_in ii where ii.project_id = ${projects.id} and ii.deleted_at is null ${dateInClause}), 0)`,
-				staffCost: sql<number>`coalesce((select sum(pr.computed_amount) from payout_records pr inner join compensation_components cc on cc.id = pr.component_id and cc.deleted_at is null where pr.project_id = ${projects.id} and pr.deleted_at is null and pr.status in ('confirmed','paid') and cc.income_type != 'dividend' ${datePrClause}), 0)`,
-				expenseCost: sql<number>`coalesce((select sum(ex.amount) from expenses ex where ex.project_id = ${projects.id} and ex.deleted_at is null ${dateExClause}), 0)`
-			})
-			.from(projects)
-			.where(and(...projectConditions));
+		// Reuse the ranking computation (correct v4 tables: revenue + expenses +
+		// payout_records) so the CSV export stays consistent with the dashboard and
+		// no longer references the retired invoices_out/invoices_in AR tables.
+		const rows = await getProjectsProfitRanking(input);
 
 		const header = ['project_id', 'project_name', 'status', 'revenue', 'cost', 'profit', 'profit_margin'];
-		const lines = rows.map((row) => {
-			const revenueValue = Number(row.revenue ?? 0);
-			const cost =
-				Number(row.purchaseCost ?? 0) + Number(row.staffCost ?? 0) + Number(row.expenseCost ?? 0);
-			const profit = revenueValue - cost;
-			const margin = revenueValue > 0 ? profit / revenueValue : 0;
-			return [
+		const lines = rows.map((row) =>
+			[
 				csvEscape(row.projectId),
 				csvEscape(row.projectName),
 				csvEscape(row.projectStatus),
-				csvEscape(revenueValue.toFixed(2)),
-				csvEscape(cost.toFixed(2)),
-				csvEscape(profit.toFixed(2)),
-				csvEscape(margin.toFixed(6))
-			].join(',');
-		});
+				csvEscape(Number(row.revenue).toFixed(2)),
+				csvEscape(Number(row.cost).toFixed(2)),
+				csvEscape(Number(row.profit).toFixed(2)),
+				csvEscape(Number(row.profitMargin).toFixed(6))
+			].join(',')
+		);
 
 		return [header.join(','), ...lines].join('\n');
 	};
@@ -1004,7 +977,7 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 				)
 			)
 			.groupBy(expenses.category, expenses.expenseType)
-			.orderBy(sql`total desc`);
+			.orderBy(desc(projectExpenseTotalSumExpr()));
 
 		const revenueByType = await ctx.db
 			.select({
@@ -1140,7 +1113,7 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 				)
 			)
 			.groupBy(expenses.category)
-			.orderBy(sql`total desc`);
+			.orderBy(desc(projectExpenseTotalSumExpr()));
 
 		const [staffCost] = await ctx.db
 			.select({ total: staffCostSumExpr() })
@@ -1162,7 +1135,7 @@ export function createFinanceInsightApi(ctx: ModuleContext) {
 				)
 			)
 			.groupBy(expenses.category)
-			.orderBy(sql`total desc`);
+			.orderBy(desc(projectExpenseTotalSumExpr()));
 
 		const stdRevenue = (revenueStandard?.total ?? 0) + (revenueTaxInvoice?.total ?? 0);
 		const zrRevenue = revenueZeroRate?.total ?? 0;

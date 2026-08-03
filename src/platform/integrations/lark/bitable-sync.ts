@@ -8,7 +8,7 @@
  * mirror in a later step. D1 writes are not subrequests; only the Lark pulls are,
  * so a run's subrequest cost is ≈ number of record pages.
  */
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import type { DBClient } from '$infrastructure/db';
 import { bitableListAllRecords } from './bitable';
 import type { BitableRecord } from './bitable';
@@ -49,7 +49,18 @@ export async function upsertBitableMirrorRecord(
 		})
 		.onConflictDoUpdate({
 			target: bitableRecords.id,
-			set: { fields, tableName: args.tableName, syncedAt, deleted: 0 }
+			// MERGE fields (RFC 7386 json_patch) instead of replacing, so a partial
+			// write-through update (e.g. linking a Contact Person after create) does
+			// not clobber previously-mirrored fields. Real Bitable echoes the full
+			// record on update (json_patch(existing, full) == full); with Lark writes
+			// disabled the synthetic client returns only changed fields, so merging
+			// preserves name/address/etc.
+			set: {
+				fields: sql`json_patch(${bitableRecords.fields}, ${fields})`,
+				tableName: args.tableName,
+				syncedAt,
+				deleted: 0
+			}
 		});
 }
 

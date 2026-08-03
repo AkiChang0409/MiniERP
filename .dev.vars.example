@@ -6,6 +6,12 @@
 # LARK_APP_ID=cli_xxxxxxxxxxxxxxxx
 # LARK_APP_SECRET=
 # LARK_VERIFICATION_TOKEN=
+# Outbound Lark WRITE kill-switch. Leave unset/false for a self-contained deploy
+# that NEVER writes to the shared Bitable Base: record create/update, media
+# upload, and IM message/card sends become no-ops (synthetic success) so domain
+# data still persists to D1/R2/KV. Reads are unaffected. Set to true only to
+# restore real write-through to Lark.
+# LARK_WRITE_ENABLED=false
 # LARK_ENCRYPT_KEY=        # optional; leave unset unless Encrypt Key is enabled in the console
 # Doc Hub Base (多维表格) target for QC/document intake. From the Base URL:
 # feishu.cn/base/<APP_TOKEN>?table=<TABLE_ID>. The app must be a collaborator on this Base.

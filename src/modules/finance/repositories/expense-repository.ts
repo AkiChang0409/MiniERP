@@ -88,7 +88,7 @@ export class ExpenseRepository {
 			.from(expenses)
 			.where(and(...conditions))
 			.groupBy(expenses.category, expenses.expenseType)
-			.orderBy(sql`total desc`);
+			.orderBy(desc(projectExpenseTotalSumExpr()));
 	}
 }
 

@@ -59,6 +59,15 @@ declare global {
 		LARK_APP_ID?: string;
 		LARK_APP_SECRET?: string;
 		LARK_VERIFICATION_TOKEN?: string;
+		/**
+		 * Outbound Lark WRITE kill-switch. Default OFF: unless set to exactly
+		 * 'true', all Bitable record create/update, media upload, and IM
+		 * message/card sends short-circuit to a synthetic success — NO company
+		 * Bitable table is mutated. Domain writes still land in the local
+		 * D1/R2/KV mirror. Reads (search/get/list/media download) are never gated
+		 * by this. Set to 'true' to restore real write-through to the shared Base.
+		 */
+		LARK_WRITE_ENABLED?: string;
 		/** Optional: API base. Default https://open.feishu.cn; international Lark = https://open.larksuite.com */
 		LARK_BASE_URL?: string;
 		/**

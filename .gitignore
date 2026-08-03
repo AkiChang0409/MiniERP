@@ -26,10 +26,12 @@ vite.config.ts.timestamp-*
 # Cloudflare Types
 /worker-configuration.d.ts
 
-# Local docs / artifacts
+# Local docs / artifacts (internship deliverables + scratch — not project code)
 ref_files/
 *.log
 Deliverables/
+tmp/
+*.inspect.ndjson
 
 # CI / test artifacts (uploaded by GitHub Actions, not committed)
 /reports

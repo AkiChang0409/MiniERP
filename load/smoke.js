@@ -9,7 +9,9 @@ import { Rate, Trend } from "k6/metrics";
 // VUs and duration are injected by the workflow via --vus / --duration flags;
 // the defaults below apply when running locally: `k6 run load/smoke.js`.
 
-const BASE_URL = __ENV.BASE_URL || "https://smartfin-v4.aki-wang.workers.dev";
+// Canonical production URL (matches wrangler.jsonc BETTER_AUTH_URL and the ZAP
+// DAST target in ci-security.yml). Override with `-e BASE_URL=...` when needed.
+const BASE_URL = __ENV.BASE_URL || "https://smartfin-v4.wangchang0409.workers.dev";
 
 const errorRate = new Rate("errors");
 const homeLatency = new Trend("home_latency_ms");

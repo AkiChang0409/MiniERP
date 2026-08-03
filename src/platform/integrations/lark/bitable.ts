@@ -13,7 +13,7 @@
  * link = { text, link } or a string[] of record_ids for relation fields.
  */
 
-import { getTenantAccessToken, larkBaseUrl } from './client';
+import { getTenantAccessToken, larkBaseUrl, larkWriteEnabled } from './client';
 
 export type BitableFields = Record<string, unknown>;
 
@@ -87,6 +87,13 @@ export async function bitableCreateRecord(
 	env: Env,
 	args: { appToken: string; tableId: string; fields: BitableFields }
 ): Promise<BitableRecord> {
+	// Outbound WRITE kill-switch (default OFF): return a synthetic local record
+	// instead of creating one in the company Base. Callers persist the mirror row
+	// (D1) off this id, so domain writes still succeed locally.
+	if (!larkWriteEnabled(env)) {
+		console.log('[lark] writes disabled — skipping bitable record create');
+		return { record_id: `local-${crypto.randomUUID()}`, fields: args.fields };
+	}
 	const data = await bitableCall<{ record: BitableRecord }>(
 		env,
 		`/open-apis/bitable/v1/apps/${enc(args.appToken)}/tables/${enc(args.tableId)}/records`,
@@ -103,6 +110,12 @@ export async function bitableUpdateRecord(
 	env: Env,
 	args: { appToken: string; tableId: string; recordId: string; fields: BitableFields }
 ): Promise<BitableRecord> {
+	// Outbound WRITE kill-switch (default OFF): echo the requested fields back as
+	// a synthetic success instead of mutating the company Base record.
+	if (!larkWriteEnabled(env)) {
+		console.log('[lark] writes disabled — skipping bitable record update');
+		return { record_id: args.recordId, fields: args.fields };
+	}
 	const data = await bitableCall<{ record: BitableRecord }>(
 		env,
 		`/open-apis/bitable/v1/apps/${enc(args.appToken)}/tables/${enc(args.tableId)}/records/${enc(
@@ -182,6 +195,12 @@ export async function bitableUploadMedia(
 	env: Env,
 	args: { appToken: string; fileName: string; mimeType: string; bytes: Uint8Array }
 ): Promise<string> {
+	// Outbound WRITE kill-switch (default OFF): return a synthetic file token so
+	// upload-then-attach flows keep working without pushing bytes to Lark Drive.
+	if (!larkWriteEnabled(env)) {
+		console.log('[lark] writes disabled — skipping bitable media upload');
+		return `local-${crypto.randomUUID()}`;
+	}
 	const token = await getTenantAccessToken(env);
 	const fd = new FormData();
 	fd.append('file_name', args.fileName);

@@ -15,6 +15,18 @@ export function larkBaseUrl(env: Env): string {
 	return configured && configured.length > 0 ? configured : DEFAULT_BASE_URL;
 }
 
+/**
+ * Outbound Lark WRITE kill-switch. Default OFF — real Bitable record writes,
+ * media uploads, and IM message/card sends only fire when
+ * `LARK_WRITE_ENABLED === 'true'`. When off, the write primitives return a
+ * synthetic success so domain writes still land in D1/R2/KV and no company
+ * Bitable table is mutated. READS (search/get/list/media download) are never
+ * gated by this.
+ */
+export function larkWriteEnabled(env: Env): boolean {
+	return (env.LARK_WRITE_ENABLED ?? '').trim().toLowerCase() === 'true';
+}
+
 interface TenantTokenResponse {
 	code: number;
 	msg?: string;
@@ -84,6 +96,12 @@ async function sendMessage(
 	env: Env,
 	args: { receiveId: string; receiveIdType: LarkReceiveIdType; msgType: string; content: string }
 ): Promise<{ messageId?: string }> {
+	// Outbound WRITE kill-switch (default OFF): skip the real IM send so no
+	// message/card is pushed to Lark. Callers treat this as a best-effort no-op.
+	if (!larkWriteEnabled(env)) {
+		console.log(`[lark] writes disabled — skipping ${args.msgType} message send`);
+		return {};
+	}
 	const token = await getTenantAccessToken(env);
 	const url = `${larkBaseUrl(env)}/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(
 		args.receiveIdType
