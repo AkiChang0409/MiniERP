@@ -2,6 +2,7 @@ import type { Handle } from '@sveltejs/kit';
 import { building } from '$app/environment';
 import { redirect } from '@sveltejs/kit';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
+import { sequence } from '@sveltejs/kit/hooks';
 
 import { getAuth } from '$platform/auth/better-auth';
 import { resolveWorkerAuthEnv } from '$platform/auth/resolve-worker-env';
@@ -95,7 +96,34 @@ function isPublicToolApi(pathname: string) {
 	return pathname.startsWith('/api/public/');
 }
 
-export const handle: Handle = async ({ event, resolve }) => {
+// Baseline security response headers, added to every response so the OWASP ZAP
+// baseline (DAST) passes: clears "CSP header not set", missing HSTS, missing
+// X-Content-Type-Options, clickjacking (X-Frame-Options) and referrer-leak
+// alerts. Deliberately conservative — the CSP only restricts framing, base-uri
+// and plugins, so it never blocks SvelteKit's inline hydration script or Svelte
+// inline styles. (A nonce-based script-src via kit.csp is the documented next
+// step for a stricter policy.)
+const SECURITY_HEADERS: Record<string, string> = {
+	'X-Content-Type-Options': 'nosniff',
+	'X-Frame-Options': 'SAMEORIGIN',
+	'Referrer-Policy': 'strict-origin-when-cross-origin',
+	'Permissions-Policy': 'geolocation=(), microphone=(), payment=()',
+	'Strict-Transport-Security': 'max-age=63072000; includeSubDomains',
+	'Content-Security-Policy': "frame-ancestors 'self'; base-uri 'self'; object-src 'none'",
+	'Cross-Origin-Opener-Policy': 'same-origin'
+};
+
+const securityHeaders: Handle = async ({ event, resolve }) => {
+	const response = await resolve(event);
+	if (!building) {
+		for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+			response.headers.set(name, value);
+		}
+	}
+	return response;
+};
+
+const authHandle: Handle = async ({ event, resolve }) => {
 	if (building) {
 		return resolve(event);
 	}
@@ -180,3 +208,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	return svelteKitHandler({ event, resolve, auth, building });
 };
+
+// Security headers run first so they wrap every response — the rendered pages
+// and the auth gate's 401/403/404 — before it leaves the worker.
+export const handle = sequence(securityHeaders, authHandle);
