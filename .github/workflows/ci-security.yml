@@ -167,10 +167,25 @@ jobs:
           languages: javascript-typescript
           queries: security-extended
 
+      # Do NOT upload to GitHub code scanning: this is a PRIVATE repo without
+      # GitHub Advanced Security, so the SARIF upload hangs on "Waiting for
+      # processing to finish" and is cancelled (the failure seen on run #107).
+      # Instead write the SARIF locally and attach it as a downloadable artifact
+      # — that is the evidence for the report, and mirrors the Trivy job above.
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
         with:
           category: codeql-js
+          output: codeql-results
+          upload: false
+
+      - name: Upload CodeQL SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: codeql-results
+          if-no-files-found: warn
 
       # Dependency-level SAST/SCA, captured as an artifact for the report.
       - name: npm audit (high+)
@@ -188,12 +203,16 @@ jobs:
     name: DAST (OWASP ZAP baseline)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # DAST needs a running target; run it manually or after a deploy.
-    if: github.event_name == 'workflow_dispatch'
+    # ZAP scans the ALREADY-LIVE worker, so it needs no local server and can run
+    # on every push / PR as well as manual dispatch. It used to be gated to
+    # `workflow_dispatch`, which is why it showed as "skipped" on pushes (run #107).
     steps:
       - uses: actions/checkout@v4
 
       - name: ZAP baseline scan
+        # Informational: a finding must not red the pipeline. The HTML report
+        # (uploaded below) is the evidence and the input to remediation.
+        continue-on-error: true
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: "https://smartfin-v4.wangchang0409.workers.dev/"
