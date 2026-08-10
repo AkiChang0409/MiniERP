@@ -6,6 +6,16 @@ name: Load Test (SmartFin v4)
 # path, so a slow/failing load test never blocks a release.
 
 on:
+  # Push trigger scoped to this feature branch + the load-test files only, so
+  # the workflow actually runs (and therefore appears in the Actions list) even
+  # before it is merged to the default branch — without firing on every code
+  # push. It stays a SEPARATE pipeline from CI/deploy either way.
+  push:
+    branches:
+      - feature/aki-finance-dev
+    paths:
+      - "load/**"
+      - ".github/workflows/load-test.yml"
   workflow_dispatch:
     inputs:
       vus:
